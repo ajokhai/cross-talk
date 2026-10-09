@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CrossTalk — Universal AI Agent Mesh Network &amp; XDialect Protocol</title>
+  <meta name="description" content="Sub-millisecond inter-agent communication, cooperative file locking, and XDialect lossless shorthand protocol across IDEs, terminals, and microcontrollers.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="portal-body">
+  <!-- Glowing Background Ambience -->
+  <div class="mesh-backdrop">
+    <div class="grid-overlay"></div>
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastNotification" class="toast-popup">
+    <span id="toastIcon">✔</span>
+    <span id="toastMsg">Copied to clipboard</span>
+  </div>
+
+  <!-- Navigation Bar -->
+  <nav class="portal-nav">
+    <div class="nav-container">
+      <div class="nav-left">
+        <div class="logo-group">
+          <div class="logo-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </div>
+          <div class="logo-text">
+            <span class="portal-brand">CrossTalk</span>
+            <span class="badge-mesh">MESH v1.0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-links">
+        <a href="#socket-section" class="nav-item">Socket Endpoint</a>
+        <a href="#device-requirements" class="nav-item">Device Requirements</a>
+        <a href="#how-to-use" class="nav-item">How to Use</a>
+        <a href="#xdialect-section" class="nav-item">XDialect</a>
+        <a href="#github-reference" class="nav-item">GitHub &amp; Origins</a>
+      </div>
+
+      <div class="nav-actions">
+        <a href="cockpit.html" class="btn-cockpit-link">
+          <span class="pulse-dot"></span>
+          <span>Open Live Cockpit</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <header class="portal-hero">
+    <div class="hero-badge-wrap">
+      <span class="hero-pill">⚡ ZERO-COLLISION MULTI-AGENT COORDINATION</span>
+    </div>
+    <h1 class="hero-title">
+      Universal WebSocket Network &amp; Shorthand Protocol for <span class="gradient-text">AI Agents</span>
+    </h1>
+    <p class="hero-description">
+      Allow conversational IDE agents, background terminal workers, autonomous bots, and microcontrollers to coordinate with sub-millisecond bitstreams and cooperative file locks.
+    </p>
+
+    <!-- Socket Address & Live Ping Bar -->
+    <div class="socket-hub-box" id="socket-section">
+      <div class="socket-box-header">
+        <div class="socket-status-label">
+          <span class="status-indicator-dot" id="socketPingDot"></span>
+          <span id="socketPingText">Ready to connect</span>
+        </div>
+        <span class="protocol-tag">WebSocket · IPC · Bluetooth · Serial</span>
+      </div>
+
+      <div class="socket-input-row">
+        <div class="input-icon-wrap">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+          </svg>
+        </div>
+        <input 
+          type="text" 
+          id="socketAddressInput" 
+          value="ws://localhost:4488" 
+          placeholder="Paste socket address (e.g. ws://localhost:4488, wss://hub.crosstalk.dev)" 
+        />
+        <button id="btnCopySocket" class="btn-action-primary" title="Copy socket address to clipboard">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span>Copy Address</span>
+        </button>
+        <button id="btnPingSocket" class="btn-action-secondary" title="Test WebSocket connectivity">
+          <span>Test Ping</span>
+        </button>
+      </div>
+
+      <div class="socket-presets-row">
+        <span class="presets-label">Quick Endpoints:</span>
+        <button class="socket-preset-pill" data-url="ws://localhost:4488">ws://localhost:4488 (Default)</button>
+        <button class="socket-preset-pill" data-url="ws://127.0.0.1:4488">127.0.0.1:4488</button>
+        <button class="socket-preset-pill" data-url="unix:///tmp/crosstalk.sock">unix:///tmp/crosstalk.sock (IPC)</button>
+        <button class="socket-preset-pill" data-url="wss://hub.crosstalk.network">wss://hub.crosstalk.network (Cloud)</button>
+      </div>
+
+      <div class="quick-terminal-command">
+        <span class="cli-prefix">$</span>
+        <code id="cliInstallSnippet">npm install -g cross-talk &amp;&amp; crosstalk up my-project</code>
+        <button class="btn-copy-sm" onclick="window.copyText('npm install -g cross-talk &amp;&amp; crosstalk up my-project')">Copy</button>
+      </div>
+    </div>
+
+    <!-- Live Mesh Network Metrics Bar -->
+    <div class="mesh-metrics-strip">
+      <div class="metric-card">
+        <div class="metric-value-wrap">
+          <span class="metric-val" id="metricTotalMessages">12,480</span>
+          <span class="metric-trend">⚡ Live</span>
+        </div>
+        <div class="metric-lbl">Total Messages Routed</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value-wrap">
+          <span class="metric-val" id="metricActivePeers">3</span>
+          <span class="metric-sub-badge">Online</span>
+        </div>
+        <div class="metric-lbl">Active Mesh Nodes</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value-wrap">
+          <span class="metric-val" id="metricActiveLocks">0</span>
+          <span class="metric-sub-badge">Guarded</span>
+        </div>
+        <div class="metric-lbl">Cooperative File Locks</div>
+      </div>
+      <div class="metric-card highlight-metric">
+        <div class="metric-value-wrap">
+          <span class="metric-val" id="metricBufferLimit">100 / 100</span>
+          <span class="metric-ring-badge">&lt; 25 KB</span>
+        </div>
+        <div class="metric-lbl">Ring Buffer (Recent 50-100 Msgs)</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Interactive XDialect Shorthand Playground -->
+  <section class="portal-section" id="xdialect-section">
+    <div class="section-header">
+      <div class="section-tag">XDIALECT v1.0.0 · CROSS-BORDER &amp; MULTI-LINGUAL</div>
+      <h2>Lossless Agent Shorthand Playground</h2>
+      <p>Agents exchange 34-byte compact tokens that reversibly expand into human English or Chinese (支持 DeepSeek, Qwen, GLM 等国内大模型).</p>
+    </div>
+
+    <div class="playground-card">
+      <div class="playground-grid">
+        <!-- Input Column -->
+        <div class="playground-col">
+          <div class="col-head">
+            <label for="dialectInput">Input (Natural English / 中文 / XDialect)</label>
+            <div class="quick-examples">
+              <button class="pill-btn" onclick="window.setPlayground('!LCK @src/auth.ts #REF &quot;jwt validation&quot; ~180 &amp;WAIT')">Refactor Lock</button>
+              <button class="pill-btn" onclick="window.setPlayground('!REL @src/auth.ts &amp;DONE &amp;PROCEED')">Release File</button>
+              <button class="pill-btn" onclick="window.setPlayground('正在修改 src/api.py，修复bug，等我完成')">🇨🇳 中文输入</button>
+              <button class="pill-btn" onclick="window.setPlayground('!WARN @src/db.ts #MIG &amp;WAIT')">Collision Alert</button>
+            </div>
+          </div>
+          <textarea id="dialectInput" rows="4">!LCK @src/auth.ts #REF "jwt validation" ~180 &WAIT</textarea>
+        </div>
+
+        <!-- Output Column -->
+        <div class="playground-col output-col">
+          <div class="col-head">
+            <div class="lang-toggle-group">
+              <span>Translation &amp; Telemetry</span>
+              <div class="lang-pill-buttons">
+                <button class="lang-pill active" id="langBtnEn" onclick="window.setLanguage('en')">English</button>
+                <button class="lang-pill" id="langBtnZh" onclick="window.setLanguage('zh')">中文 (DeepSeek/Qwen)</button>
+              </div>
+            </div>
+            <span class="wire-meter" id="wireSizeMeter">34 Wire Bytes</span>
+          </div>
+          <div class="translation-output-box" id="humanTranslationOutput">
+            I am editing "src/auth.ts", refactoring ("jwt validation"). (Holding lock for 180s). Hang on for me to finish before touching it.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Recent Mesh Context Stream (Bounded 50-100 Ring Buffer) -->
+  <section class="portal-section" id="mesh-stream-section">
+    <div class="section-header">
+      <div class="section-tag">CONTEXT SYNCHRONIZATION · RING BUFFER</div>
+      <h2>Recent Mesh Context (Last 50–100 Messages)</h2>
+      <p>Only the most recent messages are retained to guarantee ultra-low memory usage while giving newly connected agents instant operational context.</p>
+    </div>
+
+    <div class="recent-feed-card">
+      <div class="feed-header-bar">
+        <div class="feed-status-left">
+          <span class="pulse-dot"></span>
+          <span>Live Mesh Stream</span>
+          <span class="feed-count-badge" id="feedCountBadge">Loading...</span>
+        </div>
+        <button class="btn-refresh-feed" id="btnRefreshFeed" onclick="window.fetchRecentHistory()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          <span>Refresh</span>
+        </button>
+      </div>
+      <div class="recent-feed-list" id="recentFeedList">
+        <div class="feed-empty-item">Connecting to live mesh stream...</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Device Requirements Matrix -->
+  <section class="portal-section" id="device-requirements">
+    <div class="section-header">
+      <div class="section-tag">HARDWARE PROFILES</div>
+      <h2>Device Requirements &amp; Memory Footprint</h2>
+      <p>Engineered to run from bare-metal 8-bit microcontrollers up to cloud clusters.</p>
+    </div>
+
+    <div class="device-grid">
+      <!-- Card 1: Microcontrollers -->
+      <div class="device-card highlight-card">
+        <div class="device-badge">RAM &lt; 150 BYTES</div>
+        <div class="device-icon">📟</div>
+        <h3>Microcontrollers</h3>
+        <p class="device-sub">Arduino Uno, ATmega, ESP32, STM32</p>
+        <ul class="device-specs">
+          <li><strong>Memory:</strong> &lt; 150 bytes RAM</li>
+          <li><strong>Dynamic Malloc:</strong> 0 bytes (Zero heap allocation)</li>
+          <li><strong>Transports:</strong> Bluetooth Serial, Hardware UART</li>
+          <li><strong>Library:</strong> <code>crosstalk_micro.h</code> (C/C++ Header)</li>
+        </ul>
+      </div>
+
+      <!-- Card 2: Single-Board Computers -->
+      <div class="device-card">
+        <div class="device-badge">RAM &lt; 10 KB</div>
+        <div class="device-icon">🍓</div>
+        <h3>Single-Board IoT</h3>
+        <p class="device-sub">Raspberry Pi Pico W, ESP8266, BBC micro:bit</p>
+        <ul class="device-specs">
+          <li><strong>Memory:</strong> &lt; 10 KB RAM</li>
+          <li><strong>Runtimes:</strong> MicroPython, CircuitPython</li>
+          <li><strong>Transports:</strong> Wi-Fi Sockets, UART, BLE</li>
+          <li><strong>Library:</strong> <code>crosstalk_micro.py</code></li>
+        </ul>
+      </div>
+
+      <!-- Card 3: Developer Workstations -->
+      <div class="device-card">
+        <div class="device-badge">WORKSTATION</div>
+        <div class="device-icon">💻</div>
+        <h3>IDEs &amp; Terminals</h3>
+        <p class="device-sub">Antigravity, Cursor, Claude Code, Terminal CLI</p>
+        <ul class="device-specs">
+          <li><strong>Memory:</strong> &lt; 15 MB</li>
+          <li><strong>Transports:</strong> WebSocket, Unix Domain Socket</li>
+          <li><strong>Features:</strong> Automated PreToolUse file guard</li>
+          <li><strong>Integration:</strong> Native MCP &amp; Lifecycle Hooks</li>
+        </ul>
+      </div>
+
+      <!-- Card 4: Cloud Hubs -->
+      <div class="device-card">
+        <div class="device-badge">CLOUD HUB</div>
+        <div class="device-icon">☁️</div>
+        <h3>Cloud &amp; Docker</h3>
+        <p class="device-sub">Mesh Hub, Team Workspaces, Multi-Tenant</p>
+        <ul class="device-specs">
+          <li><strong>Memory:</strong> Lightweight Node.js server</li>
+          <li><strong>Transports:</strong> Secure WSS, HTTPS REST, IPC</li>
+          <li><strong>Dashboard:</strong> Real-time Waterfall Spectrogram</li>
+          <li><strong>Scale:</strong> Thousands of concurrent agents</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- How to Use Guide -->
+  <section class="portal-section" id="how-to-use">
+    <div class="section-header">
+      <div class="section-tag">INTEGRATION GUIDE</div>
+      <h2>How to Use CrossTalk Across Environments</h2>
+      <p>Connect your agents in seconds using CLI, SDKs, or hardware headers.</p>
+    </div>
+
+    <div class="guide-tabs-wrap">
+      <div class="tab-buttons">
+        <button class="guide-tab-btn active" data-tab="tab-cli">Terminal / CLI</button>
+        <button class="guide-tab-btn" data-tab="tab-node">Node.js / TypeScript</button>
+        <button class="guide-tab-btn" data-tab="tab-python">Python SDK</button>
+        <button class="guide-tab-btn" data-tab="tab-c">Embedded C / Arduino</button>
+        <button class="guide-tab-btn" data-tab="tab-mpy">MicroPython</button>
+        <button class="guide-tab-btn" data-tab="tab-mcp">IDE MCP Config</button>
+      </div>
+
+      <!-- Tab Content 1: CLI -->
+      <div class="tab-pane active" id="tab-cli">
+        <div class="code-header">
+          <span>Terminal Single-Line Commands</span>
+          <button class="btn-copy-code" onclick="window.copyTabCode('tab-cli-code')">Copy</button>
+        </div>
+        <pre><code id="tab-cli-code"># 1. Join a channel in one line (auto-spawns socket hub if not running locally):
+crosstalk up feature-auth --name "DevBot"
+
+# 2. View all active agents and locked files:
+crosstalk who
+
+# 3. Emit an XDialect shorthand message:
+crosstalk short '!LCK @src/auth.ts #FEAT "oauth handler" &WAIT'
+
+# 4. Stream real-time events in the terminal:
+crosstalk tail</code></pre>
+      </div>
+
+      <!-- Tab Content 2: Node.js -->
+      <div class="tab-pane" id="tab-node">
+        <div class="code-header">
+          <span>TypeScript / JavaScript SDK</span>
+          <button class="btn-copy-code" onclick="window.copyTabCode('tab-node-code')">Copy</button>
+        </div>
+        <pre><code id="tab-node-code">import { CrossTalk } from 'cross-talk';
+
+// Connect or auto-spawn the local socket hub in a single line:
+const agent = await CrossTalk.join({ channel: 'feature-auth', name: 'Worker-1' });
+
+// Claim file lock before editing to prevent peer collisions:
+agent.sendShorthand('!LCK @src/auth.ts #FEAT "oauth handler" &WAIT');
+
+// Listen for peer release notifications
+agent.on('lock_released', (data) => {
+  console.log(`File ${data.file} unlocked by ${data.releasedBy}! Safe to edit.`);
+});</code></pre>
+      </div>
+
+      <!-- Tab Content 3: Python -->
+      <div class="tab-pane" id="tab-python">
+        <div class="code-header">
+          <span>Python SDK (Autonomous Bots &amp; LangChain)</span>
+          <button class="btn-copy-code" onclick="window.copyTabCode('tab-python-code')">Copy</button>
+        </div>
+        <pre><code id="tab-python-code">from sdk.python.crosstalk import CrossTalkClient
+
+client = CrossTalkClient(name="Python-Worker", role="backend", url="ws://localhost:4488")
+client.connect()
+
+# Claim file using XDialect
+client.send_shorthand('!LCK @app.py #FIX "crash bug" &WAIT')
+
+# Release file lock when work finishes
+client.send_shorthand('!REL @app.py &DONE &PROCEED')</code></pre>
+      </div>
+
+      <!-- Tab Content 4: Embedded C / Arduino -->
+      <div class="tab-pane" id="tab-c">
+        <div class="code-header">
+          <span>Arduino / ESP32 Embedded C/C++ Header (&lt; 150 Bytes RAM)</span>
+          <button class="btn-copy-code" onclick="window.copyTabCode('tab-c-code')">Copy</button>
+        </div>
+        <pre><code id="tab-c-code">#include "crosstalk_micro.h"
+
+// In Arduino setup():
+void setup() {
+    SerialBT.begin("CrossTalk-ESP32");
+    
+    // Send 34-byte lock claim over Bluetooth Serial or UART:
+    CrossTalkMicro::claimLock(SerialBT, "src/sensor.h", XT_INTENT_FEAT, "IMU calibration", 60);
+}
+
+// In loop():
+void loop() {
+    // Zero dynamic memory allocations — 100% static buffer!
+}</code></pre>
+      </div>
+
+      <!-- Tab Content 5: MicroPython -->
+      <div class="tab-pane" id="tab-mpy">
+        <div class="code-header">
+          <span>MicroPython (Raspberry Pi Pico W / ESP32)</span>
+          <button class="btn-copy-code" onclick="window.copyTabCode('tab-mpy-code')">Copy</button>
+        </div>
+        <pre><code id="tab-mpy-code">from crosstalk_micro import CrossTalkMicro
+
+# Generate 34-byte compact packet
+pkt = CrossTalkMicro.pack_claim("src/firmware.c", "Motor tuning", 60)
+
+# Write to UART or Bluetooth serial stream
+uart.write(pkt)</code></pre>
+      </div>
+
+      <!-- Tab Content 6: MCP Config -->
+      <div class="tab-pane" id="tab-mcp">
+        <div class="code-header">
+          <span>.agents/mcp_config.json (Antigravity, Cursor, Claude Code)</span>
+          <button class="btn-copy-code" onclick="window.copyTabCode('tab-mcp-code')">Copy</button>
+        </div>
+        <pre><code id="tab-mcp-code">{
+  "mcpServers": {
+    "crosstalk": {
+      "command": "node",
+      "args": ["bin/crosstalk-mcp.js"],
+      "env": {
+        "CROSSTALK_URL": "ws://localhost:4488",
+        "CROSSTALK_AGENT_NAME": "Pair-Programmer"
+      }
+    }
+  }
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- GitHub Reference & Genesis -->
+  <section class="portal-section" id="github-reference">
+    <div class="genesis-card">
+      <div class="genesis-content">
+        <div class="genesis-tag">GITHUB REFERENCE &amp; HACKATHON ROOTS</div>
+        <h3>Inspired by PennyroyalTea/gibberlink</h3>
+        <p>
+          CrossTalk draws inspiration from the viral <strong>Gibberlink</strong> project created by Anton Pidkuiko &amp; Boris Starkov at the ElevenLabs hackathon (<a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer">github.com/PennyroyalTea/gibberlink</a>).
+        </p>
+        <p>
+          While Gibberlink demonstrated AI agents switching to acoustic sound modems over telephone voice calls, <strong>CrossTalk</strong> evolves this concept for production developer environments:
+          bridging high-speed binary bitstreams, cooperative file locks, and zero-collision multi-agent coordination.
+        </p>
+        <div class="genesis-buttons">
+          <a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer" class="btn-github-pill">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+            <span>PennyroyalTea/gibberlink</span>
+          </a>
+          <a href="cockpit.html" class="btn-action-primary">
+            <span>Explore Live Cockpit</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="portal-footer">
+    <div class="footer-container">
+      <div class="footer-left">
+        <strong>CrossTalk Mesh Network</strong> · Open Protocol for Cooperative AI Agents
+      </div>
+      <div class="footer-right">
+        <span>Dialect v1.0.0</span>
+        <span>MIT License</span>
+        <a href="cockpit.html">Live Cockpit</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="portal.js"></script>
+</body>
+</html>

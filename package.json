@@ -1,0 +1,65 @@
+{
+  "name": "cross-talk",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Real-time WebSocket mesh network and coordination protocol for AI agents",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./dialect": {
+      "import": "./dist/dialect/dictionary.js",
+      "types": "./dist/dialect/dictionary.d.ts"
+    },
+    "./binary": {
+      "import": "./dist/server/binary.js",
+      "types": "./dist/server/binary.d.ts"
+    },
+    "./transports": {
+      "import": "./dist/transport/interface.js",
+      "types": "./dist/transport/interface.d.ts"
+    }
+  },
+  "bin": {
+    "crosstalk": "./bin/crosstalk.js",
+    "crosstalk-mcp": "./bin/crosstalk-mcp.js"
+  },
+  "scripts": {
+    "build": "tsc && cp -r src/server/web dist/server/",
+    "start": "node dist/server/index.js",
+    "dev": "tsx src/server/index.ts",
+    "cli": "tsx src/client/cli.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "demo:agent-feature": "tsx examples/feature_agent.ts",
+    "demo:agent-refactor": "tsx examples/refactor_agent.ts",
+    "test": "node --test"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "multi-agent",
+    "websocket",
+    "mcp",
+    "coordination",
+    "file-locking"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "colorette": "^2.0.20",
+    "commander": "^12.1.0",
+    "ggwave": "^0.4.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

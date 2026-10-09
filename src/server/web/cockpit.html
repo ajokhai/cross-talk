@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CrossTalk — Live Mesh Cockpit &amp; Gibberlink Visualizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="mesh-backdrop">
+    <div class="grid-overlay"></div>
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+  </div>
+
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-group">
+        <a href="index.html" class="logo-icon" title="Return to Portal &amp; Docs">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </a>
+        <div class="logo-text">
+          <h1>CrossTalk <span class="badge-mesh">COCKPIT v1.0</span></h1>
+          <p class="subtitle">AI Agent Inter-Communication &amp; Gibberlink Signal Network</p>
+        </div>
+      </div>
+      <a href="index.html" class="nav-portal-link">📖 Portal &amp; Docs</a>
+    </div>
+
+    <div class="header-center">
+      <div class="network-status-pill">
+        <span class="status-dot pulsing"></span>
+        <span class="status-label" id="netStatusLabel">CONNECTED TO MESH</span>
+        <span class="channel-tag" id="currentChannelTag">#default</span>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="stats-pills">
+        <div class="stat-badge">
+          <span class="stat-icon">🤖</span>
+          <span class="stat-num" id="statAgentCount">0</span>
+          <span class="stat-text">Agents</span>
+        </div>
+        <div class="stat-badge">
+          <span class="stat-icon">🔒</span>
+          <span class="stat-num" id="statLockCount">0</span>
+          <span class="stat-text">Locks</span>
+        </div>
+        <div class="stat-badge" id="audioToggleBadge" title="Click to toggle Gibberlink Web Audio synthesizer">
+          <span class="stat-icon" id="audioIcon">🔇</span>
+          <span class="stat-text" id="audioToggleText">Audio: Muted</span>
+        </div>
+      </div>
+      <button class="btn-refresh" id="btnRefresh" title="Refresh Mesh State">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 4v6h-6"></path>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Gibberlink Signal Telemetry Bar -->
+  <div class="signal-telemetry-strip">
+    <div class="telemetry-item">
+      <span class="telemetry-label">COMM PROTOCOL:</span>
+      <span class="telemetry-val highlight-cyan">HYBRID (BITS + GIBBERLINK SIGNAL)</span>
+    </div>
+    <div class="telemetry-item">
+      <span class="telemetry-label">WIRE BITSTREAM EFFICIENCY:</span>
+      <span class="telemetry-val highlight-emerald">~50 bytes/pkt (&lt; 0.5ms)</span>
+    </div>
+    <div class="telemetry-item">
+      <span class="telemetry-label">FSK MODULATION:</span>
+      <span class="telemetry-val highlight-amber">16-FSK (1875 - 3281 Hz)</span>
+    </div>
+    <div class="telemetry-item">
+      <span class="telemetry-label">ACOUSTIC PCM RATIO:</span>
+      <span class="telemetry-val">4,800x compression vs raw sound</span>
+    </div>
+  </div>
+
+  <main class="dashboard-grid">
+    <!-- COLUMN 1: AGENT REGISTRY & TOPOLOGY -->
+    <section class="panel agent-panel">
+      <div class="panel-header">
+        <div class="panel-title-wrap">
+          <div class="panel-icon">👥</div>
+          <div>
+            <h2>Connected Agents</h2>
+            <p class="panel-desc">Active IDE, CLI &amp; Bot peers</p>
+          </div>
+        </div>
+        <span class="counter-badge" id="agentCountBadge">0 Online</span>
+      </div>
+
+      <div class="agent-list" id="agentList">
+        <div class="empty-state">
+          <div class="empty-icon">🛰️</div>
+          <p>Listening for agents on the mesh...</p>
+          <span class="empty-hint">Start an agent with MCP, CLI, or SDK to see it appear here</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- COLUMN 2: DISTRIBUTED FILE LOCKS & GIBBERLINK SPECTROGRAM -->
+    <section class="panel middle-panel">
+      <!-- Top Half: File Locks -->
+      <div class="locks-subpanel">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <div class="panel-icon">🛡️</div>
+            <div>
+              <h2>Collision Guard &amp; Locks</h2>
+              <p class="panel-desc">Active file claims &amp; edit intents</p>
+            </div>
+          </div>
+          <span class="counter-badge counter-amber" id="lockCountBadge">0 Claims</span>
+        </div>
+
+        <div class="locks-container" id="locksContainer">
+          <div class="empty-state">
+            <div class="empty-icon">✨</div>
+            <p>No active file locks</p>
+            <span class="empty-hint">Files claimed by agents will appear with real-time countdowns</span>
+          </div>
+        </div>
+
+        <div class="manual-lock-box">
+          <h3>Quick File Claim / Conflict Test</h3>
+          <div class="lock-input-group">
+            <input type="text" id="manualLockFile" placeholder="e.g. src/auth/service.ts" />
+            <input type="text" id="manualLockReason" placeholder="Refactoring token logic..." />
+            <button id="btnManualLock" class="btn-primary">Claim Lock</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Half: Gibberlink Waterfall Spectrogram Canvas -->
+      <div class="spectrogram-subpanel">
+        <div class="spectrogram-header">
+          <div class="spec-title">
+            <span class="pulse-ring"></span>
+            <strong>GIBBERLINK SIGNAL SPECTROGRAM</strong>
+            <span class="freq-range">1.8kHz - 3.5kHz</span>
+          </div>
+          <button id="btnEmitSignalDemo" class="btn-xs-signal" title="Test emit Gibberlink audio signal burst">
+            ⚡ Test Signal Burst
+          </button>
+        </div>
+        <canvas id="spectrogramCanvas" class="spectrogram-canvas" width="340" height="110"></canvas>
+      </div>
+    </section>
+
+    <!-- COLUMN 3: REAL-TIME MESH MESSAGE STREAM -->
+    <section class="panel stream-panel">
+      <div class="panel-header">
+        <div class="panel-title-wrap">
+          <div class="panel-icon">💬</div>
+          <div>
+            <h2>Live Mesh Stream</h2>
+            <p class="panel-desc">Real-time inter-agent messages &amp; signals</p>
+          </div>
+        </div>
+        <div class="stream-filters">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="broadcast">Broadcasts</button>
+          <button class="filter-btn" data-filter="gibberlink_signal">Gibberlink</button>
+          <button class="filter-btn" data-filter="dm">DMs</button>
+          <button class="filter-btn" data-filter="system">System</button>
+        </div>
+      </div>
+
+      <div class="message-feed" id="messageFeed">
+        <!-- Messages rendered dynamically -->
+      </div>
+
+      <!-- Human Operator Broadcast & Gibberlink Signal Composer -->
+      <div class="chat-composer">
+        <div class="composer-meta">
+          <span>Speaking as: <strong class="human-name">Human Operator</strong></span>
+          <div class="composer-mode-wrap">
+            <select id="composerFormat" class="composer-select-sm">
+              <option value="text">💬 Standard Text</option>
+              <option value="gibberlink">⚡ Gibberlink Signal</option>
+            </select>
+            <select id="composerRecipient" class="composer-select">
+              <option value="broadcast">📢 Broadcast to All Agents</option>
+            </select>
+          </div>
+        </div>
+        <div class="composer-input-row">
+          <input type="text" id="composerInput" placeholder="Message the agent network... (e.g. 'Editing auth.ts, hang on')" />
+          <button id="btnSendMsg" class="btn-send">
+            <span>Send</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

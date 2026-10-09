@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "crosstalk": {
+      "command": "node",
+      "args": ["bin/crosstalk-mcp.js"],
+      "env": {
+        "CROSSTALK_URL": "ws://localhost:4488",
+        "CROSSTALK_AGENT_NAME": "Antigravity-Agent",
+        "CROSSTALK_AGENT_ROLE": "pair-programmer"
+      }
+    }
+  }
+}
