@@ -1,7 +1,7 @@
 {
   "name": "@cross-talk/embedded",
   "version": "0.1.0",
-  "description": "CrossTalk binary wire format, stream transports and microcontroller firmware",
+  "description": "Hardware bridge, binary wire format, stream transports and microcontroller firmware for CrossTalk",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,5 +22,8 @@
   "peerDependencies": {
     "cross-talk": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "bin": {
+    "crosstalk-bridge": "./dist/bridge-cli.js"
+  }
 }
