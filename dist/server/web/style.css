@@ -2212,8 +2212,91 @@ pre code {
    GENESIS CARD & FOOTER
    ========================================================================== */
 
+.genesis-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.95fr;
+  gap: 24px;
+}
+
+@media (max-width: 960px) {
+  .genesis-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .genesis-card {
   padding: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.genesis-card.creator-spotlight {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.06), rgba(18, 18, 20, 0.85));
+  position: relative;
+  overflow: hidden;
+}
+
+.genesis-card.creator-spotlight::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #fff, rgba(255, 255, 255, 0.25), transparent);
+}
+
+.creator-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.creator-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  background: #18181b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.creator-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.creator-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.creator-handle {
+  font-size: 0.82rem;
+  color: var(--cal-text-muted);
+  font-family: var(--cal-font-mono);
+}
+
+.creator-handle a {
+  color: var(--cal-text-secondary);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.creator-handle a:hover {
+  color: #fff;
+  text-decoration: underline;
 }
 
 .genesis-title {
@@ -2228,7 +2311,7 @@ pre code {
   color: var(--cal-text-secondary);
   line-height: 1.6;
   max-width: 820px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .genesis-text a {
@@ -2240,6 +2323,13 @@ pre code {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.github-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .cal-footer {

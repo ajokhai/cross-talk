@@ -1,6 +1,10 @@
 # ⚡ CrossTalk: Real-Time Multi-Agent Mesh & Collision Guard
 
-**CrossTalk** is a real-time WebSocket communication and cooperative file-locking network for AI agents operating concurrently across terminal sessions, autonomous bots, IDE pair-programmers (such as Antigravity, Claude Code, Cursor), and background workers.
+[![GitHub Repository](https://img.shields.io/badge/GitHub-ajokhai%2Fcross--talk-blue?logo=github)](https://github.com/ajokhai/cross-talk)
+[![Author](https://img.shields.io/badge/Author-Josh%20Jokhai%20(@ajokhai)-black?logo=github)](https://github.com/ajokhai)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+
+**CrossTalk** is a real-time WebSocket communication and cooperative file-locking network for AI agents operating concurrently across terminal sessions, autonomous bots, IDE pair-programmers (such as Antigravity, Claude Code, Cursor), and background workers. Conceived and engineered by **Josh Jokhai** ([@ajokhai](https://github.com/ajokhai)).
 
 CrossTalk features **XDialect (v1.0.0)** — a lossless semantic shorthand dialect that packs agent communication into hyper-compact bitstreams while reversibly expanding into natural English for human observers — alongside an optional **Gibberlink Audio Signal Codec** with real-time waterfall spectrogram telemetry.
 
@@ -288,5 +292,41 @@ npx vercel
 1. Builds static assets from `dist/server/web`.
 2. Serves serverless endpoints in `/api` (`/api/stats`, `/api/history`, `/api/dialect`).
 3. Add `MONGODB_URI` under **Vercel Project Settings > Environment Variables** for live persistent telemetry.
+
+---
+
+## ⚡ Bare-Metal Assembly & Microcontrollers
+
+For high-speed robotics, drones, and ultra-constrained microchips where even a C standard library is too heavy, CrossTalk provides handwritten **Assembly** routines:
+
+| Platform | File | Footprint | Speed |
+| :--- | :--- | :--- | :--- |
+| **ARM Cortex-M Thumb-2** | [`embedded/assembly/crosstalk_thumb.s`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/crosstalk_thumb.s) | **0 bytes RAM heap** (registers only) | **< 100 ns** |
+| **8-bit AVR** | [`embedded/assembly/crosstalk_avr.s`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/crosstalk_avr.s) | **0 bytes RAM heap** (registers `r18-r25`) | **~1.25 µs** (@16MHz) |
+| **WebAssembly** | [`embedded/assembly/crosstalk_wasm.wat`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/crosstalk_wasm.wat) | **Zero GC pause** (< 350 bytes WASM) | **Native JIT speed** |
+
+See [`embedded/assembly/README.md`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/README.md) and [`embedded/crosstalk_micro.h`](file:///Users/Josh/Documents/cross-talk/embedded/crosstalk_micro.h) for embedded guides.
+
+---
+
+## 👤 Architect & Origins
+
+### Conceived & Engineered by Josh Jokhai
+- **GitHub**: [@ajokhai](https://github.com/ajokhai)
+- **Repository**: [github.com/ajokhai/cross-talk](https://github.com/ajokhai/cross-talk)
+
+Josh conceived and architected **CrossTalk** to solve the primary bottlenecks in multi-agent autonomous engineering:
+1. **Zero Context-Dumping**: Stopping LLMs from spending 90%+ of their tokens re-dumping chat histories at each other for simple handoffs.
+2. **Deterministic Conflict Prevention**: Preventing simultaneous edits across developers, terminals, and git branches.
+3. **Pervasive Swarm Intelligence**: Bridging frontier cloud models (Grok, ChatGPT, Gemini, Claude) with physical hardware, microcontrollers, and robotics over a unified, ultra-compact bitstream protocol.
+
+### Origins & Inspiration
+CrossTalk pays tribute to Anton Pidkuiko & Boris Starkov's viral [PennyroyalTea/gibberlink](https://github.com/PennyroyalTea/gibberlink) prototype created at the ElevenLabs Hackathon, which proved that AI models could communicate via acoustic sound frequencies. CrossTalk took that initial spark and evolved it into a full-duplex binary WebSocket mesh, XDialect token compression, Subnet Boundary Guard, and multi-model consensus network.
+
+---
+
+## 📜 License
+MIT License © [Josh Jokhai](https://github.com/ajokhai)
+
 
 

@@ -47,6 +47,12 @@
       </div>
 
       <div class="cal-nav-actions">
+        <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer" class="cal-btn cal-btn-secondary github-nav-btn" title="View ajokhai/cross-talk on GitHub">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
         <a href="cockpit.html" class="cal-btn cal-btn-secondary">
           <span class="pulse-indicator"></span>
           <span>Live Cockpit</span>
@@ -406,6 +412,16 @@
           <p class="bento-sub">Edge IoT automation</p>
           <p class="bento-desc">
             Drop in <code>crosstalk_micro.py</code> on Raspberry Pi Pico W boards to enable smart edge devices to talk to frontier AI models at wire speeds.
+          </p>
+        </div>
+
+        <div class="bento-card">
+          <div class="bento-badge">BARE-METAL ASM</div>
+          <div class="bento-icon">⚡</div>
+          <h3 class="bento-title">Pure Assembly &amp; WASM</h3>
+          <p class="bento-sub">AVR · ARM Thumb-2 · WebAssembly</p>
+          <p class="bento-desc">
+            Handwritten assembly routines (<code>embedded/assembly/</code>) for ATTiny85, Arduino ATmega328P, and STM32. 0 bytes of RAM heap, single-cycle register parsing in ~20 clock cycles (&lt; 1.25 µs).
           </p>
         </div>
       </div>
@@ -831,6 +847,7 @@
           <button class="guide-tab-btn" data-tab="tab-node">Node.js / TS</button>
           <button class="guide-tab-btn" data-tab="tab-python">Python</button>
           <button class="guide-tab-btn" data-tab="tab-c">Embedded C</button>
+          <button class="guide-tab-btn" data-tab="tab-asm">⚡ Assembly / WASM</button>
           <button class="guide-tab-btn" data-tab="tab-mcp">MCP Config</button>
         </div>
 
@@ -956,26 +973,88 @@ void loop() {
     }
   }
 }</code></pre>
+        <!-- Assembly Tab -->
+        <div class="tab-pane" id="tab-asm">
+          <div class="code-head">
+            <span>ARM Thumb-2 &amp; AVR 8-bit Assembly (0 Bytes RAM Heap, &lt; 100ns)</span>
+            <button class="cal-btn-copy" onclick="window.copyTabCode('tab-asm-code')">Copy</button>
+          </div>
+          <pre><code id="tab-asm-code">/* ARM Cortex-M Thumb-2 Assembly (embedded/assembly/crosstalk_thumb.s) */
+/* Executes in registers r0-r3. Zero dynamic RAM, zero heap allocations. */
+
+    .syntax unified
+    .thumb
+    .global xt_asm_validate_header
+xt_asm_validate_header:
+    cmp     r1, #10            /* Check buffer length >= 10 bytes */
+    blo     .Lfail
+    ldrb    r1, [r0, #0]       /* Load Magic byte */
+    cmp     r1, #0x58          /* Must equal 'X' (0x58) */
+    bne     .Lfail
+    ldrb    r1, [r0, #1]       /* Load Version byte */
+    cmp     r1, #0x01          /* Must equal 0x01 */
+    bne     .Lfail
+    movs    r0, #0             /* Return 0: Valid CrossTalk Frame */
+    bx      lr
+.Lfail:
+    movs    r0, #1
+    rsbs    r0, r0, #0         /* Return -1: Invalid Frame */
+    bx      lr</code></pre>
         </div>
       </div>
     </section>
 
-    <!-- Cal.com Style Minimalist Genesis Footer Card -->
+    <!-- Cal.com Style Creator Spotlight & Origins Section -->
     <section class="cal-section" id="genesis-section">
-      <div class="cal-card genesis-card">
-        <div class="genesis-content">
-          <span class="section-kicker">ORIGINS &amp; GITHUB REFERENCE</span>
-          <h3 class="genesis-title">Inspired by PennyroyalTea/gibberlink</h3>
-          <p class="genesis-text">
-            CrossTalk draws inspiration from Anton Pidkuiko &amp; Boris Starkov’s viral <strong>Gibberlink</strong> (<a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer">github.com/PennyroyalTea/gibberlink</a>) at the ElevenLabs Hackathon. CrossTalk evolves this concept from acoustic audio modems into high-speed binary bitstreams, cooperative file locks, and zero-collision multi-agent coordination.
-          </p>
-          <div class="genesis-actions">
-            <a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer" class="cal-btn cal-btn-secondary">
-              GitHub: PennyroyalTea/gibberlink
-            </a>
-            <a href="cockpit.html" class="cal-btn cal-btn-primary">
-              Launch Live Cockpit
-            </a>
+      <div class="genesis-grid">
+        <!-- Creator & Architect Spotlight Card -->
+        <div class="cal-card genesis-card creator-spotlight">
+          <div class="genesis-content">
+            <span class="section-kicker">ARCHITECT &amp; CREATOR</span>
+            <div class="creator-header">
+              <div class="creator-avatar">JJ</div>
+              <div class="creator-meta">
+                <span class="creator-name">Josh Jokhai</span>
+                <span class="creator-handle"><a href="https://github.com/ajokhai" target="_blank" rel="noopener noreferrer">@ajokhai</a> · Creator &amp; Systems Architect</span>
+              </div>
+            </div>
+            <h3 class="genesis-title">Engineered by Josh Jokhai (@ajokhai)</h3>
+            <p class="genesis-text">
+              Josh conceived and engineered <strong>CrossTalk</strong> to solve the deepest friction in multi-agent AI systems: eliminating the 90%+ token waste of LLM agents spamming large context blocks back and forth, preventing concurrent file edit clobbers across teams and git branches, and bringing unified swarm coordination from frontier cloud models (Grok, ChatGPT, Gemini, Claude) all the way down to microprocessors, robotics, and bare-metal assembly.
+            </p>
+            <div class="genesis-actions">
+              <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer" class="cal-btn cal-btn-primary github-nav-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                </svg>
+                <span>⭐ Star on GitHub (ajokhai/cross-talk)</span>
+              </a>
+              <a href="https://github.com/ajokhai" target="_blank" rel="noopener noreferrer" class="cal-btn cal-btn-secondary">
+                <span>Follow @ajokhai</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Origins & Inspiration Card -->
+        <div class="cal-card genesis-card">
+          <div class="genesis-content">
+            <span class="section-kicker">ORIGINS &amp; INSPIRATION</span>
+            <h3 class="genesis-title">The Spark: PennyroyalTea/gibberlink</h3>
+            <p class="genesis-text">
+              CrossTalk gives deep respect to Anton Pidkuiko &amp; Boris Starkov’s viral <strong>Gibberlink</strong> project (<a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer">github.com/PennyroyalTea/gibberlink</a>) at the ElevenLabs Hackathon, which showed AIs communicating via high-frequency acoustic modems.
+            </p>
+            <p class="genesis-text">
+              Josh took that acoustic spark and reimagined it into an open, production-grade architecture: full-duplex WebSocket mesh, binary XDialect token compression, Subnet Boundary Guard, and cross-platform multi-AI swarm coordination across machines, clouds, and embedded hardware.
+            </p>
+            <div class="genesis-actions">
+              <a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer" class="cal-btn cal-btn-secondary">
+                GitHub: PennyroyalTea/gibberlink
+              </a>
+              <a href="cockpit.html" class="cal-btn cal-btn-secondary">
+                Launch Live Cockpit
+              </a>
+            </div>
           </div>
         </div>
       </div>
@@ -987,9 +1066,10 @@ void loop() {
     <div class="footer-wrap">
       <div class="footer-left">
         <span class="footer-brand">CrossTalk</span>
-        <span class="footer-sub">Have your Grok, ChatGPT, and Gemini agents collaborate simultaneously superfast.</span>
+        <span class="footer-sub">Conceived and engineered by <a href="https://github.com/ajokhai" target="_blank" rel="noopener noreferrer" style="color: #fff; text-decoration: underline;">Josh Jokhai (@ajokhai)</a>. Open-source multi-AI swarm orchestration.</span>
       </div>
       <div class="footer-right">
+        <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer" style="color: #fff; text-decoration: underline; font-weight: 500;">GitHub (ajokhai/cross-talk)</a>
         <span>Dialect v1.0.0</span>
         <span>MIT License</span>
         <a href="cockpit.html">Cockpit</a>
