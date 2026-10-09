@@ -92,22 +92,32 @@ static void printFrame(const xt_frame_t& frame) {
 }
 
 /* Reads one length-prefixed frame if available. Drops a byte and resyncs when
- * the prefix is impossible, so serial noise cannot wedge the stream. */
+ * the prefix is impossible, so serial noise cannot wedge the stream; a valid
+ * frame too big for the buffer is skipped whole. */
 static void pollLink() {
     static uint8_t buffer[XT_MAX_PACKET_SIZE];
+    static uint16_t skip = 0;   // bytes left of an oversized frame being discarded
 
-    if (LINK.available() < 2) return;
-    uint8_t hi = LINK.peek();
-    if (hi != 0) {           // frames are <= 128 bytes, so the high length byte is 0
+    while (skip && LINK.available()) {
         LINK.read();
+        skip--;
+    }
+    if (skip || LINK.available() < 2) return;
+
+    uint8_t hi = (uint8_t)LINK.read();
+    uint16_t frameLen = ((uint16_t)hi << 8) | (uint8_t)LINK.peek();
+    if (frameLen < XT_HEADER_SIZE) return;     // dropped one byte; resync on the next
+    LINK.read();                                // consume the low length byte
+
+    if (frameLen > sizeof(buffer)) {
+        uint8_t head[2];
+        if (LINK.readBytes(head, 2) == 2 && head[0] == XT_MAGIC && head[1] == XT_VERSION) {
+            skip = frameLen - 2;                // a real frame, just too big for us
+        }
         return;
     }
-    LINK.read();
-    uint8_t lo = LINK.read();
-    uint16_t frameLen = lo;
-    if (frameLen < XT_HEADER_SIZE || frameLen > sizeof(buffer)) return;  // resync on the next byte
 
-    if (LINK.readBytes(buffer, frameLen) != frameLen) return;           // timed out mid-frame
+    if (LINK.readBytes(buffer, frameLen) != frameLen) return;   // timed out mid-frame
     xt_frame_t frame;
     if (xt_decode_packet(buffer, frameLen, &frame) == 0) printFrame(frame);
 }

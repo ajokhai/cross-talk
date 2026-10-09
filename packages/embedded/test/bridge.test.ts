@@ -193,6 +193,17 @@ test('ResyncingLink recovers from line noise and closes once', () => {
   assert.equal(got.length, 1);
   assert.equal(BinaryCodec.decode(got[0])!.payload, 'ok');
 
+  // An oversized but well-formed frame whose payload smuggles a fake frame is skipped whole.
+  const fake = BinaryCodec.encode({ opcode: BinaryOpcode.BROADCAST, flags: {}, timestamp: 0, payload: 'smuggled' });
+  const fakePrefixed = Buffer.concat([Buffer.from([0, fake.length]), fake]);
+  const big = BinaryCodec.encode({ opcode: BinaryOpcode.BROADCAST, flags: {}, timestamp: 0, payload: Buffer.concat(Array(10).fill(fakePrefixed)) });
+  const bigPrefix = Buffer.alloc(2);
+  bigPrefix.writeUInt16BE(big.length);
+  const stream2 = Buffer.concat([bigPrefix, big, prefix, frame]);
+  for (let i = 0; i < stream2.length; i += 7) stream.write(stream2.subarray(i, i + 7));
+  assert.equal(got.length, 2, 'only the real frame after the oversized one arrives');
+  assert.equal(BinaryCodec.decode(got[1])!.payload, 'ok');
+
   stream.end();
   stream.destroy();
   link.close();
