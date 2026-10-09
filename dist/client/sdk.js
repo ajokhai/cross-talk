@@ -38,7 +38,8 @@ export class CrossTalkClient extends EventEmitter {
             gibberlinkCapable: options.gibberlinkCapable !== false,
             dialectVersion: options.dialectVersion || DIALECT_V1.version,
             branch: options.branch || detectGitBranch(),
-            sessionKey: options.sessionKey || ''
+            sessionKey: options.sessionKey || '',
+            token: options.token || process.env.CROSSTALK_AUTH_TOKEN || ''
         };
     }
     get agentId() {
@@ -49,7 +50,13 @@ export class CrossTalkClient extends EventEmitter {
     }
     async connect() {
         return new Promise((resolve, reject) => {
-            this.ws = new WebSocket(this.options.url);
+            let wsUrl = this.options.url;
+            const token = this.options.token || process.env.CROSSTALK_AUTH_TOKEN;
+            if (token) {
+                const hasQuery = wsUrl.includes('?');
+                wsUrl += `${hasQuery ? '&' : '?'}token=${encodeURIComponent(token)}`;
+            }
+            this.ws = new WebSocket(wsUrl);
             this.ws.on('open', () => {
                 this.sendPacket({
                     type: 'register',

@@ -18,7 +18,7 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage, 
         // CORS headers for local tools
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-crosstalk-token');
         if (req.method === 'OPTIONS') {
             res.writeHead(204);
             res.end();
@@ -26,6 +26,34 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage, 
         }
         const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
         const pathname = url.pathname;
+        // Optional API Token Authorization via CROSSTALK_AUTH_TOKEN
+        const authToken = process.env.CROSSTALK_AUTH_TOKEN?.trim() || '';
+        const isAuthorized = () => {
+            if (!authToken)
+                return true; // Disabled by default for local zero-config developer workflow
+            const authHeader = req.headers.authorization;
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                if (authHeader.slice(7).trim() === authToken)
+                    return true;
+            }
+            const customHeader = req.headers['x-crosstalk-token'];
+            if (typeof customHeader === 'string' && customHeader.trim() === authToken) {
+                return true;
+            }
+            const queryToken = url.searchParams.get('token') || url.searchParams.get('auth_token');
+            if (queryToken && queryToken.trim() === authToken) {
+                return true;
+            }
+            return false;
+        };
+        const protectedApiRoutes = ['/api/state', '/api/who', '/api/history', '/api/invite', '/api/broadcast', '/api/check-lock'];
+        if (protectedApiRoutes.includes(pathname)) {
+            if (!isAuthorized()) {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Unauthorized: Invalid or missing CROSSTALK_AUTH_TOKEN' }));
+                return;
+            }
+        }
         // REST API Endpoints
         if (pathname === '/api/state') {
             const channel = url.searchParams.get('channel') || 'default';
@@ -43,13 +71,13 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage, 
             res.end(JSON.stringify({ agents: allAgents, locks: allLocks }, null, 2));
             return;
         }
-        // Versioned XDialect dictionary endpoint for any agent or client
+        // Versioned XDialect dictionary endpoint for any agent or client (public)
         if (pathname === '/api/dialect' || pathname === '/api/dialect/v1') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(DIALECT_V1, null, 2));
             return;
         }
-        // Live Mesh Stats for landing page & monitoring
+        // Live Mesh Stats for landing page & monitoring (public)
         if (pathname === '/api/stats') {
             const channel = url.searchParams.get('channel') || 'default';
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -108,17 +136,54 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage, 
                 res.end(JSON.stringify({ error: 'file param required' }));
                 return;
             }
-            const lockStatus = hub.getLockManager().isLocked(file);
+            const channel = url.searchParams.get('channel') || undefined;
+            const workspace = url.searchParams.get('workspace') || undefined;
+            const lockStatus = hub.getLockManager().isLocked(file, channel, workspace);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(lockStatus));
             return;
         }
-        // Static Web Dashboard files
-        let filePath = path.join(webDir, pathname === '/' ? 'index.html' : pathname);
-        if (!fs.existsSync(filePath)) {
-            filePath = path.join(webDir, 'index.html');
+        // Check for directory traversal in raw URL or decoded path
+        const rawUrl = req.url || '/';
+        if (rawUrl.includes('..') || rawUrl.includes('%2e%2e') || rawUrl.includes('%2E%2E')) {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('403 Forbidden: Path traversal detected');
+            return;
         }
-        if (fs.existsSync(filePath)) {
+        const decodedPath = decodeURIComponent(pathname);
+        if (decodedPath.includes('..')) {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('403 Forbidden: Path traversal detected');
+            return;
+        }
+        // Static Web Dashboard files with strict path traversal prevention
+        const resolvedBase = path.resolve(webDir);
+        const safePathname = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+        const targetPath = path.resolve(webDir, safePathname);
+        // Strict boundary enforcement: requested path MUST strictly stay within webDir
+        if (!targetPath.startsWith(resolvedBase + path.sep) && targetPath !== resolvedBase) {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('403 Forbidden: Path traversal detected');
+            return;
+        }
+        let filePath = targetPath;
+        const hasExt = Boolean(path.extname(targetPath));
+        if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+            if (hasExt) {
+                res.writeHead(404, { 'Content-Type': 'text/plain' });
+                res.end('Not Found');
+                return;
+            }
+            // SPA route without extension: fallback to index.html
+            filePath = path.join(resolvedBase, 'index.html');
+        }
+        // Ensure fallback file also stays within resolvedBase
+        if (!filePath.startsWith(resolvedBase)) {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('403 Forbidden');
+            return;
+        }
+        if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) {
             const ext = path.extname(filePath);
             const mimeTypes = {
                 '.html': 'text/html',
@@ -128,6 +193,8 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage, 
                 '.sh': 'application/x-sh',
                 '.py': 'text/x-python',
                 '.h': 'text/x-c',
+                '.s': 'text/plain',
+                '.wat': 'text/plain',
                 '.svg': 'image/svg+xml',
                 '.json': 'application/json'
             };

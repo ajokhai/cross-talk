@@ -36,6 +36,7 @@ export interface CrossTalkClientOptions {
   dialectVersion?: string;
   branch?: string;
   sessionKey?: string;
+  token?: string;
 }
 
 export class CrossTalkClient extends EventEmitter {
@@ -64,7 +65,8 @@ export class CrossTalkClient extends EventEmitter {
       gibberlinkCapable: options.gibberlinkCapable !== false,
       dialectVersion: options.dialectVersion || DIALECT_V1.version,
       branch: options.branch || detectGitBranch(),
-      sessionKey: options.sessionKey || ''
+      sessionKey: options.sessionKey || '',
+      token: options.token || process.env.CROSSTALK_AUTH_TOKEN || ''
     };
   }
 
@@ -84,7 +86,13 @@ export class CrossTalkClient extends EventEmitter {
     dialect: DialectDictionary;
   }> {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.options.url);
+      let wsUrl = this.options.url;
+      const token = this.options.token || process.env.CROSSTALK_AUTH_TOKEN;
+      if (token) {
+        const hasQuery = wsUrl.includes('?');
+        wsUrl += `${hasQuery ? '&' : '?'}token=${encodeURIComponent(token)}`;
+      }
+      this.ws = new WebSocket(wsUrl);
 
       this.ws.on('open', () => {
         this.sendPacket({

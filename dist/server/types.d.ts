@@ -26,6 +26,7 @@ export interface FileLock {
     acquiredAt: number;
     expiresAt: number;
     channel: string;
+    workspace?: string;
     branch?: string;
 }
 export interface MessageEvent {
@@ -151,9 +152,9 @@ export type ServerPacket = {
 } | {
     type: 'lock_denied';
     file: string;
-    holder: AgentInfo;
+    holder?: AgentInfo;
     reason: string;
-    expiresAt: number;
+    expiresAt?: number;
 } | {
     type: 'lock_released';
     file: string;

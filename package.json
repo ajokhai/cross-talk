@@ -38,7 +38,7 @@
     "mcp": "tsx src/mcp/server.ts",
     "demo:agent-feature": "tsx examples/feature_agent.ts",
     "demo:agent-refactor": "tsx examples/refactor_agent.ts",
-    "test": "node --test"
+    "test": "node --import tsx --test test/security_and_fixes.test.ts"
   },
   "keywords": [
     "ai",

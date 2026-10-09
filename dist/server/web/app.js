@@ -366,7 +366,7 @@
               <div class="agent-avatar">${getAvatarIcon(env)}</div>
               <div>
                 <span class="agent-name">${escapeHtml(agent.name)}</span>
-                <span class="env-tag">${escapeHtml(role)} · ${env}</span>
+                <span class="env-tag">${escapeHtml(role)} · ${escapeHtml(env)}</span>
               </div>
             </div>
             ${agent.gibberlinkCapable ? `<span class="signal-chip" title="Gibberlink Signal Capable">GLINK</span>` : ''}
@@ -375,7 +375,7 @@
             <strong>Task:</strong> ${escapeHtml(agent.currentTask || 'Idle')}
           </div>
           <div class="agent-meta-row">
-            <span>Status: <strong style="color: ${getStatusColor(agent.status)}">${agent.status.toUpperCase()}</strong></span>
+            <span>Status: <strong style="color: ${getStatusColor(agent.status)}">${escapeHtml(agent.status || 'idle').toUpperCase()}</strong></span>
             ${hasLocks ? `<span class="locked-badge">🔒 ${agent.lockedFiles.length} file(s) held</span>` : ''}
           </div>
         </div>

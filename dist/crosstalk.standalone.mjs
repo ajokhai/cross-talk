@@ -7427,9 +7427,15 @@ var LockManager;
 var init_locks = __esm({
   "src/server/locks.ts"() {
     "use strict";
-    LockManager = class {
+    LockManager = class _LockManager {
+      static MAX_TTL_SECONDS = 1800;
+      // 30 minutes maximum to prevent starvation DoS
+      static MIN_TTL_SECONDS = 5;
+      // 5 seconds minimum
+      static MAX_LOCKS_PER_AGENT = 10;
+      // Max 10 active concurrent locks per agent
+      // Key: channel::workspace::normalizedFilePath -> FileLock
       locks = /* @__PURE__ */ new Map();
-      // normalizedFilePath -> FileLock
       cleanupInterval = null;
       constructor() {
         this.cleanupInterval = setInterval(() => {
@@ -7444,13 +7450,25 @@ var init_locks = __esm({
         }
         return normalized;
       }
+      getLockKey(channel, workspace, file) {
+        const ch = (channel || "default").trim().toLowerCase();
+        const ws = (workspace || "default").trim();
+        const f = this.normalizePath(file);
+        return `${ch}::${ws}::${f}`;
+      }
       acquire(rawPath, agent, reason, ttlSeconds = 300, channel = "default") {
         const file = this.normalizePath(rawPath);
+        const workspace = agent.workspace || "default";
+        const lockKey = this.getLockKey(channel, workspace, file);
         const now = Date.now();
-        const existing = this.locks.get(file);
+        const clampedTtl = Math.max(
+          _LockManager.MIN_TTL_SECONDS,
+          Math.min(ttlSeconds || 300, _LockManager.MAX_TTL_SECONDS)
+        );
+        const existing = this.locks.get(lockKey);
         if (existing && existing.expiresAt > now) {
           if (existing.holderId === agent.id) {
-            existing.expiresAt = now + ttlSeconds * 1e3;
+            existing.expiresAt = now + clampedTtl * 1e3;
             existing.reason = reason;
             return { success: true, lock: existing };
           }
@@ -7466,72 +7484,101 @@ var init_locks = __esm({
             }
           };
         }
+        const currentAgentLocks = this.getLocksByAgent(agent.id);
+        if (currentAgentLocks.length >= _LockManager.MAX_LOCKS_PER_AGENT) {
+          return {
+            success: false,
+            quotaExceeded: true,
+            error: `Lock quota exceeded: Agent '${agent.name}' already holds ${currentAgentLocks.length} active locks (max ${_LockManager.MAX_LOCKS_PER_AGENT}). Release a lock before claiming another.`
+          };
+        }
         const lock = {
           file,
           holderId: agent.id,
           holderName: agent.name,
           reason,
           acquiredAt: now,
-          expiresAt: now + ttlSeconds * 1e3,
-          channel
+          expiresAt: now + clampedTtl * 1e3,
+          channel,
+          workspace
         };
-        this.locks.set(file, lock);
+        this.locks.set(lockKey, lock);
         return { success: true, lock };
       }
-      release(rawPath, agentId, force = false) {
+      release(rawPath, agentId, force = false, channel, workspace) {
         const file = this.normalizePath(rawPath);
-        const existing = this.locks.get(file);
-        if (!existing) {
-          return { success: false };
+        if (channel && workspace) {
+          const key = this.getLockKey(channel, workspace, file);
+          const existing = this.locks.get(key);
+          if (existing) {
+            if (!force && existing.holderId !== agentId) {
+              return { success: false, lock: existing };
+            }
+            this.locks.delete(key);
+            return { success: true, lock: existing };
+          }
         }
-        if (!force && existing.holderId !== agentId) {
-          return { success: false, lock: existing };
+        for (const [key, lock] of this.locks.entries()) {
+          if (lock.file === file) {
+            if (channel && lock.channel !== channel) continue;
+            if (workspace && lock.workspace !== workspace) continue;
+            if (!force && lock.holderId !== agentId) {
+              return { success: false, lock };
+            }
+            this.locks.delete(key);
+            return { success: true, lock };
+          }
         }
-        this.locks.delete(file);
-        return { success: true, lock: existing };
+        return { success: false };
       }
       releaseAllByAgent(agentId) {
         const released = [];
-        for (const [file, lock] of this.locks.entries()) {
+        for (const [key, lock] of this.locks.entries()) {
           if (lock.holderId === agentId) {
             released.push(lock);
-            this.locks.delete(file);
+            this.locks.delete(key);
           }
         }
         return released;
       }
-      isLocked(rawPath) {
+      isLocked(rawPath, channel, workspace) {
         const file = this.normalizePath(rawPath);
-        const existing = this.locks.get(file);
-        if (!existing) return { locked: false };
-        if (existing.expiresAt <= Date.now()) {
-          this.locks.delete(file);
-          return { locked: false };
+        const now = Date.now();
+        for (const [key, lock] of this.locks.entries()) {
+          if (lock.file === file) {
+            if (channel && lock.channel !== channel) continue;
+            if (workspace && lock.workspace !== workspace) continue;
+            if (lock.expiresAt <= now) {
+              this.locks.delete(key);
+              continue;
+            }
+            return { locked: true, lock };
+          }
         }
-        return { locked: true, lock: existing };
+        return { locked: false };
       }
-      getLocks(channel) {
+      getLocks(channel, workspace) {
         const now = Date.now();
         const active = [];
-        for (const [file, lock] of this.locks.entries()) {
+        for (const [key, lock] of this.locks.entries()) {
           if (lock.expiresAt > now) {
-            if (!channel || lock.channel === channel) {
-              active.push(lock);
-            }
+            if (channel && lock.channel !== channel) continue;
+            if (workspace && lock.workspace !== workspace) continue;
+            active.push(lock);
           } else {
-            this.locks.delete(file);
+            this.locks.delete(key);
           }
         }
         return active;
       }
-      getLocksByAgent(agentId) {
-        return this.getLocks().filter((l) => l.holderId === agentId);
+      getLocksByAgent(agentId, channel, workspace) {
+        return this.getLocks(channel, workspace).filter((l) => l.holderId === agentId);
       }
       cleanExpiredLocks() {
         const now = Date.now();
-        for (const [file, lock] of this.locks.entries()) {
+        for (const [key, lock] of this.locks.entries()) {
           if (lock.expiresAt <= now) {
-            this.locks.delete(file);
+            this.locks.delete(key);
           }
         }
       }
@@ -7862,6 +7909,35 @@ var init_hub = __esm({
           ws.close(4003, "Subnet policy violation");
           return;
         }
+        const authToken = process.env.CROSSTALK_AUTH_TOKEN?.trim() || "";
+        if (authToken) {
+          let clientToken = null;
+          if (req?.url) {
+            try {
+              const parsedUrl = new URL(req.url, "http://localhost");
+              clientToken = parsedUrl.searchParams.get("token") || parsedUrl.searchParams.get("auth_token");
+            } catch (_) {
+            }
+          }
+          if (!clientToken && req?.headers) {
+            const authHeader = req.headers.authorization;
+            if (authHeader && authHeader.startsWith("Bearer ")) {
+              clientToken = authHeader.slice(7).trim();
+            } else if (req.headers["x-crosstalk-token"]) {
+              clientToken = String(req.headers["x-crosstalk-token"]).trim();
+            } else if (req.headers["sec-websocket-protocol"]) {
+              const protos = String(req.headers["sec-websocket-protocol"]).split(",").map((p) => p.trim());
+              if (protos.includes(authToken)) {
+                clientToken = authToken;
+              }
+            }
+          }
+          if (clientToken !== authToken) {
+            console.warn(`[MeshHub] \u26D4 Connection rejected from ${clientIp}: invalid or missing CROSSTALK_AUTH_TOKEN.`);
+            ws.close(4401, "Unauthorized: Invalid or missing CROSSTALK_AUTH_TOKEN");
+            return;
+          }
+        }
         ws.on("message", (raw) => {
           try {
             const text = typeof raw === "string" ? raw : raw.toString("utf8");
@@ -8010,9 +8086,21 @@ var init_hub = __esm({
                   lock: res.lock,
                   byMe: false
                 }, [client.agent.id]);
+              } else if (res.quotaExceeded) {
+                this.send(ws, {
+                  type: "lock_denied",
+                  file: parsed.target,
+                  reason: res.error || "Lock quota exceeded"
+                });
               }
             } else if (parsed.action === "!REL" && parsed.target) {
-              const res = this.lockManager.release(parsed.target, client.agent.id);
+              const res = this.lockManager.release(
+                parsed.target,
+                client.agent.id,
+                false,
+                client.channel,
+                client.agent.workspace
+              );
               if (res.success && res.lock) {
                 client.agent.lockedFiles = client.agent.lockedFiles.filter((f) => f !== res.lock?.file);
                 this.broadcastToChannel(client.channel, {
@@ -8109,7 +8197,13 @@ var init_hub = __esm({
                   client.channel
                 );
               } else if (decoded.data.action === "UNLOCK" && decoded.data.file) {
-                this.lockManager.release(decoded.data.file, client.agent.id);
+                this.lockManager.release(
+                  decoded.data.file,
+                  client.agent.id,
+                  false,
+                  client.channel,
+                  client.agent.workspace
+                );
               }
             }
             const msg = {
@@ -8186,6 +8280,13 @@ var init_hub = __esm({
                 client.channel,
                 `File claimed: [${res.lock.file}] locked by ${client.agent.name} ("${packet.reason}")`
               );
+            } else if (res.quotaExceeded) {
+              this.send(ws, {
+                type: "lock_denied",
+                file: packet.file,
+                reason: res.error || "Lock quota exceeded (maximum 10 locks per agent)"
+              });
+              return;
             } else if (res.existingHolder) {
               const holderClient = this.clients.get(res.existingHolder.id);
               const holderAgent = holderClient ? holderClient.agent : {
@@ -8235,7 +8336,13 @@ var init_hub = __esm({
               this.send(ws, { type: "error", message: "Not registered yet" });
               return;
             }
-            const res = this.lockManager.release(packet.file, client.agent.id);
+            const res = this.lockManager.release(
+              packet.file,
+              client.agent.id,
+              false,
+              client.channel,
+              client.agent.workspace
+            );
             if (res.success && res.lock) {
               client.agent.lockedFiles = client.agent.lockedFiles.filter((f) => f !== res.lock?.file);
               this.broadcastToChannel(client.channel, {
@@ -8593,7 +8700,7 @@ async function startServer(port = 4488, host = "0.0.0.0", customStorage, allowed
   const server = http.createServer((req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-crosstalk-token");
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       res.end();
@@ -8601,6 +8708,31 @@ async function startServer(port = 4488, host = "0.0.0.0", customStorage, allowed
     }
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const pathname = url.pathname;
+    const authToken = process.env.CROSSTALK_AUTH_TOKEN?.trim() || "";
+    const isAuthorized = () => {
+      if (!authToken) return true;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        if (authHeader.slice(7).trim() === authToken) return true;
+      }
+      const customHeader = req.headers["x-crosstalk-token"];
+      if (typeof customHeader === "string" && customHeader.trim() === authToken) {
+        return true;
+      }
+      const queryToken = url.searchParams.get("token") || url.searchParams.get("auth_token");
+      if (queryToken && queryToken.trim() === authToken) {
+        return true;
+      }
+      return false;
+    };
+    const protectedApiRoutes = ["/api/state", "/api/who", "/api/history", "/api/invite", "/api/broadcast", "/api/check-lock"];
+    if (protectedApiRoutes.includes(pathname)) {
+      if (!isAuthorized()) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized: Invalid or missing CROSSTALK_AUTH_TOKEN" }));
+        return;
+      }
+    }
     if (pathname === "/api/state") {
       const channel = url.searchParams.get("channel") || "default";
       const agents = hub.getAgentsInChannel(channel);
@@ -8679,16 +8811,49 @@ async function startServer(port = 4488, host = "0.0.0.0", customStorage, allowed
         res.end(JSON.stringify({ error: "file param required" }));
         return;
       }
-      const lockStatus = hub.getLockManager().isLocked(file);
+      const channel = url.searchParams.get("channel") || void 0;
+      const workspace = url.searchParams.get("workspace") || void 0;
+      const lockStatus = hub.getLockManager().isLocked(file, channel, workspace);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(lockStatus));
       return;
     }
-    let filePath = path2.join(webDir, pathname === "/" ? "index.html" : pathname);
-    if (!fs.existsSync(filePath)) {
-      filePath = path2.join(webDir, "index.html");
+    const rawUrl = req.url || "/";
+    if (rawUrl.includes("..") || rawUrl.includes("%2e%2e") || rawUrl.includes("%2E%2E")) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("403 Forbidden: Path traversal detected");
+      return;
     }
-    if (fs.existsSync(filePath)) {
+    const decodedPath = decodeURIComponent(pathname);
+    if (decodedPath.includes("..")) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("403 Forbidden: Path traversal detected");
+      return;
+    }
+    const resolvedBase = path2.resolve(webDir);
+    const safePathname = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+    const targetPath = path2.resolve(webDir, safePathname);
+    if (!targetPath.startsWith(resolvedBase + path2.sep) && targetPath !== resolvedBase) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("403 Forbidden: Path traversal detected");
+      return;
+    }
+    let filePath = targetPath;
+    const hasExt = Boolean(path2.extname(targetPath));
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      if (hasExt) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
+        return;
+      }
+      filePath = path2.join(resolvedBase, "index.html");
+    }
+    if (!filePath.startsWith(resolvedBase)) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("403 Forbidden");
+      return;
+    }
+    if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) {
       const ext = path2.extname(filePath);
       const mimeTypes = {
         ".html": "text/html",
@@ -8698,6 +8863,8 @@ async function startServer(port = 4488, host = "0.0.0.0", customStorage, allowed
         ".sh": "application/x-sh",
         ".py": "text/x-python",
         ".h": "text/x-c",
+        ".s": "text/plain",
+        ".wat": "text/plain",
         ".svg": "image/svg+xml",
         ".json": "application/json"
       };
@@ -8850,7 +9017,8 @@ var CrossTalkClient = class extends EventEmitter {
       gibberlinkCapable: options.gibberlinkCapable !== false,
       dialectVersion: options.dialectVersion || DIALECT_V1.version,
       branch: options.branch || detectGitBranch(),
-      sessionKey: options.sessionKey || ""
+      sessionKey: options.sessionKey || "",
+      token: options.token || process.env.CROSSTALK_AUTH_TOKEN || ""
     };
   }
   get agentId() {
@@ -8861,7 +9029,13 @@ var CrossTalkClient = class extends EventEmitter {
   }
   async connect() {
     return new Promise((resolve, reject) => {
-      this.ws = new import_websocket.default(this.options.url);
+      let wsUrl = this.options.url;
+      const token = this.options.token || process.env.CROSSTALK_AUTH_TOKEN;
+      if (token) {
+        const hasQuery = wsUrl.includes("?");
+        wsUrl += `${hasQuery ? "&" : "?"}token=${encodeURIComponent(token)}`;
+      }
+      this.ws = new import_websocket.default(wsUrl);
       this.ws.on("open", () => {
         this.sendPacket({
           type: "register",

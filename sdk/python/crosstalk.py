@@ -4,10 +4,12 @@ Lightweight, zero-bloat client for AI agents to communicate over the CrossTalk m
 exchange XDialect shorthand, and acquire cooperative file locks.
 """
 
+import os
 import json
 import time
 import threading
 import urllib.request
+import urllib.parse
 from typing import Optional, Dict, Any, Callable
 
 try:
@@ -91,11 +93,11 @@ class CrossTalkClient:
         url: str = "ws://localhost:4488",
         channel: str = "default",
         workspace: str = ".",
+        token: Optional[str] = None,
     ):
         self.name = name
         self.role = role
-        self.url = url
-        self.http_url = url.replace("ws://", "http://").replace("wss://", "https://")
+        self.token = token or os.environ.get("CROSSTALK_AUTH_TOKEN")
         self.channel = channel
         self.workspace = workspace
         self.agent_id: Optional[str] = None
@@ -103,6 +105,23 @@ class CrossTalkClient:
         self.ws = None
         self.connected = False
         self._handlers: Dict[str, list] = {}
+
+        base_ws = url
+        if self.token and "?" not in base_ws:
+            self.url = f"{base_ws}?token={urllib.parse.quote(self.token)}"
+        elif self.token and "?" in base_ws:
+            self.url = f"{base_ws}&token={urllib.parse.quote(self.token)}"
+        else:
+            self.url = base_ws
+
+        self.http_url = base_ws.replace("ws://", "http://").replace("wss://", "https://")
+
+    def _get_http_headers(self) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+            headers["x-crosstalk-token"] = self.token
+        return headers
 
     def on(self, event: str, handler: Callable):
         if event not in self._handlers:
@@ -128,7 +147,8 @@ class CrossTalkClient:
     def fetch_who(self) -> Dict[str, Any]:
         """Query active agents and locks via zero-dependency HTTP."""
         try:
-            with urllib.request.urlopen(f"{self.http_url}/api/who", timeout=3) as resp:
+            req = urllib.request.Request(f"{self.http_url}/api/who", headers=self._get_http_headers())
+            with urllib.request.urlopen(req, timeout=3) as resp:
                 return json.loads(resp.read().decode())
         except Exception as e:
             return {"error": str(e), "agents": [], "locks": []}
@@ -136,7 +156,8 @@ class CrossTalkClient:
     def fetch_history(self, limit: int = 50) -> Dict[str, Any]:
         """Fetch recent message ring buffer via zero-dependency HTTP."""
         try:
-            with urllib.request.urlopen(f"{self.http_url}/api/history?limit={limit}", timeout=3) as resp:
+            req = urllib.request.Request(f"{self.http_url}/api/history?limit={limit}", headers=self._get_http_headers())
+            with urllib.request.urlopen(req, timeout=3) as resp:
                 return json.loads(resp.read().decode())
         except Exception as e:
             return {"error": str(e), "messages": []}
@@ -194,8 +215,16 @@ class CrossTalkClient:
                     self._emit("ready", packet)
                 elif ptype == "broadcast":
                     self._emit("broadcast", packet.get("message"))
+                elif ptype == "direct_message":
+                    self._emit("direct_message", packet.get("message"))
+                elif ptype == "direct_message_sent":
+                    self._emit("direct_message_sent", packet.get("message"))
                 elif ptype == "lock_acquired":
                     self._emit("lock_acquired", packet.get("lock"))
+                elif ptype == "lock_released":
+                    self._emit("lock_released", packet)
+                elif ptype == "lock_denied":
+                    self._emit("lock_denied", packet)
                 elif ptype == "lock_conflict_warning":
                     self._emit("lock_conflict_warning", packet)
             except Exception as e:
@@ -225,6 +254,17 @@ class CrossTalkClient:
             self.ws.send(json.dumps({"type": "broadcast", "content": content}))
         else:
             self.broadcast_http(content)
+
+    def send_dm(self, target: str, content: str):
+        """Sends a private direct message or task handoff to a specific peer agent."""
+        if self.ws and self.connected:
+            self.ws.send(json.dumps({
+                "type": "direct_message",
+                "to": target,
+                "content": content
+            }))
+        else:
+            print("[CrossTalk] Direct messages require an active WebSocket connection.")
 
     def send_shorthand(self, shorthand: str):
         """Broadcasts concise XDialect shorthand message."""

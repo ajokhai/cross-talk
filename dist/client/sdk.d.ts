@@ -17,6 +17,7 @@ export interface CrossTalkClientOptions {
     dialectVersion?: string;
     branch?: string;
     sessionKey?: string;
+    token?: string;
 }
 export declare class CrossTalkClient extends EventEmitter {
     private ws;

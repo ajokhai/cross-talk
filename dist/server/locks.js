@@ -1,6 +1,10 @@
 import path from 'node:path';
 export class LockManager {
-    locks = new Map(); // normalizedFilePath -> FileLock
+    static MAX_TTL_SECONDS = 1800; // 30 minutes maximum to prevent starvation DoS
+    static MIN_TTL_SECONDS = 5; // 5 seconds minimum
+    static MAX_LOCKS_PER_AGENT = 10; // Max 10 active concurrent locks per agent
+    // Key: channel::workspace::normalizedFilePath -> FileLock
+    locks = new Map();
     cleanupInterval = null;
     constructor() {
         // Periodically expire stale locks every 5 seconds
@@ -19,15 +23,25 @@ export class LockManager {
         }
         return normalized;
     }
+    getLockKey(channel, workspace, file) {
+        const ch = (channel || 'default').trim().toLowerCase();
+        const ws = (workspace || 'default').trim();
+        const f = this.normalizePath(file);
+        return `${ch}::${ws}::${f}`;
+    }
     acquire(rawPath, agent, reason, ttlSeconds = 300, channel = 'default') {
         const file = this.normalizePath(rawPath);
+        const workspace = agent.workspace || 'default';
+        const lockKey = this.getLockKey(channel, workspace, file);
         const now = Date.now();
-        const existing = this.locks.get(file);
-        // If existing lock is valid and held by someone else
+        // Clamp TTL to safe boundaries (5s to 30 mins) to prevent indefinite file starvation
+        const clampedTtl = Math.max(LockManager.MIN_TTL_SECONDS, Math.min(ttlSeconds || 300, LockManager.MAX_TTL_SECONDS));
+        const existing = this.locks.get(lockKey);
+        // If existing lock is valid and held
         if (existing && existing.expiresAt > now) {
             if (existing.holderId === agent.id) {
-                // Renewal by the same agent
-                existing.expiresAt = now + ttlSeconds * 1000;
+                // Renewal by the same agent (does not consume additional quota)
+                existing.expiresAt = now + clampedTtl * 1000;
                 existing.reason = reason;
                 return { success: true, lock: existing };
             }
@@ -43,75 +57,112 @@ export class LockManager {
                 }
             };
         }
-        // Lock granted
+        // Per-Agent Quota Enforcement: Prevent one agent from hoarding all locks
+        const currentAgentLocks = this.getLocksByAgent(agent.id);
+        if (currentAgentLocks.length >= LockManager.MAX_LOCKS_PER_AGENT) {
+            return {
+                success: false,
+                quotaExceeded: true,
+                error: `Lock quota exceeded: Agent '${agent.name}' already holds ${currentAgentLocks.length} active locks (max ${LockManager.MAX_LOCKS_PER_AGENT}). Release a lock before claiming another.`
+            };
+        }
+        // Lock granted in specific channel and workspace
         const lock = {
             file,
             holderId: agent.id,
             holderName: agent.name,
             reason,
             acquiredAt: now,
-            expiresAt: now + ttlSeconds * 1000,
-            channel
+            expiresAt: now + clampedTtl * 1000,
+            channel,
+            workspace
         };
-        this.locks.set(file, lock);
+        this.locks.set(lockKey, lock);
         return { success: true, lock };
     }
-    release(rawPath, agentId, force = false) {
+    release(rawPath, agentId, force = false, channel, workspace) {
         const file = this.normalizePath(rawPath);
-        const existing = this.locks.get(file);
-        if (!existing) {
-            return { success: false };
+        // Fast path: direct key lookup if channel and workspace are known
+        if (channel && workspace) {
+            const key = this.getLockKey(channel, workspace, file);
+            const existing = this.locks.get(key);
+            if (existing) {
+                if (!force && existing.holderId !== agentId) {
+                    return { success: false, lock: existing };
+                }
+                this.locks.delete(key);
+                return { success: true, lock: existing };
+            }
         }
-        if (!force && existing.holderId !== agentId) {
-            return { success: false, lock: existing };
+        // Flexible fallback: match across map
+        for (const [key, lock] of this.locks.entries()) {
+            if (lock.file === file) {
+                if (channel && lock.channel !== channel)
+                    continue;
+                if (workspace && lock.workspace !== workspace)
+                    continue;
+                if (!force && lock.holderId !== agentId) {
+                    return { success: false, lock };
+                }
+                this.locks.delete(key);
+                return { success: true, lock };
+            }
         }
-        this.locks.delete(file);
-        return { success: true, lock: existing };
+        return { success: false };
     }
     releaseAllByAgent(agentId) {
         const released = [];
-        for (const [file, lock] of this.locks.entries()) {
+        for (const [key, lock] of this.locks.entries()) {
             if (lock.holderId === agentId) {
                 released.push(lock);
-                this.locks.delete(file);
+                this.locks.delete(key);
             }
         }
         return released;
     }
-    isLocked(rawPath) {
+    isLocked(rawPath, channel, workspace) {
         const file = this.normalizePath(rawPath);
-        const existing = this.locks.get(file);
-        if (!existing)
-            return { locked: false };
-        if (existing.expiresAt <= Date.now()) {
-            this.locks.delete(file);
-            return { locked: false };
+        const now = Date.now();
+        for (const [key, lock] of this.locks.entries()) {
+            if (lock.file === file) {
+                if (channel && lock.channel !== channel)
+                    continue;
+                if (workspace && lock.workspace !== workspace)
+                    continue;
+                if (lock.expiresAt <= now) {
+                    this.locks.delete(key);
+                    continue;
+                }
+                return { locked: true, lock };
+            }
         }
-        return { locked: true, lock: existing };
+        return { locked: false };
     }
-    getLocks(channel) {
+    getLocks(channel, workspace) {
         const now = Date.now();
         const active = [];
-        for (const [file, lock] of this.locks.entries()) {
+        for (const [key, lock] of this.locks.entries()) {
             if (lock.expiresAt > now) {
-                if (!channel || lock.channel === channel) {
-                    active.push(lock);
-                }
+                if (channel && lock.channel !== channel)
+                    continue;
+                if (workspace && lock.workspace !== workspace)
+                    continue;
+                active.push(lock);
             }
             else {
-                this.locks.delete(file);
+                this.locks.delete(key);
             }
         }
         return active;
     }
-    getLocksByAgent(agentId) {
-        return this.getLocks().filter(l => l.holderId === agentId);
+    getLocksByAgent(agentId, channel, workspace) {
+        return this.getLocks(channel, workspace).filter(l => l.holderId === agentId);
     }
     cleanExpiredLocks() {
         const now = Date.now();
-        for (const [file, lock] of this.locks.entries()) {
+        for (const [key, lock] of this.locks.entries()) {
             if (lock.expiresAt <= now) {
-                this.locks.delete(file);
+                this.locks.delete(key);
             }
         }
     }

@@ -58,6 +58,38 @@ export class MeshHub {
             ws.close(4003, 'Subnet policy violation');
             return;
         }
+        // Optional Token Authentication via CROSSTALK_AUTH_TOKEN
+        const authToken = process.env.CROSSTALK_AUTH_TOKEN?.trim() || '';
+        if (authToken) {
+            let clientToken = null;
+            if (req?.url) {
+                try {
+                    const parsedUrl = new URL(req.url, 'http://localhost');
+                    clientToken = parsedUrl.searchParams.get('token') || parsedUrl.searchParams.get('auth_token');
+                }
+                catch (_) { }
+            }
+            if (!clientToken && req?.headers) {
+                const authHeader = req.headers.authorization;
+                if (authHeader && authHeader.startsWith('Bearer ')) {
+                    clientToken = authHeader.slice(7).trim();
+                }
+                else if (req.headers['x-crosstalk-token']) {
+                    clientToken = String(req.headers['x-crosstalk-token']).trim();
+                }
+                else if (req.headers['sec-websocket-protocol']) {
+                    const protos = String(req.headers['sec-websocket-protocol']).split(',').map(p => p.trim());
+                    if (protos.includes(authToken)) {
+                        clientToken = authToken;
+                    }
+                }
+            }
+            if (clientToken !== authToken) {
+                console.warn(`[MeshHub] ⛔ Connection rejected from ${clientIp}: invalid or missing CROSSTALK_AUTH_TOKEN.`);
+                ws.close(4401, 'Unauthorized: Invalid or missing CROSSTALK_AUTH_TOKEN');
+                return;
+            }
+        }
         ws.on('message', (raw) => {
             try {
                 const text = typeof raw === 'string' ? raw : raw.toString('utf8');
@@ -200,9 +232,16 @@ export class MeshHub {
                             byMe: false
                         }, [client.agent.id]);
                     }
+                    else if (res.quotaExceeded) {
+                        this.send(ws, {
+                            type: 'lock_denied',
+                            file: parsed.target,
+                            reason: res.error || 'Lock quota exceeded'
+                        });
+                    }
                 }
                 else if (parsed.action === '!REL' && parsed.target) {
-                    const res = this.lockManager.release(parsed.target, client.agent.id);
+                    const res = this.lockManager.release(parsed.target, client.agent.id, false, client.channel, client.agent.workspace);
                     if (res.success && res.lock) {
                         client.agent.lockedFiles = client.agent.lockedFiles.filter(f => f !== res.lock?.file);
                         this.broadcastToChannel(client.channel, {
@@ -295,7 +334,7 @@ export class MeshHub {
                         this.lockManager.acquire(decoded.data.file, client.agent, decoded.data.reason || 'Gibberlink signal lock', decoded.data.ttlSeconds || 300, client.channel);
                     }
                     else if (decoded.data.action === 'UNLOCK' && decoded.data.file) {
-                        this.lockManager.release(decoded.data.file, client.agent.id);
+                        this.lockManager.release(decoded.data.file, client.agent.id, false, client.channel, client.agent.workspace);
                     }
                 }
                 const msg = {
@@ -365,6 +404,14 @@ export class MeshHub {
                     });
                     this.recordAndBroadcastSystemMessage(client.channel, `File claimed: [${res.lock.file}] locked by ${client.agent.name} ("${packet.reason}")`);
                 }
+                else if (res.quotaExceeded) {
+                    this.send(ws, {
+                        type: 'lock_denied',
+                        file: packet.file,
+                        reason: res.error || 'Lock quota exceeded (maximum 10 locks per agent)'
+                    });
+                    return;
+                }
                 else if (res.existingHolder) {
                     const holderClient = this.clients.get(res.existingHolder.id);
                     const holderAgent = holderClient ? holderClient.agent : ({
@@ -414,7 +461,7 @@ export class MeshHub {
                     this.send(ws, { type: 'error', message: 'Not registered yet' });
                     return;
                 }
-                const res = this.lockManager.release(packet.file, client.agent.id);
+                const res = this.lockManager.release(packet.file, client.agent.id, false, client.channel, client.agent.workspace);
                 if (res.success && res.lock) {
                     client.agent.lockedFiles = client.agent.lockedFiles.filter(f => f !== res.lock?.file);
                     this.broadcastToChannel(client.channel, {
