@@ -119,3 +119,83 @@ test('Node -> MicroPython: frame decodes, partial and oversized input is rejecte
   );
   assert.deepEqual(out.split('\n'), [`${BinaryOpcode.LOCK_ACQUIRE} ${hex.length / 2 - 10}`, 'None', 'too long']);
 });
+
+// ---------------------------------------------------------------------------
+// Conversation profile (host bridge): device -> host and host -> device frames
+// ---------------------------------------------------------------------------
+
+/** Host -> device BROADCAST / DIRECT_MSG payload: [from_len:1][from][text]. */
+function attributed(from: string, text: string): Buffer {
+  const name = Buffer.from(from, 'utf8');
+  return Buffer.concat([Buffer.from([name.length]), name, Buffer.from(text, 'utf8')]);
+}
+
+function hostFrame(opcode: BinaryOpcode, payload: Buffer, flags: Record<string, boolean> = {}): Buffer {
+  return BinaryCodec.encode({ opcode, flags, timestamp: Date.now(), payload });
+}
+
+test('C -> Node: register, text, DM, heartbeat and state query follow the bridge profile', { skip: !has('cc') }, () => {
+  const frames = execFileSync(c(), ['emit-chat']).toString().trim().split('\n').map(h => BinaryCodec.decode(Buffer.from(h, 'hex'))!);
+  const [register, text, dm, heartbeat, state] = frames;
+  assert.equal(register.opcode, BinaryOpcode.REGISTER);
+  assert.equal(register.raw!.toString('utf8'), 'esp32-imu');
+  assert.equal(text.opcode, BinaryOpcode.BROADCAST);
+  assert.equal(text.raw!.toString('utf8'), 'temp 21.5C, ok');
+  assert.equal(dm.opcode, BinaryOpcode.DIRECT_MSG);
+  assert.equal(dm.raw![0], 'claude-bot'.length);
+  assert.equal(dm.raw!.subarray(1, 11).toString(), 'claude-bot');
+  assert.equal(dm.raw!.subarray(11).toString(), 'calibration done');
+  assert.equal(dm.flags.ackRequested, false, 'reply_expected = 0 clears the ack bit');
+  assert.equal(heartbeat.opcode, BinaryOpcode.HEARTBEAT);
+  assert.equal(heartbeat.raw!.toString(), 'calibrating');
+  assert.equal(state.opcode, BinaryOpcode.STATE_QUERY);
+  assert.equal(state.raw!.length, 0);
+});
+
+test('Node -> C: downlink chat, DM, lock events and a conflict alert decode', { skip: !has('cc') }, () => {
+  const downlink = (frame: Buffer) => execFileSync(c(), ['downlink', frame.toString('hex')]).toString().trim();
+  assert.equal(downlink(hostFrame(BinaryOpcode.BROADCAST, attributed('claude-bot', 'what is the bias?'))), 'chat claude-bot|what is the bias?');
+  assert.equal(downlink(hostFrame(BinaryOpcode.DIRECT_MSG, attributed('gemini', 'héllo ✓'))), 'chat gemini|héllo ✓');
+  assert.equal(
+    downlink(hostFrame(BinaryOpcode.LOCK_ACQUIRE, DialectEngine.packToBits('!LCK @src/motor.c "claude-bot" &WAIT'))),
+    'lock 16 0 src/motor.c|claude-bot'
+  );
+  assert.equal(
+    downlink(hostFrame(BinaryOpcode.LOCK_ACQUIRE, DialectEngine.packToBits('!WARN @src/imu.c "claude-bot"'), { conflictAlert: true })),
+    'lock 20 4 src/imu.c|claude-bot'
+  );
+  assert.equal(
+    downlink(hostFrame(BinaryOpcode.LOCK_DENIED, DialectEngine.packToBits('!WARN @a.c "held by bob"'), { isResponse: true })),
+    'lock 20 2 a.c|held by bob'
+  );
+  // A sender name that claims more bytes than the payload has is rejected, not over-read.
+  assert.equal(downlink(hostFrame(BinaryOpcode.BROADCAST, Buffer.from([40, 0x61, 0x62]))), 'other 2');
+});
+
+test('MicroPython: conversation frames round-trip with Node and the stream reader resyncs', { skip: !has('python3') }, () => {
+  const chat = hostFrame(BinaryOpcode.BROADCAST, attributed('claude-bot', 'hi there'));
+  const lock = hostFrame(BinaryOpcode.LOCK_ACQUIRE, DialectEngine.packToBits('!WARN @src/imu.c "bob"'), { conflictAlert: true });
+  const stream = Buffer.concat([Buffer.from('ff1358', 'hex'), StreamFramer.frame(chat), StreamFramer.frame(lock)]);
+  const out = micropython(
+    'from crosstalk_micro import CrossTalkMicro as M, FrameReader\n' +
+    'for b in (M.pack_register("pico"), M.pack_text("hi"), M.pack_dm("bob", "ok", False), M.pack_heartbeat(), M.pack_state_query()):\n' +
+    '  print(b.hex())\n' +
+    `r = FrameReader(); fs = r.feed(bytes.fromhex("${stream.toString('hex')}"))\n` +
+    'print(len(fs), M.unpack_attributed(fs[0]["payload"]))\n' +
+    'p = M.unpack_packed(fs[1]["payload"]); print(fs[1]["flags"], p["action"], p["target"], p["reason"])\n' +
+    'try:\n  M.pack_text("\\x10x")\nexcept ValueError:\n  print("rejected")'
+  ).split('\n');
+
+  const packets: Buffer[] = [];
+  StreamFramer.unframe(Buffer.from(out.slice(0, 5).join(''), 'hex'), p => packets.push(Buffer.from(p)));
+  const decoded = packets.map(p => BinaryCodec.decode(p)!);
+  assert.deepEqual(decoded.map(d => d.opcode), [
+    BinaryOpcode.REGISTER, BinaryOpcode.BROADCAST, BinaryOpcode.DIRECT_MSG, BinaryOpcode.HEARTBEAT, BinaryOpcode.STATE_QUERY
+  ]);
+  assert.equal(decoded[0].raw!.toString(), 'pico');
+  assert.deepEqual([...decoded[2].raw!], [3, ...Buffer.from('bobok')]);
+  assert.equal(decoded[2].flags.ackRequested, false);
+  assert.equal(out[5], "2 ('claude-bot', 'hi there')");
+  assert.equal(out[6], '4 20 src/imu.c bob');
+  assert.equal(out[7], 'rejected');
+});
