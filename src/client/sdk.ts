@@ -1,502 +1,544 @@
-import { WebSocket } from 'ws';
-import EventEmitter from 'node:events';
+import { EventEmitter } from 'node:events';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import WebSocket from 'ws';
 import {
-  AgentInfo,
-  FileLock,
-  MessageEvent,
-  ServerPacket,
-  ClientPacket,
-  AgentEnvironment,
-  AgentStatus
-} from '../server/types.js';
-import { GibberlinkEngine, GibberlinkSignalPacket } from '../server/gibberlink.js';
-import { BinaryCodec, BinaryFrame } from '../server/binary.js';
-import { DIALECT_V1, DialectDictionary } from '../dialect/dictionary.js';
-import { DialectEngine, ParsedDialectMessage } from '../dialect/engine.js';
-import { execSync } from 'node:child_process';
+  PROTOCOL_VERSION,
+  type AgentEnvironment,
+  type AgentInfo,
+  type AgentStatus,
+  type ChannelInfo,
+  type ChannelMessage,
+  type ChannelSnapshot,
+  type DirectMessage,
+  type ErrorCode,
+  type FileLock,
+  type RequestFrame,
+  type ResultData,
+  type ServerFrame
+} from '../protocol.js';
 
-function detectGitBranch(): string {
-  try {
-    return execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'main';
-  } catch {
-    return 'main';
+export const DEFAULT_URL = 'ws://localhost:4488';
+
+export interface ConnectOptions {
+  name: string;
+  /** Hub WebSocket URL. Defaults to $CROSSTALK_URL or ws://localhost:4488. */
+  url?: string;
+  /** Hub token. Defaults to $CROSSTALK_AUTH_TOKEN. */
+  token?: string;
+  role?: string;
+  environment?: AgentEnvironment;
+  /** Defaults to the current git branch, if any. */
+  branch?: string;
+  currentTask?: string;
+  /** Lock paths are sent relative to this directory. Defaults to the git root or cwd. */
+  workspaceRoot?: string;
+  /** Reconnect and rejoin channels after the socket drops. Default true. */
+  reconnect?: boolean;
+  requestTimeoutMs?: number;
+  /** Start an in-process hub if nothing is listening on a localhost URL. Default false. */
+  autoStart?: boolean;
+}
+
+export class CrossTalkError extends Error {
+  constructor(readonly code: ErrorCode | 'timeout' | 'disconnected', message: string, readonly details?: unknown) {
+    super(message);
+    this.name = 'CrossTalkError';
   }
 }
 
-export interface CrossTalkClientOptions {
-  url?: string;
-  channel?: string;
-  name: string;
-  role?: string;
-  environment?: AgentEnvironment;
-  workspace?: string;
-  currentTask?: string;
-  autoHeartbeat?: boolean;
-  gibberlinkCapable?: boolean;
-  dialectVersion?: string;
-  branch?: string;
-  sessionKey?: string;
-  token?: string;
+type RequestType = RequestFrame['type'];
+type RequestBody<T extends RequestType> = Omit<Extract<RequestFrame, { type: T }>, 'type' | 'id'>;
+
+function git(args: string[]): string | undefined {
+  try {
+    return execFileSync('git', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-export class CrossTalkClient extends EventEmitter {
-  private ws: WebSocket | null = null;
-  private options: Required<CrossTalkClientOptions>;
-  private heartbeatInterval: NodeJS.Timeout | null = null;
-  private isConnected = false;
-  private myAgentId: string = '';
-  private currentDialect: DialectDictionary = DIALECT_V1;
-  private pendingLockResolvers: Map<string, (result: any) => void> = new Map();
-  private pendingStateResolver: ((state: any) => void) | null = null;
-  private pendingInboxResolver: ((messages: MessageEvent[]) => void) | null = null;
-  private recentMessages: Array<{ content: string; time: number }> = [];
+/**
+ * A channel the client has joined. Keeps a live view of members and locks
+ * and re-emits the channel's events.
+ *
+ * Events: 'message', 'member.joined', 'member.left', 'member.updated',
+ * 'lock.acquired', 'lock.released', 'lock.contended'.
+ */
+export class Channel extends EventEmitter {
+  info: ChannelInfo;
+  readonly members = new Map<string, AgentInfo>();
+  readonly locks = new Map<string, FileLock>();
+  /** Recent history, starting with what the hub had when we joined. */
+  readonly messages: ChannelMessage[] = [];
 
-  constructor(options: CrossTalkClientOptions) {
+  constructor(private readonly client: CrossTalk, snapshot: ChannelSnapshot) {
+    super();
+    this.info = snapshot.channel;
+    this.apply(snapshot);
+  }
+
+  /** The conversation's address. Share it with the agents you want in this conversation. */
+  get address(): string {
+    return this.info.id;
+  }
+
+  /** Display label; not unique. */
+  get name(): string {
+    return this.info.name;
+  }
+
+  /** @internal */
+  apply(snapshot: ChannelSnapshot): void {
+    this.info = snapshot.channel;
+    this.members.clear();
+    for (const m of snapshot.members) this.members.set(m.id, m);
+    this.locks.clear();
+    for (const l of snapshot.locks) this.locks.set(l.file, l);
+    this.messages.splice(0, this.messages.length, ...snapshot.messages);
+  }
+
+  /** @internal */
+  handle(frame: ServerFrame): void {
+    switch (frame.type) {
+      case 'message':
+        this.messages.push(frame.message);
+        if (this.messages.length > 500) this.messages.shift();
+        this.emit('message', frame.message);
+        break;
+      case 'member.joined':
+      case 'member.updated':
+        this.members.set(frame.agent.id, frame.agent);
+        this.emit(frame.type, frame.agent);
+        break;
+      case 'member.left':
+        this.members.delete(frame.agent.id);
+        this.emit('member.left', frame.agent, frame.reason);
+        break;
+      case 'lock.acquired':
+        this.locks.set(frame.lock.file, frame.lock);
+        this.emit('lock.acquired', frame.lock);
+        break;
+      case 'lock.released':
+        this.locks.delete(frame.file);
+        this.emit('lock.released', frame);
+        break;
+      case 'lock.contended':
+        this.emit('lock.contended', frame);
+        break;
+    }
+  }
+
+  async send(content: string, metadata?: Record<string, unknown>): Promise<ChannelMessage> {
+    const message = await this.client.request('message.send', { channel: this.address, content, metadata });
+    this.messages.push(message);
+    return message;
+  }
+
+  /** Sends XDialect shorthand, e.g. `!LCK @src/auth.ts #REF "jwt" &WAIT`. */
+  async shorthand(expression: string): Promise<ChannelMessage> {
+    const message = await this.client.request('shorthand.send', { channel: this.address, shorthand: expression });
+    this.messages.push(message);
+    return message;
+  }
+
+  /**
+   * Claims an advisory lock on a file. Rejects with code 'lock_held' (and the
+   * current lock in `details`) when someone else holds it.
+   */
+  async lock(file: string, reason: string, ttlSeconds?: number): Promise<FileLock> {
+    const lock = await this.client.request('lock.acquire', {
+      channel: this.address,
+      file: this.client.relativePath(file),
+      reason,
+      ttlSeconds
+    });
+    this.locks.set(lock.file, lock);
+    return lock;
+  }
+
+  async unlock(file: string): Promise<void> {
+    const { file: released } = await this.client.request('lock.release', {
+      channel: this.address,
+      file: this.client.relativePath(file)
+    });
+    this.locks.delete(released);
+  }
+
+  /** Re-fetches members, locks and recent history from the hub. */
+  async refresh(): Promise<this> {
+    this.apply(await this.client.request('channel.state', { channel: this.address }));
+    return this;
+  }
+
+  async leave(): Promise<void> {
+    await this.client.request('channel.leave', { channel: this.address });
+    this.client.forget(this.address);
+  }
+}
+
+/**
+ * A CrossTalk agent connection.
+ *
+ * ```ts
+ * const ct = await CrossTalk.connect({ name: 'Claude' });
+ * const ch = await ct.createChannel('auth-refactor');
+ * console.log('share this address:', ch.address);   // others: ct.joinChannel(address)
+ * ch.on('message', m => console.log(m.from.name, m.content));
+ * await ch.send('Starting on the token refresh flow');
+ * ```
+ *
+ * Events: 'message' (ChannelMessage, any channel), 'dm' (DirectMessage),
+ * 'event' (every raw ServerFrame), 'disconnected', 'reconnected', 'error'.
+ */
+export class CrossTalk extends EventEmitter {
+  agent!: AgentInfo;
+  /** Joined channels by address. */
+  readonly channels = new Map<string, Channel>();
+  private ws?: WebSocket;
+  private readonly pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+  private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask'>> & Pick<ConnectOptions, 'branch' | 'currentTask'>;
+  private closed = false;
+  private reconnectDelay = 500;
+  /** Messages and DMs not yet consumed by waitForMessage(), so nothing arriving between calls is lost. */
+  private unread: Array<ChannelMessage | DirectMessage> = [];
+  private readonly wakeWaiters = new Set<() => void>();
+
+  private constructor(options: ConnectOptions) {
     super();
     this.options = {
-      url: options.url || process.env.CROSSTALK_URL || 'ws://localhost:4488',
-      channel: options.channel || process.env.CROSSTALK_CHANNEL || 'default',
+      url: options.url ?? process.env.CROSSTALK_URL ?? DEFAULT_URL,
+      token: options.token ?? process.env.CROSSTALK_AUTH_TOKEN ?? '',
+      role: options.role ?? 'agent',
+      environment: options.environment ?? 'bot',
+      workspaceRoot: options.workspaceRoot ?? git(['rev-parse', '--show-toplevel']) ?? process.cwd(),
+      reconnect: options.reconnect ?? true,
+      requestTimeoutMs: options.requestTimeoutMs ?? 10_000,
+      autoStart: options.autoStart ?? false,
       name: options.name,
-      role: options.role || 'developer',
-      environment: options.environment || 'bot',
-      workspace: options.workspace || process.cwd(),
-      currentTask: options.currentTask || 'Idle',
-      autoHeartbeat: options.autoHeartbeat !== false,
-      gibberlinkCapable: options.gibberlinkCapable !== false,
-      dialectVersion: options.dialectVersion || DIALECT_V1.version,
-      branch: options.branch || detectGitBranch(),
-      sessionKey: options.sessionKey || '',
-      token: options.token || process.env.CROSSTALK_AUTH_TOKEN || ''
+      branch: options.branch ?? git(['rev-parse', '--abbrev-ref', 'HEAD']),
+      currentTask: options.currentTask
     };
   }
 
-  public get agentId(): string {
-    return this.myAgentId;
-  }
-
-  public get dialect(): DialectDictionary {
-    return this.currentDialect;
-  }
-
-  public async connect(): Promise<{
-    agentId: string;
-    channel: string;
-    agents: AgentInfo[];
-    locks: FileLock[];
-    dialect: DialectDictionary;
-  }> {
-    return new Promise((resolve, reject) => {
-      let wsUrl = this.options.url;
-      const token = this.options.token || process.env.CROSSTALK_AUTH_TOKEN;
-      if (token) {
-        const hasQuery = wsUrl.includes('?');
-        wsUrl += `${hasQuery ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  static async connect(options: ConnectOptions): Promise<CrossTalk> {
+    const client = new CrossTalk(options);
+    try {
+      await client.open();
+    } catch (err: any) {
+      const local = /^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?/.test(client.options.url);
+      if (!client.options.autoStart || !local || err?.code !== 'ECONNREFUSED') throw err;
+      const { startServer } = await import('../server/index.js');
+      const port = Number(new URL(client.options.url).port) || 4488;
+      try {
+        await startServer({ port, quiet: true });
+      } catch (startErr: any) {
+        // Another process won the race to start a hub; just use theirs.
+        if (startErr?.code !== 'EADDRINUSE') throw startErr;
       }
-      this.ws = new WebSocket(wsUrl);
+      await client.open();
+    }
+    return client;
+  }
 
-      this.ws.on('open', () => {
-        this.sendPacket({
-          type: 'register',
-          channel: this.options.channel,
-          sessionKey: this.options.sessionKey,
+  get url(): string {
+    return this.options.url;
+  }
+
+  /** Emits 'error' only when someone listens, so a stray error never crashes the host process. */
+  private report(err: unknown): void {
+    if (this.listenerCount('error') > 0) this.emit('error', err);
+  }
+
+  private open(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const url = new URL(this.options.url);
+      const headers: Record<string, string> = {};
+      if (this.options.token) {
+        headers.Authorization = `Bearer ${this.options.token}`;
+        const loopback = /^(localhost|127\.|\[::1\])/.test(url.hostname);
+        if (url.protocol === 'ws:' && !loopback) {
+          console.warn('[crosstalk] sending the hub token over unencrypted ws:// to a remote host; prefer wss://');
+        }
+      }
+      const ws = new WebSocket(url, { headers, handshakeTimeout: 10_000 });
+      let welcomed = false;
+      const giveUp = setTimeout(() => {
+        if (welcomed) return;
+        reject(new CrossTalkError('timeout', 'Hub did not answer hello within 10s'));
+        ws.terminate();
+      }, 10_000);
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          type: 'hello',
+          protocol: PROTOCOL_VERSION,
           agent: {
             name: this.options.name,
             role: this.options.role,
             environment: this.options.environment,
-            workspace: this.options.workspace,
-            currentTask: this.options.currentTask,
-            gibberlinkCapable: this.options.gibberlinkCapable,
-            dialectVersion: this.options.dialectVersion,
-            branch: this.options.branch
+            branch: this.options.branch,
+            currentTask: this.options.currentTask
           }
-        });
+        }));
       });
 
-      this.ws.on('message', (raw: Buffer | string) => {
+      ws.on('message', data => {
+        let frame: ServerFrame;
         try {
-          if (Buffer.isBuffer(raw) && raw.length >= 10 && raw[0] === 0x58) {
-            const frame = BinaryCodec.decode(raw);
-            if (frame) {
-              this.emit('binary_frame', frame);
-              return;
-            }
-          }
-
-          const packet = JSON.parse(raw.toString('utf8')) as ServerPacket;
-          this.handlePacket(packet, resolve);
-        } catch (err) {
-          this.emit('error', err);
-        }
-      });
-
-      this.ws.on('close', () => {
-        this.isConnected = false;
-        if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-        this.emit('disconnected');
-      });
-
-      this.ws.on('error', (err) => {
-        if (!this.isConnected) reject(err);
-        this.emit('error', err);
-      });
-    });
-  }
-
-  private handlePacket(packet: ServerPacket, initialResolver?: (val: any) => void) {
-    switch (packet.type) {
-      case 'registered': {
-        this.isConnected = true;
-        this.myAgentId = packet.agentId;
-        if (packet.dialect) {
-          this.currentDialect = packet.dialect;
-        }
-
-        if (this.options.autoHeartbeat) {
-          this.heartbeatInterval = setInterval(() => {
-            this.heartbeat();
-          }, 10000);
-        }
-
-        if (initialResolver) {
-          initialResolver({
-            agentId: packet.agentId,
-            channel: packet.channel,
-            agents: packet.mesh.agents,
-            locks: packet.mesh.locks,
-            dialect: packet.dialect
-          });
-        }
-        this.emit('ready', packet);
-        break;
-      }
-
-      case 'agent_joined':
-        this.emit('agent_joined', packet.agent);
-        break;
-
-      case 'agent_left':
-        this.emit('agent_left', { id: packet.agentId, name: packet.name, reason: packet.reason });
-        break;
-
-      case 'agent_updated':
-        this.emit('agent_updated', packet.agent);
-        break;
-
-      case 'broadcast':
-        if (packet.message.type === 'dialect_shorthand') {
-          this.emit('dialect_shorthand', packet.message);
-        }
-        this.emit('broadcast', packet.message);
-        break;
-
-      case 'direct_message':
-        // Filter out self-echoes: never trigger direct_message on our own sent messages
-        if (packet.message?.from?.id && packet.message.from.id === this.myAgentId) {
+          frame = JSON.parse(data.toString());
+        } catch {
           return;
         }
-        this.emit('direct_message', packet.message);
-        break;
-
-      case 'direct_message_sent':
-        this.emit('direct_message_sent', packet);
-        break;
-
-      case 'gibberlink_signal':
-        const decoded = GibberlinkEngine.decode(packet.signal);
-        this.emit('gibberlink_signal', {
-          message: packet.message,
-          signal: packet.signal,
-          decoded
-        });
-        break;
-
-      case 'dialect_dictionary':
-        this.currentDialect = packet.dictionary;
-        this.emit('dialect_updated', packet.dictionary);
-        break;
-
-      case 'lock_acquired': {
-        const resolver = this.pendingLockResolvers.get(packet.lock.file);
-        if (resolver && packet.byMe) {
-          this.pendingLockResolvers.delete(packet.lock.file);
-          resolver({ success: true, lock: packet.lock });
+        if (!welcomed) {
+          if (frame.type === 'welcome') {
+            welcomed = true;
+            clearTimeout(giveUp);
+            this.ws = ws;
+            this.agent = frame.agent;
+            this.reconnectDelay = 500;
+            resolve();
+          } else if (frame.type === 'error') {
+            reject(new CrossTalkError(frame.error.code, frame.error.message));
+            ws.close();
+          }
+          return;
         }
-        this.emit('lock_acquired', packet.lock);
-        break;
-      }
-
-      case 'lock_denied': {
-        const resolver = this.pendingLockResolvers.get(packet.file);
-        if (resolver) {
-          this.pendingLockResolvers.delete(packet.file);
-          resolver({
-            success: false,
-            holder: packet.holder,
-            reason: packet.reason,
-            expiresAt: packet.expiresAt
-          });
+        try {
+          this.dispatch(frame);
+        } catch (err) {
+          this.report(err);
         }
-        this.emit('lock_denied', packet);
-        break;
-      }
-
-      case 'lock_released':
-        this.emit('lock_released', { file: packet.file, releasedBy: packet.releasedBy });
-        break;
-
-      case 'lock_conflict_warning':
-        this.emit('lock_conflict_warning', packet);
-        break;
-
-      case 'state_snapshot':
-        if (this.pendingStateResolver) {
-          this.pendingStateResolver(packet);
-          this.pendingStateResolver = null;
-        }
-        this.emit('state_snapshot', packet);
-        break;
-
-      case 'inbox_batch':
-        if (this.pendingInboxResolver) {
-          this.pendingInboxResolver(packet.messages);
-          this.pendingInboxResolver = null;
-        }
-        break;
-
-      case 'error':
-        this.emit('server_error', packet.message);
-        break;
-    }
-  }
-
-  public broadcast(content: string, metadata?: Record<string, any>) {
-    this.sendPacket({
-      type: 'broadcast',
-      content,
-      metadata
-    });
-  }
-
-  /**
-   * Broadcasts a message using the XDialect concise shorthand format.
-   * Auto-translates to human language and packs into bitstream for wire efficiency.
-   * Example: `!LCK @src/auth.ts #REF "jwt validation" &WAIT`
-   */
-  public sendShorthand(shorthand: string, metadata?: Record<string, any>) {
-    this.sendPacket({
-      type: 'shorthand_broadcast',
-      shorthand,
-      metadata
-    });
-  }
-
-  public parseShorthand(shorthand: string): ParsedDialectMessage {
-    return DialectEngine.parse(shorthand);
-  }
-
-  public shorthandToHuman(shorthand: string): string {
-    return DialectEngine.toHuman(shorthand);
-  }
-
-  public humanToShorthand(english: string): string {
-    return DialectEngine.fromHuman(english);
-  }
-
-  public sendGibberlinkSignal(
-    payload: string | object,
-    mode: 'audible_fast' | 'audible_standard' | 'ultrasonic' = 'audible_fast',
-    to?: string
-  ): GibberlinkSignalPacket {
-    const signal = GibberlinkEngine.encode(payload, mode);
-    this.sendPacket({
-      type: 'gibberlink_signal',
-      signal,
-      to
-    });
-    return signal;
-  }
-
-  public sendBinary(frame: BinaryFrame) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const buf = BinaryCodec.encode(frame);
-      this.ws.send(buf);
-    }
-  }
-
-  public async lockFile(
-    file: string,
-    reason: string,
-    ttlSeconds: number = 300
-  ): Promise<{ success: boolean; lock?: FileLock; holder?: AgentInfo; reason?: string; expiresAt?: number }> {
-    return new Promise((resolve) => {
-      this.pendingLockResolvers.set(file, resolve);
-      this.sendPacket({
-        type: 'lock_acquire',
-        file,
-        reason,
-        ttlSeconds
       });
 
-      setTimeout(() => {
-        if (this.pendingLockResolvers.has(file)) {
-          this.pendingLockResolvers.delete(file);
-          resolve({ success: false, reason: 'Lock request timed out' });
+      ws.on('unexpected-response', (_req, res) => {
+        reject(new CrossTalkError('unauthorized', `Hub refused the connection (HTTP ${res.statusCode})`));
+      });
+
+      ws.on('error', err => {
+        if (!welcomed) reject(err);
+        else this.report(err);
+      });
+
+      ws.on('close', (code, reason) => {
+        if (!welcomed) {
+          clearTimeout(giveUp);
+          reject(new CrossTalkError('disconnected', `Hub closed the connection (${code}${reason.length ? `: ${reason}` : ''})`));
+          return;
         }
-      }, 5000);
-    });
-  }
-
-  public unlockFile(file: string) {
-    this.sendPacket({
-      type: 'lock_release',
-      file
-    });
-  }
-
-  public heartbeat(status?: AgentStatus, currentTask?: string) {
-    if (status) this.options.currentTask = currentTask || this.options.currentTask;
-    this.sendPacket({
-      type: 'heartbeat',
-      status: status,
-      currentTask: currentTask || this.options.currentTask
-    });
-  }
-
-  public updateTask(taskDescription: string, status: AgentStatus = 'working') {
-    this.options.currentTask = taskDescription;
-    this.heartbeat(status, taskDescription);
-  }
-
-  public async getMeshState(): Promise<{ agents: AgentInfo[]; locks: FileLock[]; recentMessages: MessageEvent[] }> {
-    return new Promise((resolve) => {
-      this.pendingStateResolver = resolve;
-      this.sendPacket({ type: 'query_state' });
-      setTimeout(() => {
-        if (this.pendingStateResolver) {
-          this.pendingStateResolver = null;
-          resolve({ agents: [], locks: [], recentMessages: [] });
+        this.ws = undefined;
+        for (const [id, p] of this.pending) {
+          clearTimeout(p.timer);
+          p.reject(new CrossTalkError('disconnected', 'Connection closed'));
+          this.pending.delete(id);
         }
-      }, 3000);
+        this.emit('disconnected');
+        if (!this.closed && this.options.reconnect) this.scheduleReconnect();
+      });
     });
   }
 
-  public async fetchInbox(since: number = 0): Promise<MessageEvent[]> {
-    return new Promise((resolve) => {
-      this.pendingInboxResolver = resolve;
-      this.sendPacket({ type: 'fetch_inbox', since });
-      setTimeout(() => {
-        if (this.pendingInboxResolver) {
-          this.pendingInboxResolver = null;
-          resolve([]);
-        }
-      }, 3000);
-    });
-  }
-
-  public shouldSuppressAutoReply(msg: MessageEvent): boolean {
-    if (msg.isAck || msg.replyExpected === false) return true;
-    const content = (msg.content || '').trim().toLowerCase();
-    if (content.startsWith('ack:') || content.startsWith('acknowledged:') || content.startsWith('已收到')) {
-      return true;
-    }
-    const now = Date.now();
-    this.recentMessages = this.recentMessages.filter(m => now - m.time < 3500);
-    const count = this.recentMessages.filter(m => m.content === content).length;
-    this.recentMessages.push({ content, time: now });
-    if (count >= 2) {
-      console.warn(`[CrossTalk Client] 🔁 Circuit breaker: suppressed duplicate ping-pong reply for: "${content.slice(0, 30)}..."`);
-      return true;
-    }
-    return false;
-  }
-
-  public sendDirectMessage(
-    toAgentId: string,
-    content: string,
-    options?: { isAck?: boolean; replyExpected?: boolean; metadata?: Record<string, any> } | Record<string, any>
-  ) {
-    const isOptionsObj = options && ('isAck' in options || 'replyExpected' in options || 'metadata' in options);
-    const isAck = isOptionsObj ? (options as any).isAck : false;
-    const replyExpected = isOptionsObj ? ((options as any).replyExpected ?? !isAck) : true;
-    const metadata = isOptionsObj ? (options as any).metadata : (options as Record<string, any>);
-
-    this.sendPacket({
-      type: 'direct_message',
-      to: toAgentId,
-      content,
-      isAck,
-      replyExpected,
-      metadata
-    });
-  }
-
-  public async disconnect(reason: string = 'client_exit'): Promise<void> {
-    if (this.ws && this.isConnected) {
+  private scheduleReconnect(): void {
+    const delay = this.reconnectDelay;
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
+    setTimeout(async () => {
+      if (this.closed) return;
       try {
-        this.sendPacket({ type: 'disconnect', reason });
-      } catch {}
-    }
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-    if (this.ws) {
-      try {
-        this.ws.close(1000, reason);
-      } catch {}
-      this.ws = null;
-    }
-    this.isConnected = false;
-  }
-
-  private sendPacket(packet: any) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(packet));
-    }
-  }
-}
-
-export class CrossTalk {
-  /**
-   * Connect to, join, or auto-create a socket mesh in a single line.
-   * If autoHost is true (default) and no server is active locally, it boots a local hub on the spot!
-   */
-  public static async join(options: {
-    channel?: string;
-    url?: string;
-    name?: string;
-    role?: string;
-    autoHost?: boolean;
-    port?: number;
-    currentTask?: string;
-  } = {}): Promise<CrossTalkClient> {
-    const url = options.url || process.env.CROSSTALK_URL || 'ws://localhost:4488';
-    const channel = options.channel || process.env.CROSSTALK_CHANNEL || 'default';
-    const name = options.name || `Agent-${Math.floor(Math.random() * 9000 + 1000)}`;
-    const port = options.port || 4488;
-    const autoHost = options.autoHost !== false;
-
-    const client = new CrossTalkClient({
-      url,
-      channel,
-      name,
-      role: options.role || 'developer',
-      currentTask: options.currentTask || 'Active on mesh'
-    });
-
-    try {
-      await client.connect();
-      return client;
-    } catch (err: any) {
-      if (autoHost && (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('0.0.0.0'))) {
-        const { startServer } = await import('../server/index.js');
-        startServer(port);
-        await new Promise((r) => setTimeout(r, 400));
-        await client.connect();
-        return client;
+        await this.open();
+        // A reconnect gets a new agent id; rejoin everything and drop stale locks.
+        for (const channel of [...this.channels.values()]) {
+          try {
+            channel.apply(await this.request('channel.join', { channel: channel.address }));
+          } catch (err) {
+            this.channels.delete(channel.address);
+            this.report(err);
+          }
+        }
+        this.emit('reconnected', this.agent);
+      } catch {
+        this.scheduleReconnect();
       }
-      throw err;
+    }, delay).unref();
+  }
+
+  private dispatch(frame: ServerFrame): void {
+    if (frame.type === 'result') {
+      const p = this.pending.get(frame.id);
+      if (!p) return;
+      this.pending.delete(frame.id);
+      clearTimeout(p.timer);
+      if (frame.ok) p.resolve(frame.data);
+      else p.reject(new CrossTalkError(frame.error.code, frame.error.message, frame.error.details));
+      return;
+    }
+
+    this.emit('event', frame);
+    switch (frame.type) {
+      case 'dm':
+        this.queue(frame.message);
+        this.emit('dm', frame.message);
+        return;
+      case 'error':
+        this.report(new CrossTalkError(frame.error.code, frame.error.message));
+        return;
+      case 'message':
+        this.queue(frame.message);
+        this.channels.get(frame.message.channel)?.handle(frame);
+        this.emit('message', frame.message);
+        return;
+      case 'lock.contended':
+        this.channels.get(frame.lock.channel)?.handle(frame);
+        this.emit('lock.contended', frame);
+        return;
+      case 'member.joined':
+      case 'member.left':
+      case 'member.updated':
+      case 'lock.released':
+        this.channels.get(frame.channel)?.handle(frame);
+        return;
+      case 'lock.acquired':
+        this.channels.get(frame.lock.channel)?.handle(frame);
+        return;
     }
   }
-}
 
+  /** Low-level request. Prefer the typed helpers. */
+  request<T extends RequestType>(type: T, body: RequestBody<T>): Promise<ResultData[T]> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new CrossTalkError('disconnected', 'Not connected to a hub'));
+    }
+    const id = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new CrossTalkError('timeout', `${type} timed out`));
+      }, this.options.requestTimeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      ws.send(JSON.stringify({ ...body, type, id }));
+    });
+  }
+
+  private track(snapshot: ChannelSnapshot): Channel {
+    const existing = this.channels.get(snapshot.channel.id);
+    if (existing) {
+      existing.apply(snapshot);
+      return existing;
+    }
+    const channel = new Channel(this, snapshot);
+    this.channels.set(channel.address, channel);
+    return channel;
+  }
+
+  /** @internal */
+  forget(address: string): void {
+    this.channels.delete(address);
+  }
+
+  /** @internal Converts absolute paths inside the workspace to repo-relative ones. */
+  relativePath(file: string): string {
+    if (!path.isAbsolute(file)) return file;
+    const rel = path.relative(this.options.workspaceRoot, file);
+    return rel.startsWith('..') || path.isAbsolute(rel) ? file : rel.split(path.sep).join('/');
+  }
+
+  /**
+   * Starts a new conversation at a fresh address and joins it. Channels are
+   * private (reachable only by address) unless `public: true`, which also lists
+   * them in the hub's discovery directory.
+   */
+  async createChannel(name?: string, options: { topic?: string; public?: boolean } = {}): Promise<Channel> {
+    return this.track(await this.request('channel.create', {
+      name,
+      topic: options.topic,
+      visibility: options.public ? 'public' : 'private'
+    }));
+  }
+
+  /** Joins a conversation by its address (`xt_...`). */
+  async joinChannel(address: string): Promise<Channel> {
+    return this.track(await this.request('channel.join', { channel: address.trim() }));
+  }
+
+  static isAddress(value: string): boolean {
+    return /^xt_[A-Za-z0-9_-]{22}$/.test(value.trim());
+  }
+
+  /** A joined channel by address, or by label when exactly one joined channel has it. */
+  channel(addressOrName: string): Channel | undefined {
+    const key = addressOrName.trim();
+    const byAddress = this.channels.get(key);
+    if (byAddress) return byAddress;
+    const byName = [...this.channels.values()].filter(c => c.name.toLowerCase() === key.toLowerCase());
+    return byName.length === 1 ? byName[0] : undefined;
+  }
+
+  /** Channels you are in. */
+  async listChannels(): Promise<ChannelInfo[]> {
+    return (await this.request('channel.list', { scope: 'joined' })).channels;
+  }
+
+  /** The hub's directory of public channels, most recently active first. */
+  async listPublicChannels(options: { limit?: number; cursor?: string } = {}): Promise<{ channels: ChannelInfo[]; cursor?: string }> {
+    return this.request('channel.list', { scope: 'public', ...options });
+  }
+
+  /** Direct message to an agent (id or name) that shares a channel with you. */
+  dm(to: string, content: string, options: { replyExpected?: boolean; metadata?: Record<string, unknown> } = {}): Promise<DirectMessage> {
+    return this.request('dm.send', { to, content, ...options });
+  }
+
+  async setStatus(status: AgentStatus, currentTask?: string): Promise<AgentInfo> {
+    this.agent = await this.request('status.update', { status, currentTask });
+    return this.agent;
+  }
+
+  private queue(message: ChannelMessage | DirectMessage): void {
+    this.unread.push(message);
+    if (this.unread.length > 500) this.unread.shift();
+    for (const wake of this.wakeWaiters) wake();
+  }
+
+  /**
+   * Resolves with the oldest unconsumed channel message or DM matching the
+   * filter (waiting up to `timeoutMs` if there is none), or `undefined` on
+   * timeout. Messages are buffered from connect, so a turn-taking agent never
+   * misses one that arrived while it was busy.
+   */
+  waitForMessage(
+    /** `channel` is an address. */
+    options: { channel?: string; includeDms?: boolean; timeoutMs?: number } = {}
+  ): Promise<ChannelMessage | DirectMessage | undefined> {
+    const { channel, includeDms = true, timeoutMs = 60_000 } = options;
+    const take = () => {
+      const i = this.unread.findIndex(m => ('channel' in m ? !channel || m.channel === channel : includeDms));
+      return i === -1 ? undefined : this.unread.splice(i, 1)[0];
+    };
+    const ready = take();
+    if (ready) return Promise.resolve(ready);
+    return new Promise(resolve => {
+      const done = (value?: ChannelMessage | DirectMessage) => {
+        clearTimeout(timer);
+        this.wakeWaiters.delete(check);
+        resolve(value);
+      };
+      const check = () => {
+        const next = take();
+        if (next) done(next);
+      };
+      const timer = setTimeout(() => done(), timeoutMs);
+      this.wakeWaiters.add(check);
+    });
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    const ws = this.ws;
+    if (!ws) return;
+    await new Promise<void>(resolve => {
+      ws.once('close', () => resolve());
+      ws.close(1000, 'client closed');
+    });
+  }
+}

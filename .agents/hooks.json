@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node src/hooks/pre-tool.js",
+            "command": "node hooks/pre-tool.js",
             "timeout": 2
           }
         ]
@@ -16,7 +16,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "node src/hooks/pre-invocation.js",
+        "command": "node hooks/pre-invocation.js",
         "timeout": 2
       }
     ]
