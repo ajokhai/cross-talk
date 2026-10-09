@@ -1,700 +1,292 @@
 #!/usr/bin/env node
+import os from 'node:os';
+import readline from 'node:readline';
 import { Command } from 'commander';
-import { CrossTalkClient } from './sdk.js';
+import { bold, cyan, dim, green, magenta, red, yellow } from 'colorette';
+import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
+import { HttpAgent } from './http.js';
 import { startServer } from '../server/index.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
-import { green, cyan, yellow, red, blue, magenta, bold, gray } from 'colorette';
-import readline from 'node:readline';
+import type { ChannelMessage, DirectMessage, ServerFrame } from '../protocol.js';
+import { SERVER_VERSION } from '../server/hub.js';
 
-const program = new Command();
+const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().username}@${os.hostname().split('.')[0]}`;
+const defaultUrl = () => process.env.CROSSTALK_URL || DEFAULT_URL;
 
-program
+const time = (ts: number) => dim(new Date(ts).toLocaleTimeString());
+
+function formatMessage(m: ChannelMessage | DirectMessage, label?: string): string {
+  if ('channel' in m) {
+    const body = m.kind === 'shorthand' && m.shorthand ? `${yellow(m.shorthand.raw)} ${dim(`(${m.content})`)}` : m.content;
+    return `${time(m.timestamp)} ${label ? dim('#' + label) + ' ' : ''}${bold(cyan(m.from.name))}: ${body}`;
+  }
+  return `${time(m.timestamp)} ${magenta('DM')} ${bold(cyan(m.from.name))} ${dim(`(${m.from.id})`)}: ${m.content}`;
+}
+
+function fail(err: unknown): never {
+  const e = err as any;
+  const msg = e?.code === 'ECONNREFUSED'
+    ? `No hub at ${defaultUrl()}. Start one with \`crosstalk serve\`.`
+    : e?.message ?? String(err);
+  console.error(red(`✖ ${msg}`));
+  process.exit(1);
+}
+
+/** Connects a one-shot HTTP agent and makes sure it is in the channel at `address`. */
+async function oneShot(address: string, opts: { name: string; url: string }) {
+  if (!CrossTalk.isAddress(address)) fail(`"${address}" is not a channel address (they look like xt_Qm9r3vKx1pZ8aT2cL5nWdA)`);
+  const agent = new HttpAgent({ name: opts.name, url: opts.url });
+  await agent.open();
+  const snapshot = await agent.request('channel.join', { channel: address });
+  return { agent, channel: snapshot.channel.id, snapshot };
+}
+
+function printShareHint(address: string) {
+  console.log(`\nAddress: ${bold(address)}`);
+  console.log(dim(`Share it with the agents you want in this conversation:`));
+  console.log(dim(`  CLI:   crosstalk up ${address}`));
+  console.log(dim(`  Agent: "join CrossTalk channel ${address}"`));
+}
+
+const program = new Command()
   .name('crosstalk')
-  .description('Real-time WebSocket mesh network for AI agent inter-communication, Gibberlink signals & XDialect')
-  .version('1.0.0');
+  .description('Channels where AI agents meet, talk and coordinate edits.')
+  .version(SERVER_VERSION);
 
-// Command: serve
 program
   .command('serve')
-  .description('Start the CrossTalk mesh hub server and web dashboard')
-  .option('-p, --port <number>', 'Port to listen on', '4488')
-  .option('-h, --host <host>', 'Host address to bind (0.0.0.0 for LAN/Wi-Fi)', '0.0.0.0')
-  .option('-s, --subnet <cidr>', 'Lock sockets to specific subnet (e.g. 192.168.1.0/24, lan, local)')
-  .action((options) => {
-    const port = parseInt(options.port, 10);
-    const subnets = options.subnet ? [options.subnet] : undefined;
-    startServer(port, options.host, undefined, subnets);
+  .description('Run a hub')
+  .option('-p, --port <port>', 'port', '4488')
+  .option('-H, --host <host>', 'bind address (0.0.0.0 for LAN)', '127.0.0.1')
+  .option('-t, --token <token>', 'require this token from clients (or set CROSSTALK_AUTH_TOKEN)')
+  .option('-s, --subnet <rules...>', 'allow only these CIDRs / presets (lan, local)')
+  .option('--allow-origin <origins...>', 'browser origins allowed without the token, e.g. a hosted cockpit')
+  .action(async opts => {
+    await startServer({
+      port: Number(opts.port),
+      host: opts.host,
+      token: opts.token,
+      allowedSubnets: opts.subnet,
+      allowedOrigins: opts.allowOrigin
+    }).catch(fail);
   });
 
-// Single-line command: up (Auto-joins or auto-creates socket mesh on the spot)
-program
-  .command('up [channel]')
-  .description('Join a socket mesh channel in a single line (auto-spawns local socket if not yet running)')
-  .option('-n, --name <name>', 'Agent display name', `Agent-${Math.floor(Math.random() * 9000 + 1000)}`)
-  .option('-r, --role <role>', 'Agent role', 'developer')
-  .option('-b, --branch <branch>', 'Git branch name (auto-detected from git if omitted)')
-  .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
-  .option('-s, --subnet <cidr>', 'Subnet lock CIDR (e.g. 192.168.1.0/24, lan, local)')
-  .option('-p, --port <number>', 'Port to bind if auto-spawning', '4488')
-  .action(async (channel = 'default', options) => {
-    const port = parseInt(options.port, 10);
-    console.log(bold(cyan(`\n⚡ Connecting to CrossTalk socket on #${channel}...`)));
+const channel = program.command('channel').description('Manage channels');
 
-    let client: CrossTalkClient;
+channel
+  .command('list')
+  .description('List the hub\'s public channel directory')
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async opts => {
     try {
-      client = new CrossTalkClient({
-        url: options.url,
-        channel,
-        name: options.name,
-        role: options.role,
-        environment: 'terminal',
-        branch: options.branch,
-        currentTask: 'Interactive session'
-      });
-      await client.connect();
-    } catch {
-      console.log(yellow(`[CrossTalk] No socket hub detected at ${options.url}. Auto-spawning local socket mesh...`));
-      const subnets = options.subnet ? [options.subnet] : undefined;
-      startServer(port, '0.0.0.0', undefined, subnets);
-      await new Promise(r => setTimeout(r, 400));
-      client = new CrossTalkClient({
-        url: options.url,
-        channel,
-        name: options.name,
-        role: options.role,
-        environment: 'terminal',
-        branch: options.branch,
-        currentTask: 'Interactive session'
-      });
-      await client.connect();
+      const ct = await CrossTalk.connect({ name: 'cli', url: opts.url, environment: 'terminal', reconnect: false });
+      const { channels } = await ct.listPublicChannels();
+      await ct.close();
+      if (!channels.length) return console.log(dim('No public channels. Conversations are private unless created with --public.'));
+      for (const c of channels) {
+        console.log(`${bold('#' + c.name)} ${c.id} ${dim(`${c.memberCount}/${c.maxMembers}`)}${c.topic ? `  ${c.topic}` : ''}`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const createAction = async (label: string | undefined, opts: any) => {
+  try {
+    const agent = new HttpAgent({ name: opts.name, url: opts.url });
+    await agent.open();
+    const snap = await agent.request('channel.create', {
+      name: label,
+      topic: opts.topic,
+      visibility: opts.public ? 'public' : 'private'
+    });
+    console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`));
+    printShareHint(snap.channel.id);
+  } catch (err) {
+    fail(err);
+  }
+};
+
+for (const cmd of [program.command('new [label]'), channel.command('create [label]')]) {
+  cmd
+    .description('Start a new conversation at its own address')
+    .option('--public', 'also list it in the hub\'s public directory')
+    .option('--topic <topic>', 'what the conversation is for')
+    .option('-n, --name <agent>', 'your agent name', defaultName())
+    .option('-u, --url <url>', 'hub URL', defaultUrl())
+    .action(createAction);
+}
+
+program
+  .command('up [address]')
+  .description('Join a conversation by address and chat interactively (starts a new one if no address is given)')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-r, --role <role>', 'your role', 'human')
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .option('--label <label>', 'label for a new conversation')
+  .option('--no-start', 'do not start a local hub if none is running')
+  .action(async (address: string | undefined, opts) => {
+    let ct: CrossTalk;
+    let ch: Channel;
+    try {
+      ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start });
+      ch = address ? await ct.joinChannel(address) : await ct.createChannel(opts.label);
+    } catch (err) {
+      return fail(err);
     }
 
-    console.log(bold(green(`✔ Online in channel #${channel} as [${options.name}] (${client.agentId})`)));
-    console.log(gray('Type your message or XDialect shorthand (!LCK @file, !REL @file, &WAIT):'));
-    console.log(gray('Commands: /who, /lock <file>, /unlock <file>, /exit\n'));
+    console.log(green(`✔ ${bold(ct.agent.name)} is in #${ch.name}`) + dim(` (${ch.members.size} here)`));
+    if (!address) printShareHint(ch.address);
+    for (const m of ch.messages.slice(-10)) console.log(formatMessage(m));
+    console.log(dim('Type to chat. /who  /lock <file> [reason]  /unlock <file>  /dm <name> <text>  !XDialect  /exit'));
 
-    client.on('broadcast', (msg) => {
-      if (msg.from?.id !== client.agentId) {
-        if (msg.type === 'dialect_shorthand' && msg.shorthand) {
-          console.log(`\n⚡ ${bold(magenta(`XDialect`))} from ${bold(cyan(msg.from?.name))}: ${yellow(msg.shorthand.raw)}`);
-          console.log(`   └─> "${gray(msg.shorthand.human)}"`);
-        } else {
-          console.log(`\n📢 ${bold(cyan(msg.from?.name || 'System'))}: ${msg.content}`);
-        }
-        process.stdout.write('> ');
-      }
-    });
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
+    const print = (line: string) => {
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      console.log(line);
+      rl.prompt(true);
+    };
 
-    client.on('direct_message', (msg) => {
-      if (msg.from?.id !== client.agentId) {
-        console.log(`\n🔒 ${bold(magenta(`DM from ${msg.from?.name}`))}: ${msg.content}`);
-        process.stdout.write('> ');
-      }
-    });
-
-    client.on('lock_acquired', (lock) => {
-      console.log(`\n🔒 [MESH] ${bold(lock.holderName)} claimed [${yellow(lock.file)}] ("${lock.reason}")`);
-      process.stdout.write('> ');
-    });
-
-    client.on('lock_released', (data) => {
-      console.log(`\n🔓 [MESH] [${yellow(data.file)}] unlocked by ${bold(data.releasedBy)}`);
-      process.stdout.write('> ');
-    });
-
-    client.on('lock_conflict_warning', (warn) => {
-      console.log(`\n🚨 ${red(`[ALERT] ${warn.requester.name} requested [${warn.file}] which you hold!`)}`);
-      process.stdout.write('> ');
-    });
-
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: '> '
-    });
+    ct.on('message', m => print(formatMessage(m)));
+    ct.on('dm', m => print(formatMessage(m)));
+    ch.on('member.joined', a => print(dim(`→ ${a.name} joined`)));
+    ch.on('member.left', a => print(dim(`← ${a.name} left`)));
+    ch.on('lock.acquired', l => print(yellow(`🔒 ${l.holder.name} locked ${l.file}: ${l.reason}`)));
+    ch.on('lock.released', e => print(dim(`🔓 ${e.file} unlocked`)));
+    ch.on('lock.contended', e => print(red(`⚠ ${e.requester.name} wants ${e.lock.file}, which you hold`)));
+    ct.on('disconnected', () => print(red('disconnected, reconnecting…')));
+    ct.on('reconnected', () => print(green('reconnected')));
 
     rl.prompt();
-
-    rl.on('line', async (line) => {
+    rl.on('line', async line => {
       const text = line.trim();
-      if (!text) {
-        rl.prompt();
-        return;
-      }
-
-      if (text === '/exit' || text === '/quit') {
-        client.disconnect();
-        process.exit(0);
-      } else if (text.startsWith('/lock ')) {
-        const parts = text.slice(6).split(' ');
-        const file = parts[0];
-        const reason = parts.slice(1).join(' ') || 'Editing file';
-        const res = await client.lockFile(file, reason);
-        if (res.success) {
-          console.log(green(`✔ Locked [${file}]`));
+      try {
+        if (!text) {
+          // nothing
+        } else if (text === '/exit' || text === '/quit') {
+          rl.close();
+          return;
+        } else if (text === '/who') {
+          await ch.refresh();
+          for (const m of ch.members.values()) print(`${bold(m.name)} ${dim(m.id)} ${m.status}${m.currentTask ? ` — ${m.currentTask}` : ''}`);
+          for (const l of ch.locks.values()) print(yellow(`🔒 ${l.file} — ${l.holder.name}: ${l.reason}`));
+        } else if (text.startsWith('/lock ')) {
+          const [, file, ...reason] = text.split(/\s+/);
+          const lock = await ch.lock(file, reason.join(' ') || 'editing');
+          print(green(`🔒 locked ${lock.file}`));
+        } else if (text.startsWith('/unlock ')) {
+          await ch.unlock(text.split(/\s+/)[1]);
+          print(green('🔓 unlocked'));
+        } else if (text.startsWith('/dm ')) {
+          const [, to, ...rest] = text.split(/\s+/);
+          await ct.dm(to, rest.join(' '));
+        } else if (text.startsWith('!') || text.startsWith('?')) {
+          await ch.shorthand(text);
         } else {
-          console.log(red(`✖ Denied: Held by ${res.holder?.name} ("${res.reason}")`));
+          await ch.send(text);
         }
-      } else if (text.startsWith('/unlock ')) {
-        const file = text.slice(8).trim();
-        client.unlockFile(file);
-        console.log(green(`✔ Released [${file}]`));
-      } else if (text === '/who') {
-        const s = await client.getMeshState();
-        console.log(`Online: ${s.agents.map(a => `${a.name} (${a.currentTask})`).join(', ')}`);
-        if (s.locks.length > 0) {
-          console.log(`Locks: ${s.locks.map(l => `${l.file} by ${l.holderName}`).join(', ')}`);
-        }
-      } else if (text.startsWith('!') || text.startsWith('#')) {
-        client.sendShorthand(text);
-      } else {
-        client.broadcast(text);
+      } catch (err) {
+        print(red(`✖ ${(err as Error).message}`));
       }
       rl.prompt();
     });
-
-    const keepalive = setInterval(() => {}, 15000);
-    const shutdown = async () => {
-      clearInterval(keepalive);
-      console.log(yellow('\n[CrossTalk] Disconnecting gracefully...'));
-      await client.disconnect('user_exit');
+    rl.on('close', async () => {
+      await ct.close();
       process.exit(0);
-    };
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-  });
-
-// Command: invite / pair / share
-program
-  .command('invite')
-  .alias('pair')
-  .alias('share')
-  .description('Generate cross-branch agent pairing invite with 3 communication options')
-  .option('-c, --channel <channel>', 'Channel name', 'default')
-  .option('-b, --branch <branch>', 'My git branch name (auto-detected if omitted)')
-  .option('-s, --subnet <cidr>', 'Subnet boundary lock (e.g. 192.168.1.0/24, lan, local)')
-  .option('-u, --url <url>', 'Hub URL or host address', 'localhost:4488')
-  .action(async (options) => {
-    const { execSync } = await import('node:child_process');
-    let branch = options.branch;
-    if (!branch) {
-      try {
-        branch = execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'main';
-      } catch {
-        branch = 'main';
-      }
-    }
-
-    const host = options.url.replace(/^(http|https|ws|wss):\/\//, '');
-    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
-    const subnetLock = options.subnet || (isLocal ? '192.168.0.0/16' : 'any');
-
-    const crypto = await import('node:crypto');
-    const randomSuffix = crypto.randomBytes(2).toString('hex').toUpperCase();
-    const branchTag = branch.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8).toUpperCase() || 'SYNC';
-    const code = `XT-${randomSuffix}-${branchTag}`;
-
-    console.log(bold(cyan(`\n⚡ CrossTalk Agent Pairing & Cross-Branch Bridge`)));
-    console.log(`${gray('My Active Branch:')} ${bold(green(branch))}\n`);
-    console.log(`Give your friend (or their agent) ${bold('ONE')} of these 3 options to connect:\n`);
-
-    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
-    console.log(bold(`Option 1: Central Hosted Relay (Zero-Config · Recommended)`));
-    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
-    console.log(`  🔑 Session Code:  ${bold(yellow(code))}`);
-    console.log(`  🔗 Web Join Link: ${cyan(`http://${host}/?room=${code}&branch=${branch}`)}\n`);
-    console.log(`  💬 ${bold('What to tell your friend\'s agent in chat:')}`);
-    console.log(`     ${green(`"Join CrossTalk session ${code} on branch feature-ui"`)}\n`);
-    console.log(`  💻 ${bold('What your friend runs in terminal:')}`);
-    console.log(`     ${cyan(`crosstalk join ${code} --branch feature-ui`)}\n`);
-
-    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
-    console.log(bold(`Option 2: Open Mesh (Distributed Discovery Rendezvous)`));
-    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
-    console.log(`  🌐 Topic:         ${yellow(`mesh://open/repo-${branchTag.toLowerCase()}`)}\n`);
-    console.log(`  💬 ${bold('What to tell your friend\'s agent in chat:')}`);
-    console.log(`     ${green(`"Connect to open mesh channel 'team-${branchTag.toLowerCase()}' on branch feature-ui"`)}\n`);
-    console.log(`  💻 ${bold('What your friend runs in terminal:')}`);
-    console.log(`     ${cyan(`crosstalk up team-${branchTag.toLowerCase()} --mode mesh --branch feature-ui`)}\n`);
-
-    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
-    console.log(bold(`Option 3: Direct Computer-to-Computer (Subnet Locked P2P)`));
-    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
-    console.log(`  📡 Direct Socket: ${cyan(`ws://${host}`)}`);
-    console.log(`  🔒 Subnet Lock:   ${yellow(subnetLock)} ${gray('(Strict boundary: external packets rejected)')}\n`);
-    console.log(`  💬 ${bold('What to tell your friend\'s agent in chat:')}`);
-    console.log(`     ${green(`"Connect directly to peer ws://${host} on branch feature-ui with subnet lock ${subnetLock}"`)}\n`);
-    console.log(`  💻 ${bold('What your friend runs in terminal:')}`);
-    console.log(`     ${cyan(`crosstalk join ws://${host} --branch feature-ui --subnet ${subnetLock}`)}\n`);
-  });
-
-// Command: join <target>
-program
-  .command('join <target>')
-  .description('Join a CrossTalk session using an invite code (XT-XXXX), URL, or direct address')
-  .option('-n, --name <name>', 'Agent display name', `Agent-${Math.floor(Math.random() * 9000 + 1000)}`)
-  .option('-r, --role <role>', 'Agent role', 'developer')
-  .option('-b, --branch <branch>', 'My git branch name (auto-detected if omitted)')
-  .option('-s, --subnet <cidr>', 'Subnet lock CIDR', 'any')
-  .action(async (target, options) => {
-    let url = 'ws://localhost:4488';
-    let channel = 'default';
-
-    if (target.startsWith('XT-')) {
-      channel = target;
-      console.log(bold(cyan(`\n⚡ Joining session via Invite Code ${bold(yellow(target))}...`)));
-    } else if (target.startsWith('ws://') || target.startsWith('wss://')) {
-      url = target;
-      console.log(bold(cyan(`\n⚡ Connecting directly to peer socket at ${cyan(url)}...`)));
-    } else if (target.startsWith('http://') || target.startsWith('https://')) {
-      try {
-        const parsed = new URL(target);
-        url = (parsed.protocol === 'https:' ? 'wss://' : 'ws://') + parsed.host;
-        channel = parsed.searchParams.get('room') || 'default';
-        console.log(bold(cyan(`\n⚡ Joining session via URL ${cyan(target)}...`)));
-      } catch {
-        channel = target;
-      }
-    } else {
-      channel = target;
-    }
-
-    const client = new CrossTalkClient({
-      url,
-      channel,
-      name: options.name,
-      role: options.role,
-      branch: options.branch,
-      environment: 'terminal',
-      currentTask: `Active in session #${channel}`
     });
+  });
 
+program
+  .command('send <address> <text...>')
+  .description('Post one message (stays present for ~10 min so replies can be awaited with `wait`)')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, words: string[], opts) => {
     try {
-      await client.connect();
-      console.log(bold(green(`✔ Successfully linked to CrossTalk session [${channel}] on branch [${client['options']?.branch || 'main'}]!`)));
-      console.log(gray('Cooperative file locks and peer notifications active.\n'));
-
-      client.on('broadcast', (msg) => {
-        if (!client.shouldSuppressAutoReply(msg) && msg.from?.id !== client.agentId) {
-          const senderBranch = msg.branch ? ` (${msg.branch})` : '';
-          console.log(`📢 ${bold(cyan((msg.from?.name || 'Peer') + senderBranch))}: ${msg.content}`);
-        }
-      });
-
-      client.on('direct_message', (msg) => {
-        if (!client.shouldSuppressAutoReply(msg) && msg.from?.id !== client.agentId) {
-          const senderBranch = msg.branch ? ` (${msg.branch})` : '';
-          console.log(`🔒 ${bold(magenta(`DM from ${(msg.from?.name || 'Peer') + senderBranch}`))}: ${msg.content}`);
-        }
-      });
-
-      client.on('lock_acquired', (lock) => {
-        const branchTag = lock.branch ? ` [branch: ${lock.branch}]` : '';
-        console.log(`🔒 ${yellow(`LOCK ACQUIRED:`)} [${lock.file}] by ${bold(lock.holderName)}${branchTag} ("${lock.reason}")`);
-      });
-
-      client.on('lock_released', (data) => {
-        console.log(`🔓 ${green(`LOCK RELEASED:`)} [${data.file}] by ${bold(data.releasedBy)}`);
-      });
-
-      const keepalive = setInterval(() => {}, 15000);
-      const shutdown = async () => {
-        clearInterval(keepalive);
-        console.log(yellow('\n[CrossTalk] Disconnecting gracefully...'));
-        await client.disconnect('user_exit');
-        process.exit(0);
-      };
-      process.on('SIGINT', shutdown);
-      process.on('SIGTERM', shutdown);
-    } catch (err: any) {
-      console.error(red(`\n✖ Connection failed: ${err.message}`));
-      process.exit(1);
+      const { agent, channel } = await oneShot(target, opts);
+      const text = words.join(' ');
+      if (text.startsWith('!')) await agent.request('shorthand.send', { channel, shorthand: text });
+      else await agent.request('message.send', { channel, content: text });
+      console.log(green(`✔ sent as ${agent.agent!.name}`));
+    } catch (err) {
+      fail(err);
     }
   });
 
-// Command: who
 program
-  .command('who')
-  .description('List all active agents and file locks on the mesh')
-  .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
-  .action(async (options) => {
-    const client = new CrossTalkClient({
-      url: options.url,
-      name: 'CLI-Observer',
-      role: 'observer',
-      environment: 'terminal',
-      autoHeartbeat: false
-    });
-
+  .command('wait <address>')
+  .description('Block until a message or DM arrives, print it and exit (exit code 2 on timeout)')
+  .option('-t, --timeout <seconds>', 'give up after this long', '60')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .option('--json', 'print raw JSON')
+  .action(async (target: string, opts) => {
     try {
-      const state = await client.connect();
-      console.log(`\n${bold(cyan('=== CrossTalk Active Mesh State ==='))}`);
-      console.log(`Channel: ${bold('#' + state.channel)}`);
-      console.log(`Dialect: ${bold('XDialect v' + state.dialect.version)}\n`);
-
-      console.log(bold('Connected Agents:'));
-      if (state.agents.length === 0) {
-        console.log(gray('  (No active agents currently connected)'));
-      } else {
-        state.agents.forEach((a) => {
-          const statusColor = a.status === 'working' ? green : a.status === 'waiting' ? yellow : blue;
-          console.log(`  🤖 ${bold(a.name)} (${cyan(a.role)} · ${gray(a.environment)})`);
-          console.log(`     ID:       ${gray(a.id)}`);
-          console.log(`     Status:   ${statusColor(a.status.toUpperCase())}`);
-          console.log(`     Task:     ${a.currentTask}`);
-          if (a.lockedFiles && a.lockedFiles.length > 0) {
-            console.log(`     Locks:    ${yellow(a.lockedFiles.join(', '))}`);
-          }
-          console.log('');
-        });
-      }
-
-      console.log(bold('Active File Claims:'));
-      if (state.locks.length === 0) {
-        console.log(gray('  (No files currently locked)'));
-      } else {
-        const now = Date.now();
-        state.locks.forEach((l) => {
-          const rem = Math.max(0, Math.round((l.expiresAt - now) / 1000));
-          console.log(`  🔒 ${yellow(l.file)}`);
-          console.log(`     Holder:   ${bold(l.holderName)} (${gray(l.holderId)})`);
-          console.log(`     Reason:   "${l.reason}"`);
-          console.log(`     Expires:  ${rem}s remaining\n`);
-        });
-      }
-
-      client.disconnect();
-      process.exit(0);
-    } catch (err: any) {
-      console.error(red(`Failed to connect to CrossTalk mesh: ${err.message}`));
-      process.exit(1);
-    }
-  });
-
-// Command: dict (View Versioned Dictionary)
-program
-  .command('dict')
-  .description('Print the active versioned XDialect token dictionary for agent shorthand')
-  .action(() => {
-    console.log(`\n${bold(cyan(`📖 XDialect Dictionary (v${DIALECT_V1.version}))`))}`);
-    console.log(gray(`Checksum: ${DIALECT_V1.checksum} | Updated: ${DIALECT_V1.updatedAt}\n`));
-
-    console.log(bold('Token Catalog:'));
-    console.log(`${gray('Code'.padEnd(10))} ${gray('ID'.padEnd(8))} ${gray('Category'.padEnd(12))} ${gray('Meaning')}`);
-    console.log(gray('─'.repeat(70)));
-
-    Object.values(DIALECT_V1.tokens).forEach((tok) => {
-      const codeStr = tok.code.startsWith('!') ? green(tok.code.padEnd(10)) :
-                      tok.code.startsWith('#') ? cyan(tok.code.padEnd(10)) :
-                      tok.code.startsWith('&') ? yellow(tok.code.padEnd(10)) :
-                      magenta(tok.code.padEnd(10));
-      const idStr = ('0x' + tok.numericId.toString(16)).padEnd(8);
-      console.log(`${codeStr} ${gray(idStr)} ${tok.category.padEnd(12)} ${tok.meaning}`);
-    });
-
-    console.log(`\n${bold('Grammar Format:')} ${yellow(DIALECT_V1.grammar.format)}\n`);
-    console.log(bold('Examples:'));
-    DIALECT_V1.grammar.examples.forEach((ex) => {
-      console.log(`  ${green(ex.shorthand)}`);
-      console.log(`  └─> ${gray(ex.human)}\n`);
-    });
-  });
-
-// Command: short (Send shorthand dialect)
-program
-  .command('short <expression>')
-  .description('Send an ultra-concise XDialect shorthand message to the mesh')
-  .option('-n, --name <name>', 'Agent display name', 'Terminal-Agent')
-  .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
-  .action(async (expression, options) => {
-    const parsed = DialectEngine.parse(expression);
-    const human = DialectEngine.toHuman(parsed);
-    const bits = DialectEngine.packToBits(parsed);
-
-    const client = new CrossTalkClient({
-      url: options.url,
-      name: options.name,
-      role: 'developer',
-      environment: 'terminal'
-    });
-
-    try {
-      await client.connect();
-      client.sendShorthand(expression);
-
-      console.log(`\n${green('✔ XDialect Message Dispatched!')}`);
-      console.log(`  Shorthand: ${bold(cyan(expression))}`);
-      console.log(`  Wire Size: ${yellow(bits.length + ' bytes')} (vs ~${Buffer.byteLength(human)} bytes in English)`);
-      console.log(`  English:   "${gray(human)}"\n`);
-
-      setTimeout(() => {
-        client.disconnect();
-        process.exit(0);
-      }, 500);
-    } catch (err: any) {
-      console.error(red(`Dispatch failed: ${err.message}`));
-      process.exit(1);
-    }
-  });
-
-// Command: to-human
-program
-  .command('to-human <shorthand>')
-  .description('Translate shorthand expression to natural human English')
-  .action((shorthand) => {
-    const parsed = DialectEngine.parse(shorthand);
-    const human = DialectEngine.toHuman(parsed);
-    const bits = DialectEngine.packToBits(parsed);
-    console.log(`\nShorthand: ${bold(cyan(shorthand))}`);
-    console.log(`Bits:      ${yellow(bits.length + ' bytes')}`);
-    console.log(`English:   ${green(human)}\n`);
-  });
-
-// Command: to-zh
-program
-  .command('to-zh <shorthand>')
-  .description('Expand concise XDialect shorthand to natural Chinese (中文展开)')
-  .action((shorthand) => {
-    const zh = DialectEngine.toChinese(shorthand);
-    const bits = DialectEngine.packToBits(shorthand);
-    console.log(`\nShorthand: ${bold(cyan(shorthand))}`);
-    console.log(`Bits:      ${yellow(bits.length + ' bytes')}`);
-    console.log(`中文翻译:  ${green(zh)}\n`);
-  });
-
-// Command: to-short
-program
-  .command('to-short <english>')
-  .description('Compile natural human English sentence to concise XDialect shorthand')
-  .action((english) => {
-    const shorthand = DialectEngine.fromHuman(english);
-    const bits = DialectEngine.packToBits(shorthand);
-    console.log(`\nEnglish:   ${gray(english)}`);
-    console.log(`Shorthand: ${bold(cyan(shorthand))}`);
-    console.log(`Bits:      ${yellow(bits.length + ' bytes')}\n`);
-  });
-
-// Command: broadcast
-program
-  .command('broadcast <message>')
-  .alias('msg')
-  .description('Broadcast an announcement or status to all agents on the mesh')
-  .option('-n, --name <name>', 'Agent display name', 'Terminal-Agent')
-  .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
-  .action(async (message, options) => {
-    const client = new CrossTalkClient({
-      url: options.url,
-      name: options.name,
-      role: 'developer',
-      environment: 'terminal'
-    });
-
-    try {
-      await client.connect();
-      client.broadcast(message);
-      console.log(`${green('✔')} Broadcast sent: "${cyan(message)}"`);
-      setTimeout(() => {
-        client.disconnect();
-        process.exit(0);
-      }, 500);
-    } catch (err: any) {
-      console.error(red(`Broadcast failed: ${err.message}`));
-      process.exit(1);
-    }
-  });
-
-// Command: lock
-program
-  .command('lock <file>')
-  .description('Acquire an exclusive lock on a file with reason')
-  .option('-r, --reason <reason>', 'Reason for editing', 'Refactoring file')
-  .option('-t, --ttl <seconds>', 'Time to hold lock in seconds', '300')
-  .option('-n, --name <name>', 'Agent display name', 'Terminal-Agent')
-  .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
-  .action(async (file, options) => {
-    const client = new CrossTalkClient({
-      url: options.url,
-      name: options.name,
-      role: 'developer',
-      environment: 'terminal'
-    });
-
-    try {
-      await client.connect();
-      const ttl = parseInt(options.ttl, 10);
-      const res = await client.lockFile(file, options.reason, ttl);
-
-      if (res.success) {
-        console.log(`${green('✔ Lock Acquired!')}`);
-        console.log(`  File:    ${yellow(file)}`);
-        console.log(`  Holder:  ${bold(options.name)}`);
-        console.log(`  Reason:  "${options.reason}"`);
-        console.log(`  TTL:     ${ttl}s`);
-      } else {
-        console.log(`${red('✖ Lock DENIED — File is currently held by another agent!')}`);
-        console.log(`  File:    ${yellow(file)}`);
-        console.log(`  Holder:  ${bold(res.holder?.name || 'Unknown')} (${gray(res.holder?.id || '')})`);
-        console.log(`  Reason:  "${res.reason}"`);
-        console.log(`  Expires: ${res.expiresAt ? Math.round((res.expiresAt - Date.now()) / 1000) + 's' : 'active'}`);
-      }
-
-      setTimeout(() => {
-        client.disconnect();
-        process.exit(res.success ? 0 : 2);
-      }, 500);
-    } catch (err: any) {
-      console.error(red(`Lock request failed: ${err.message}`));
-      process.exit(1);
-    }
-  });
-
-// Command: unlock
-program
-  .command('unlock <file>')
-  .description('Release a previously claimed file lock')
-  .option('-n, --name <name>', 'Agent display name', 'Terminal-Agent')
-  .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
-  .action(async (file, options) => {
-    const client = new CrossTalkClient({
-      url: options.url,
-      name: options.name,
-      role: 'developer',
-      environment: 'terminal'
-    });
-
-    try {
-      await client.connect();
-      client.unlockFile(file);
-      console.log(`${green('✔')} Sent release request for file: ${yellow(file)}`);
-      setTimeout(() => {
-        client.disconnect();
-        process.exit(0);
-      }, 500);
-    } catch (err: any) {
-      console.error(red(`Unlock failed: ${err.message}`));
-      process.exit(1);
-    }
-  });
-
-// Command: tail
-program
-  .command('tail')
-  .description('Stream live messages, locks, and events from the mesh in real time')
-  .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
-  .action(async (options) => {
-    const client = new CrossTalkClient({
-      url: options.url,
-      name: 'Stream-Watcher',
-      role: 'watcher',
-      environment: 'terminal'
-    });
-
-    try {
-      await client.connect();
-      console.log(bold(cyan('\n📡 Streaming CrossTalk Mesh Events (Press Ctrl+C to exit)...\n')));
-
-      client.on('broadcast', (msg) => {
-        const time = new Date(msg.timestamp).toLocaleTimeString();
-        if (msg.type === 'dialect_shorthand' && msg.shorthand) {
-          console.log(`${gray(`[${time}]`)} ⚡ ${bold(magenta(`XDialect`))} from ${bold(cyan(msg.from?.name || 'Agent'))}:`);
-          console.log(`     Shorthand: ${yellow(msg.shorthand.raw)} (${msg.shorthand.bitSize} bytes)`);
-          console.log(`     English:   "${gray(msg.shorthand.human)}"`);
-        } else {
-          console.log(`${gray(`[${time}]`)} 📢 ${bold(cyan(msg.from?.name || 'System'))}: ${msg.content}`);
-        }
-      });
-
-      client.on('direct_message', (msg) => {
-        const time = new Date(msg.timestamp).toLocaleTimeString();
-        console.log(`${gray(`[${time}]`)} 🔒 ${bold(magenta(`DM from ${msg.from?.name}`))}: ${msg.content}`);
-      });
-
-      client.on('lock_acquired', (lock) => {
-        console.log(`🔒 ${yellow(`LOCK ACQUIRED:`)} [${lock.file}] by ${bold(lock.holderName)} ("${lock.reason}")`);
-      });
-
-      client.on('lock_released', (data) => {
-        console.log(`🔓 ${green(`LOCK RELEASED:`)} [${data.file}] by ${bold(data.releasedBy)}`);
-      });
-
-      client.on('lock_conflict_warning', (warn) => {
-        console.log(`🚨 ${red(`CONFLICT ALERT:`)} Agent ${bold(warn.requester.name)} tried to touch [${warn.file}] held by ${bold(warn.holder.name)}!`);
-      });
-
-      client.on('agent_joined', (agent) => {
-        console.log(`➕ ${green(`AGENT JOINED:`)} ${bold(agent.name)} (${agent.role} · ${agent.environment})`);
-      });
-
-      client.on('agent_left', (agent) => {
-        console.log(`➖ ${gray(`AGENT LEFT:`)} ${bold(agent.name)}`);
-      });
-    } catch (err: any) {
-      console.error(red(`Streaming failed: ${err.message}`));
-      process.exit(1);
-    }
-  });
-
-// Command: install (Offline single-file installer to system PATH)
-program
-  .command('install')
-  .description('Install this standalone CrossTalk CLI to system PATH (works 100% offline from a single file)')
-  .option('-d, --dir <directory>', 'Destination directory (defaults to /usr/local/bin or ~/.local/bin)')
-  .option('-n, --name <name>', 'Command binary name', 'crosstalk')
-  .action(async (options) => {
-    const fs = await import('node:fs');
-    const path = await import('node:path');
-    const os = await import('node:os');
-
-    const binName = options.name || 'crosstalk';
-    let targetDir = options.dir;
-
-    if (!targetDir) {
-      const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
-      if (isRoot) {
-        targetDir = '/usr/local/bin';
-      } else {
-        // Test write access to /usr/local/bin
-        try {
-          fs.accessSync('/usr/local/bin', fs.constants.W_OK);
-          targetDir = '/usr/local/bin';
-        } catch {
-          targetDir = path.join(os.homedir(), '.local', 'bin');
+      const { agent, channel } = await oneShot(target, opts);
+      const deadline = Date.now() + Number(opts.timeout) * 1000;
+      while (Date.now() < deadline) {
+        const remaining = Math.ceil((deadline - Date.now()) / 1000);
+        const events = await agent.events(Math.min(remaining, 55));
+        const hits = events.filter((f): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
+          f.type === 'dm' || (f.type === 'message' && f.message.channel === channel));
+        if (hits.length) {
+          for (const f of hits) console.log(opts.json ? JSON.stringify(f.message) : formatMessage(f.message));
+          return;
         }
       }
-    }
-
-    try {
-      if (!fs.existsSync(targetDir)) {
-        fs.mkdirSync(targetDir, { recursive: true });
-      }
-
-      const sourceFile = process.argv[1];
-      const targetFile = path.join(targetDir, binName);
-
-      fs.copyFileSync(sourceFile, targetFile);
-      fs.chmodSync(targetFile, 0o755);
-
-      console.log(bold(green(`\n✔ CrossTalk v1.0.0 successfully installed to ${targetFile}!`)));
-      console.log(cyan(`✔ Air-gapped offline installation complete without internet connection.`));
-
-      const pathEnv = process.env.PATH || '';
-      if (!pathEnv.includes(targetDir)) {
-        console.log(yellow(`\n⚠️  Notice: ${targetDir} is not currently in your system PATH.`));
-        console.log(`Add it to your shell profile by running:`);
-        console.log(bold(`  echo 'export PATH="${targetDir}:$PATH"' >> ~/.bashrc (or ~/.zshrc)`));
-        console.log(`  source ~/.bashrc\n`);
-      } else {
-        console.log(green(`✔ Directory is in your PATH. You can immediately run:`));
-        console.log(bold(`  ${binName} who`));
-        console.log(bold(`  ${binName} up`));
-        console.log(bold(`  ${binName} serve`));
-        console.log(bold(`  ${binName} dict\n`));
-      }
-    } catch (err: any) {
-      console.error(bold(red(`\n✖ Installation failed: ${err.message}`)));
-      console.log(`Try running with sudo if installing to /usr/local/bin: sudo node ${process.argv[1]} install\n`);
+      console.error(dim(`no messages after ${opts.timeout}s`));
+      process.exit(2);
+    } catch (err) {
+      fail(err);
     }
   });
 
-program.parse(process.argv);
+program
+  .command('tail <address>')
+  .description('Stream a conversation to stdout')
+  .option('-n, --name <name>', 'observer name', `${defaultName()}-tail`)
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, opts) => {
+    try {
+      const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'observer', environment: 'terminal' });
+      const ch = await ct.joinChannel(target);
+      for (const m of ch.messages) console.log(formatMessage(m));
+      ch.on('message', m => console.log(formatMessage(m)));
+      ch.on('lock.acquired', l => console.log(yellow(`🔒 ${l.holder.name} locked ${l.file}: ${l.reason}`)));
+      ch.on('lock.released', e => console.log(dim(`🔓 ${e.file} unlocked (${e.reason})`)));
+      ch.on('member.joined', a => console.log(dim(`→ ${a.name} joined`)));
+      ch.on('member.left', a => console.log(dim(`← ${a.name} left`)));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('dialect [expression...]')
+  .description('Show the XDialect dictionary, or translate an expression to English')
+  .action((words: string[]) => {
+    if (!words.length) {
+      console.log(bold(`${DIALECT_V1.name} v${DIALECT_V1.version}`));
+      console.log(dim(DIALECT_V1.grammar.format));
+      for (const t of Object.values(DIALECT_V1.tokens)) console.log(`  ${yellow(t.code.padEnd(9))} ${t.meaning}`);
+      return;
+    }
+    const expr = words.join(' ');
+    console.log(DialectEngine.toHuman(expr));
+    console.log(dim(`${DialectEngine.packToBits(expr).length} bytes packed`));
+  });
+
+program
+  .command('mcp')
+  .description('Run the MCP server on stdio (same as `crosstalk-mcp`)')
+  .action(async () => {
+    const { runMcpServer } = await import('../mcp/server.js');
+    await runMcpServer();
+  });
+
+program.parseAsync().catch(err => {
+  if (err instanceof CrossTalkError) fail(err);
+  throw err;
+});

@@ -1,334 +1,298 @@
-# ⚡ CrossTalk: Real-Time Multi-Agent Mesh & Collision Guard
+# CrossTalk
 
-[![GitHub Repository](https://img.shields.io/badge/GitHub-ajokhai%2Fcross--talk-blue?logo=github)](https://github.com/ajokhai/cross-talk)
-[![X/Twitter](https://img.shields.io/badge/X%2FTwitter-@ajokhai-000000?logo=x)](https://x.com/ajokhai)
-[![Author](https://img.shields.io/badge/Author-Josh%20Ayokhai%20(@ajokhai)-black?logo=github)](https://x.com/ajokhai)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+**Channels where AI agents meet, talk, and coordinate edits.**
 
-**CrossTalk** is a real-time WebSocket communication and cooperative file-locking network for AI agents operating concurrently across terminal sessions, autonomous bots, IDE pair-programmers (such as Antigravity, Claude Code, Cursor), and background workers. Conceived and engineered by **Josh Ayokhai** ([@ajokhai](https://x.com/ajokhai)).
+CrossTalk lets agents from any vendor (Claude Code, Gemini CLI, Codex, Cursor, or your own scripts) join the same conversation, message each other, and claim files before editing them. Several agents can then work in one codebase without overwriting each other's changes.
 
-CrossTalk features **XDialect (v1.0.0)** — a lossless semantic shorthand dialect that packs agent communication into hyper-compact bitstreams while reversibly expanding into natural English for human observers — alongside an optional **Gibberlink Audio Signal Codec** with real-time waterfall spectrogram telemetry.
+Every conversation is a channel with its own private address (`xt_…`). Whoever creates a channel shares its address with the agents they want in it. There's no lobby where every agent ends up talking at once.
 
----
-
-## 🚀 Key Capabilities
-
-1. **Distributed Cooperative File Locks**:
-   - Prevent agents from clobbering each other's edits.
-   - When Agent A locks a file (e.g. `!LCK @src/auth.ts &WAIT`), Agent B receives a collision warning with Agent A's identity and intent.
-   - Real-time lock handoff events when an agent finishes.
-2. **XDialect v1.0.0 (Concise Bit Shorthand)**:
-   - High-density semantic tokens (`!LCK`, `!REL`, `#REF`, `#FEAT`, `&WAIT`, `&PROCEED`).
-   - Wire size of **~30–50 bytes** per packet (versus 200+ bytes in verbose natural language).
-   - **Bidirectionally reversible**: Automatically expands to natural English for humans and compiles from English to shorthand for agents.
-   - **Versioned Dictionary**: Distributed to all connecting agents on handshake and via `GET /api/dialect`.
-3. **Gibberlink FSK Signal Stream (Dual-Mode)**:
-   - Modulates data into 16-FSK audio carrier frequencies (1875 Hz – 3281 Hz) without requiring acoustic microphone/speaker conversion.
-   - Real-time **Waterfall Spectrogram** in the browser dashboard.
-   - Optional Web Audio API synthesizer for acoustic modem playback.
-4. **Universal Agent Integrations**:
-   - **MCP Server** (`@modelcontextprotocol/sdk`): Native toolset for Antigravity, Claude Code, and Cursor.
-   - **Antigravity Hooks**: Proactive `PreToolUse` lock checker that intercepts file editing tools before collision occurs.
-   - **CLI Tool** (`crosstalk`): Terminal commands for humans, shell scripts, and CLI bots.
-   - **Node.js & Python SDKs**: Clean libraries to connect any autonomous agent in 3 lines of code.
-5. **Interactive Web Portal & Live Cockpit**:
-   - **Web Portal** (`http://localhost:4488`): Interactive socket copy/paste ping tester, endpoint presets, lossless XDialect playground, device requirements matrix, and multi-language integration guide.
-   - **Telemetry Cockpit** (`http://localhost:4488/cockpit.html`): Real-time agent mesh visualizer, cooperative lock matrix, and Waterfall Spectrogram for Gibberlink audio modem signals.
-   - **Attribution**: References and builds upon Anton Pidkuiko & Boris Starkov's [PennyroyalTea/gibberlink](https://github.com/PennyroyalTea/gibberlink).
+Created by [Josh Ayokhai (@ajokhai)](https://x.com/ajokhai). MIT licensed.
 
 ---
 
-## 📊 Wire Efficiency: Bits vs. Audio Signals vs. Natural Language
+## How it works
 
-| Metric | Verbose Natural Language | Gibberlink Acoustic Sound (PCM) | Gibberlink Signal Stream | CrossTalk XDialect (Bits) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Typical Size** | ~180 – 350 bytes (JSON) | ~240,000 bytes (48kHz audio) | ~2,500 bytes (JSON frequencies) | **~34 – 54 bytes** (Binary frame) |
-| **Transmission Latency** | ~2 – 5 ms | ~2,000 – 4,000 ms (audio time) | ~1 – 3 ms | **< 0.5 ms** (Wire instant) |
-| **Compression Ratio** | Baseline | 1,200x heavier | 12x heavier | **5x – 7,000x more efficient** |
-| **Human Readability** | High | Low | None | **100% Reversible to English** |
+1. **Start a conversation.** An agent creates a channel with an optional label and topic, and gets back an address such as `xt_Qm9r3vKx1pZ8aT2cL5nWdA`.
+2. **Share the address.** Other agents join with it. An agent can be in several channels at once and can leave at any time.
+3. **Coordinate.** Agents post messages, DM each other, set a status, and lock files before editing them. Everything stays inside the channel.
+
+A few rules the hub enforces:
+
+- **Messages, locks, and presence are scoped to a channel.** A lock on `src/auth.ts` in one channel doesn't block another channel.
+- **Channels are private by default.** Only agents with the address can join, read, or post. A channel created with `--public` is also listed in the hub's directory.
+- **DMs only work between agents that share a channel.**
+- **Each channel holds up to 50 members** by default.
+- **Empty channels expire.** A new channel nobody has posted in stays alive for 10 minutes, so you can share its address before anyone joins. A channel with history lasts 1 hour after its last member leaves.
+- **Locks are advisory and expire.** The default TTL is 5 minutes and the maximum is 30. Re-lock to extend. A lock is released automatically when its holder leaves or disconnects.
 
 ---
 
-## 📖 XDialect v1.0.0 Token Dictionary
+## Install
 
-Agents receive this dictionary upon connection (`ws://localhost:4488` or `GET http://localhost:4488/api/dialect`):
-
-### Actions (`!`)
-- `!LCK` : Claim exclusive file lock (`!LCK @src/auth.ts`)
-- `!REL` : Release file lock (`!REL @src/auth.ts`)
-- `!BCST`: Broadcast announcement to all agents
-- `!DM`  : Direct private message to a specific agent (`!DM ^Agent-2`)
-- `!WARN`: Collision / conflict alert
-- `!PASS`: Handoff file or task to peer agent
-
-### Intents (`#`)
-- `#REF` : Refactoring existing code
-- `#FEAT`: Implementing new feature
-- `#FIX` : Bug fix
-- `#TEST`: Authoring or running test suite
-- `#BLD` : Compiling or building
-- `#MIG` : Database or schema migration
-
-### Flow Control (`&`)
-- `&WAIT` : Hang on for me to finish before touching it.
-- `&ACK`  : Understood, holding off.
-- `&DONE` : Finished work.
-- `&PROCEED` : Clear to proceed now.
-
-### Grammar Format
-```
-<ACTION> [@<FILE>] [#<INTENT>] ["<REASON>"] [~<TTL_SEC>] [^<RECIPIENT>] [&<FLOW>]
+```sh
+npm install -g github:ajokhai/cross-talk
 ```
 
-### Examples
-- **Shorthand**: `!LCK @src/auth.ts #REF "jwt validation" ~180 &WAIT`  
-  **English**: *"I am editing src/auth.ts, refactoring (jwt validation). Holding lock for 180s. Hang on for me to finish before touching it."*  
-  **Wire Size**: 34 bytes.
+This installs two commands: `crosstalk` (CLI and hub) and `crosstalk-mcp` (an MCP server on stdio). Node 18 or later is required.
 
-- **Shorthand**: `!REL @src/auth.ts &DONE &PROCEED`  
-  **English**: *"Finished editing src/auth.ts. Lock released. You are clear to proceed now."*  
-  **Wire Size**: 26 bytes.
+## Quick start
 
----
+```sh
+# 1. Start a hub (ws://localhost:4488, bound to 127.0.0.1)
+crosstalk serve
 
----
+# 2. Start a conversation; prints its address
+crosstalk new auth-refactor --topic "Move sessions to JWT"
+# → xt_Qm9r3vKx1pZ8aT2cL5nWdA
 
-## ⚡ Single-Line Join & Auto-Socket Bootstrap
-
-Agents can connect to an existing mesh or **auto-spawn their own local socket in a single line**:
-
-### In Terminal / CLI
-```bash
-# Joins channel 'auth-feature'. If no hub is active locally, auto-spawns one on the spot!
-crosstalk up auth-feature --name "DevBot"
+# 3. Join it from another terminal (or hand the address to an agent)
+crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code
 ```
 
-### In TypeScript / JavaScript
-```typescript
+`crosstalk up` with no address starts a new conversation and prints its address. If no hub is running on localhost, `up` starts one. Pass `--no-start` to turn that off.
+
+---
+
+## Connect an agent
+
+Agents have three ways in. Use whichever the agent supports.
+
+### 1. MCP (Claude Code, Gemini CLI, Cursor, Codex, Claude Desktop…)
+
+Add CrossTalk to the client's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "crosstalk": {
+      "command": "crosstalk-mcp",
+      "env": {
+        "CROSSTALK_AGENT_NAME": "claude-code",
+        "CROSSTALK_CHANNEL": "xt_Qm9r3vKx1pZ8aT2cL5nWdA"
+      }
+    }
+  }
+}
+```
+
+| Variable | Purpose |
+| :-- | :-- |
+| `CROSSTALK_URL` | Hub URL. Default `ws://localhost:4488`. |
+| `CROSSTALK_AUTH_TOKEN` | Token, if the hub requires one. |
+| `CROSSTALK_AGENT_NAME` | How other agents see you. |
+| `CROSSTALK_AGENT_ROLE` | Optional role, e.g. `backend`. |
+| `CROSSTALK_CHANNEL` | Comma-separated channel addresses to join on startup. |
+| `CROSSTALK_AUTOSTART` | Set to `0` to stop the MCP server from starting a local hub when none is running. |
+
+Tools:
+
+| Tool | What it does |
+| :-- | :-- |
+| `crosstalk_create_channel` | Start a conversation (`name?`, `topic?`, `public?`) and return its address. |
+| `crosstalk_join_channel` | Join by address. Returns members, active locks, and recent messages. |
+| `crosstalk_leave_channel` | Leave a channel. Your locks in it are released. |
+| `crosstalk_list_channels` | List your channels, or the public directory with `public: true`. |
+| `crosstalk_channel_state` | Members, their tasks, locks, and recent messages. |
+| `crosstalk_send` | Post a message to a channel. |
+| `crosstalk_dm` | Message one agent you share a channel with. Use `replyExpected: false` for acks. |
+| `crosstalk_set_status` | Tell channel-mates what you're doing (`idle`, `working`, `waiting`). |
+| `crosstalk_lock_file` | Claim a file before editing (`filePath`, `reason`, `ttlSeconds?`). |
+| `crosstalk_unlock_file` | Release the file when you're done. |
+| `crosstalk_read_inbox` | New messages, DMs, joins/leaves, and lock activity, as plain text. |
+| `crosstalk_wait` | Block until a message or DM arrives (default 60s, max 600s). |
+
+Tools that take a `channel` accept an address or the label of a channel you've joined. If you're in exactly one channel, you can leave it out.
+
+### 2. CLI (any agent that can run a shell command)
+
+```sh
+crosstalk send xt_Qm9r3vKx1pZ8aT2cL5nWdA "session.ts is free"
+crosstalk wait xt_Qm9r3vKx1pZ8aT2cL5nWdA --timeout 60   # exit code 2 on timeout
+crosstalk tail xt_Qm9r3vKx1pZ8aT2cL5nWdA               # stream a channel
+crosstalk channel list                                  # the hub's public directory
+```
+
+`send` keeps your session present for about 10 minutes, so a following `wait` receives the replies.
+
+### 3. HTTP or WebSocket (anything else)
+
+An agent that can only run `curl` can still take part:
+
+```sh
+# open a session
+curl -s localhost:4488/v1/sessions -H 'Content-Type: application/json' -d '{"name":"gemini-cli"}'
+# → { "session": "s_…", "agent": { … } }
+
+# send any request frame
+curl -s localhost:4488/v1/rpc -H 'X-CrossTalk-Session: s_…' -H 'Content-Type: application/json' \
+  -d '{"type":"channel.join","channel":"xt_Qm9r3vKx1pZ8aT2cL5nWdA"}'
+
+# long-poll for events (up to 25s)
+curl -s 'localhost:4488/v1/events?wait=25' -H 'X-CrossTalk-Session: s_…'
+
+# end the session
+curl -s -X DELETE localhost:4488/v1/sessions -H 'X-CrossTalk-Session: s_…'
+```
+
+Over WebSocket, the first frame is `{"type":"hello","protocol":2,"agent":{"name":"…"}}`. After that, each request carries an `id` and gets exactly one `{"type":"result","id":…,"ok":…}` back. The hub pushes events (`message`, `dm`, `member.joined`, `member.left`, `lock.acquired`, `lock.released`, …) to channel members. [`src/protocol.ts`](src/protocol.ts) is the full reference.
+
+| Request | Fields |
+| :-- | :-- |
+| `channel.create` | `name?`, `topic?`, `visibility?` (`private` \| `public`) |
+| `channel.join` | `channel` (address) |
+| `channel.leave` | `channel` |
+| `channel.list` | `scope?` (`joined` \| `public`), `limit?`, `cursor?` |
+| `channel.state` | `channel` |
+| `message.send` | `channel`, `content`, `metadata?` |
+| `shorthand.send` | `channel`, `shorthand` |
+| `dm.send` | `to`, `content`, `replyExpected?` |
+| `lock.acquire` | `channel`, `file`, `reason`, `ttlSeconds?` |
+| `lock.release` | `channel`, `file` |
+| `status.update` | `status?`, `currentTask?` |
+
+---
+
+## SDKs
+
+### Node
+
+```ts
 import { CrossTalk } from 'cross-talk';
 
-// Single-line connect: auto-discovers or auto-spawns the hub if none is running!
-const agent = await CrossTalk.join({ channel: 'auth-feature', name: 'Worker-1' });
+const ct = await CrossTalk.connect({ name: 'claude-code' });
 
-// Claim file with XDialect
-agent.sendShorthand('!LCK @src/auth.ts #FEAT "jwt logic" &WAIT');
+const ch = await ct.createChannel('auth-refactor', { topic: 'Move sessions to JWT' });
+console.log(ch.address);                    // share this
+
+// another agent: const ch = await ct.joinChannel('xt_…');
+
+ch.on('message', (msg) => console.log(`${msg.from.name}: ${msg.content}`));
+
+await ch.lock('src/auth.ts', 'switching sessions to JWT');
+await ch.send('Lock on src/auth.ts, about 10 minutes.');
+// … edit …
+await ch.unlock('src/auth.ts');
+
+const reply = await ct.waitForMessage({ channel: ch.address, timeoutMs: 60_000 });
 ```
 
----
+Pass `{ public: true }` to `createChannel` to list the channel in the directory. `ct.dm(to, text, { replyExpected: false })` sends an ack, and `ct.setStatus('working', 'auth refactor')` updates presence.
 
-## 🔌 Universal Transports: Local Sockets, LAN, Bluetooth & Serial
+### Python
 
-CrossTalk separates the protocol from the physical wire via `ICrossTalkTransport`:
-- **WebSocket (LAN / Local Network)**: Run `crosstalk serve --host 0.0.0.0` so any device, phone, or laptop on your Wi-Fi network can connect.
-- **Unix Domain Sockets (IPC)**: Run over `/tmp/crosstalk.sock` for ultra-fast local inter-process communication with zero network overhead.
-- **Bluetooth Serial / UART**: Stream length-prefixed binary frames over Bluetooth SPP or Hardware Serial (`StreamTransport`).
+[`sdk/python/crosstalk.py`](sdk/python/crosstalk.py) is a single file with no dependencies beyond the standard library. If `websocket-client` is installed it uses WebSocket; otherwise it falls back to HTTP long-polling. The API is synchronous, and events arrive on a background thread.
 
----
-
-## 📟 Microcontroller Support (< 150 Bytes RAM)
-
-CrossTalk can run on microcontrollers with virtually no memory (Arduino, ESP32, Raspberry Pi Pico, STM32):
-
-### 1. Embedded C / C++ Header (`embedded/crosstalk_micro.h`)
-- **Zero dynamic memory allocation** (`malloc` is never called).
-- Fixed-size 44-byte frame buffer. Fits on an **Arduino Uno (2KB RAM)** or bare-metal Cortex-M.
-- Arduino example in [`embedded/arduino_esp32_crosstalk.ino`](file:///Users/Josh/Documents/cross-talk/embedded/arduino_esp32_crosstalk.ino):
-```cpp
-#include "crosstalk_micro.h"
-
-// Send a 34-byte lock claim over Bluetooth Serial or UART:
-CrossTalkMicro::claimLock(SerialBT, "src/calibration.h", XT_INTENT_FEAT, "Calibrating IMU", 60);
-```
-
-### 2. MicroPython / CircuitPython (`embedded/crosstalk_micro.py`)
-- Zero dependencies, uses `struct.pack`.
-- Runs on Raspberry Pi Pico W and ESP32 with `< 10KB` RAM:
 ```python
-from crosstalk_micro import CrossTalkMicro
+from crosstalk import CrossTalk
 
-# Generate 34-byte packet for Bluetooth/UART
-pkt = CrossTalkMicro.pack_claim("src/firmware.c", "Sensor calibration", 60)
-uart.write(pkt)
+ct = CrossTalk.connect("data-worker")                 # url=, token= (defaults to $CROSSTALK_AUTH_TOKEN)
+ch = ct.join_channel("xt_Qm9r3vKx1pZ8aT2cL5nWdA")     # or ct.create_channel("etl"); ch.address
+
+ch.lock("pipeline/etl.py", "batch chunking", ttl=300)
+ch.send("Taking etl.py")
+ch.unlock("pipeline/etl.py")
+
+msg = ct.wait_for_message(ch.address, timeout=60)     # None on timeout
 ```
+
+The same file is also a CLI: `python3 crosstalk.py create <name>`, then `send <address> <text>`, `wait <address> --timeout 600`, `watch <address>`, `history <address>` and `channels`.
 
 ---
 
-## 📦 Offline & Air-Gapped Single-File Installation (Zero Internet)
+## Running a hub
 
-Install or run CrossTalk on any air-gapped device, server, or isolated VM by copying a **single file** with **zero internet connection** and **zero external packages**:
-
-### Method 1: All-in-One Self-Extracting Shell Script (`crosstalk-airgap.sh`)
-Copy [`dist/crosstalk-airgap.sh`](file:///Users/Josh/Documents/cross-talk/dist/crosstalk-airgap.sh) (470 KB) via USB or local network and run:
-```bash
-# Install permanently to /usr/local/bin or ~/.local/bin (auto-detects Node.js or Python 3):
-sh crosstalk-airgap.sh install
-
-# Or run any command directly from the file without installing:
-sh crosstalk-airgap.sh who
-sh crosstalk-airgap.sh up my-project
-sh crosstalk-airgap.sh serve
+```sh
+crosstalk serve                         # 127.0.0.1:4488
+crosstalk serve --port 5000
+CROSSTALK_AUTH_TOKEN=secret crosstalk serve --host 0.0.0.0   # share on your LAN
+crosstalk serve --subnet lan            # only accept private-network clients
 ```
 
-### Method 2: Node.js Standalone Bundle (`crosstalk.standalone.mjs`)
-Copy [`dist/crosstalk.standalone.mjs`](file:///Users/Josh/Documents/cross-talk/dist/crosstalk.standalone.mjs) (328 KB, 100% self-contained with all dependencies bundled):
-```bash
-# Run directly:
-node crosstalk.standalone.mjs who
+- **Binding:** by default the hub listens only on `127.0.0.1`. When you bind beyond localhost, set a token, or anyone who can reach the port can join public channels.
+- **Token:** clients send it as `?token=` on the WebSocket URL, an `Authorization: Bearer` header, or `CROSSTALK_AUTH_TOKEN`.
+- **Browsers:** a browser can only connect from an allow-listed origin (`--allow-origin https://example.com` or `CROSSTALK_ALLOWED_ORIGINS`) or with the token. To use the hosted cockpit with a local hub, run `crosstalk serve --allow-origin <cockpit origin>`.
+- **No database:** the hub keeps channels, locks, and recent messages in memory.
 
-# Or self-install to system PATH in one command:
-node crosstalk.standalone.mjs install
-```
-
-### Method 3: Python Pure Stdlib Client (`crosstalk.py`)
-Copy [`sdk/python/crosstalk.py`](file:///Users/Josh/Documents/cross-talk/sdk/python/crosstalk.py) (8 KB, zero pip packages, 100% standard library):
-```bash
-# Run directly:
-python3 crosstalk.py who
-
-# Or install to system PATH:
-python3 crosstalk.py install
-```
+Read-only HTTP endpoints: `GET /health`, `GET /api/dialect`, `GET /api/channels` (public directory), `GET /api/channels/:address` (any channel; knowing the address is what grants access), `GET /api/locks/check?channel=&file=`.
 
 ---
 
-## 🛠️ Quickstart
+## Editor hooks (optional)
 
-### 1. Start or Join in a Single Command
-```bash
-# If hub isn't running, auto-spawns on the spot and joins channel:
-./bin/crosstalk.js up my-project
+[`hooks/`](hooks/) contains two hook scripts:
+
+- `pre-tool.js`: before a file edit, warns if another agent holds a lock on the file.
+- `pre-invocation.js`: adds who's online and which files are locked to the agent's context.
+
+Both read `CROSSTALK_URL`, `CROSSTALK_CHANNEL`, `CROSSTALK_AUTH_TOKEN`, and `CROSSTALK_AGENT_NAME`, and do nothing if the hub is down. The Claude Code version of `pre-tool.js` goes in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Edit|Write|MultiEdit", "hooks": [{ "type": "command", "command": "node hooks/pre-tool.js" }] }
+    ]
+  }
+}
 ```
 
-Or start the standalone server:
-```bash
-./bin/crosstalk.js serve --host 0.0.0.0 --port 4488
-```
-Open **`http://localhost:4488`** to view the live dashboard and Waterfall Spectrogram.
-
-### 2. CLI Coordination Commands
-```bash
-# View active agents and locked files
-./bin/crosstalk.js who
-
-# View the versioned token dictionary
-./bin/crosstalk.js dict
-
-# Send shorthand to the mesh
-./bin/crosstalk.js short '!LCK @src/server.ts #FEAT "websocket mesh" &WAIT'
-
-# Translate shorthand to English
-./bin/crosstalk.js to-human '!LCK @src/api.ts #FIX "null pointer" &WAIT'
-
-# Translate English to shorthand
-./bin/crosstalk.js to-short "I am editing src/api.ts, fixing bug, hang on for me to finish"
-```
-
-### 3. Run the Multi-Agent Simulation
-```bash
-npx tsx examples/simulate_two_agents.ts
-```
-
-### 4. Run the Microcontroller Bluetooth/Serial Stream Demo
-```bash
-npx tsx examples/micro_stream_demo.ts
-```
+[`.agents/hooks.json`](.agents/hooks.json) has the equivalent config for Antigravity.
 
 ---
 
-## 🤖 Connecting AI Agents
+## XDialect shorthand (optional)
 
-### Option A: IDE Conversation Agents (Antigravity, Claude Code, Cursor)
-CrossTalk includes an **MCP (Model Context Protocol)** server:
-1. [`.agents/mcp_config.json`](file:///Users/Josh/Documents/cross-talk/.agents/mcp_config.json) is pre-configured in this repository.
-2. Tools exposed to the LLM:
-   - `crosstalk_check_mesh`: Check peer agents and locked files.
-   - `crosstalk_get_dialect_dictionary`: Fetch the active XDialect dictionary.
-   - `crosstalk_send_shorthand`: Emit concise shorthand messages (`!LCK`, `!REL`, `&WAIT`).
-   - `crosstalk_lock_file`: Cooperative file lock.
-   - `crosstalk_unlock_file`: Cooperative file unlock.
-   - `crosstalk_send_message`: Direct message another agent.
-   - `crosstalk_read_inbox`: Check unread notifications and conflict alerts.
+Agents can also post compact shorthand that expands to readable English:
 
-### Option B: Automatic File Guard via Antigravity Lifecycle Hooks
-In [`.agents/hooks.json`](file:///Users/Josh/Documents/cross-talk/.agents/hooks.json):
-- `PreToolUse` intercepts `replace_file_content` and `write_to_file`. If another agent holds a lock, it pauses execution and alerts the agent!
-- `PreInvocation` injects active peer status directly into the prompt context.
-
-### Option C: Python SDK
-```python
-from sdk.python.crosstalk import CrossTalkClient
-
-client = CrossTalkClient(name="Python-Worker", role="data-pipeline")
-client.connect()
-
-# Claim file using XDialect
-client.send_shorthand('!LCK @pipeline/etl.py #FEAT "batch chunking" ~120 &WAIT')
+```
+!LCK @src/auth.ts #REF "jwt sessions" ~300 &WAIT
+!REL @src/auth.ts &DONE &PROCEED
 ```
 
----
-
-## 🗄️ Zero-Weight Architecture & Optional MongoDB
-
-### Featherlight Local Installers
-- **Zero Database Overhead**: CLI packages, installers, and edge nodes install instantly without database weight.
-- **In-Memory Ring Buffer**: Default storage uses an ultra-fast in-memory circular ring buffer keeping the last 50–100 messages (`< 25 KB` RAM footprint).
-
-### Optional MongoDB Connection (Website & Hosted Nodes)
-For public websites, dashboards, or shared cloud hubs needing persistent total-message counters across restarts:
-- Set `MONGODB_URI` in your `.env` or Vercel dashboard:
-  ```bash
-  export MONGODB_URI="mongodb+srv://<user>:<password>@cluster.mongodb.net"
-  export MONGODB_DB_NAME="crosstalk"
-  ```
-- CrossTalk automatically provisions a **MongoDB Capped Collection** (`crosstalk_messages`, max 100 documents) which maintains a strict FIFO ring buffer with zero manual pruning overhead and O(1) performance.
-- If `MONGODB_URI` is omitted, the system seamlessly runs in pure in-memory mode with zero configuration.
+Use `shorthand.send` (or `ch.shorthand()`) to post it, and `crosstalk dialect '<expression>'` to translate it. `!LCK` and `!REL` take and release real locks. Plain messages work just as well; shorthand is never required. The dictionary is at `GET /api/dialect`.
 
 ---
 
-## 🚀 Vercel Deployment
-To deploy the CrossTalk portal and API directly to Vercel:
-```bash
-npx vercel
+## Add-on packages
+
+The core stays small. Extras live in [`packages/`](packages/) as separate packages:
+
+| Package | What it is |
+| :-- | :-- |
+| [`@cross-talk/gibberlink`](packages/gibberlink) | Carries FSK audio-signal packets in message metadata (`sendSignal`, `decodeSignal`). Inspired by [PennyroyalTea/gibberlink](https://github.com/PennyroyalTea/gibberlink). |
+| [`@cross-talk/embedded`](packages/embedded) | `StreamTransport` and `BinaryCodec` for serial links, plus firmware for microcontrollers: a C header, MicroPython, Arduino, AVR, ARM Thumb-2 and WebAssembly. |
+| [`@cross-talk/airgap`](packages/airgap) | Builds a single-file installer (`crosstalk-airgap.sh`) for machines with no internet access. |
+| [`@cross-talk/dialect-zh`](packages/dialect-zh) | Translates XDialect to and from Chinese (`toChinese`, `fromChinese`). |
+
+These packages aren't on npm yet. Each one's README explains how to use it from this repo.
+
+### Microcontrollers (status)
+
+`@cross-talk/embedded` is for devices too small to run an agent or a WebSocket client. They exchange a compact binary frame over serial or BLE with a host computer:
+
 ```
-1. Builds static assets from `dist/server/web`.
-2. Serves serverless endpoints in `/api` (`/api/stats`, `/api/history`, `/api/dialect`).
-3. Add `MONGODB_URI` under **Vercel Project Settings > Environment Variables** for live persistent telemetry.
+device ──serial / BLE──▶ host (Node, StreamTransport + BinaryCodec) ──▶ hub
+```
+
+**Devices can't join channels on their own.** The v2 hub accepts only JSON, so a host has to translate between binary frames and channel messages. That bridge isn't built yet. Until it is, the firmware and codec are only useful for device-to-host links you wire up yourself.
 
 ---
 
-## ⚡ Bare-Metal Assembly & Microcontrollers
+## Website
 
-For high-speed robotics, drones, and ultra-constrained microchips where even a C standard library is too heavy, CrossTalk provides handwritten **Assembly** routines:
-
-| Platform | File | Footprint | Speed |
-| :--- | :--- | :--- | :--- |
-| **ARM Cortex-M Thumb-2** | [`embedded/assembly/crosstalk_thumb.s`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/crosstalk_thumb.s) | **0 bytes RAM heap** (registers only) | **< 100 ns** |
-| **8-bit AVR** | [`embedded/assembly/crosstalk_avr.s`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/crosstalk_avr.s) | **0 bytes RAM heap** (registers `r18-r25`) | **~1.25 µs** (@16MHz) |
-| **WebAssembly** | [`embedded/assembly/crosstalk_wasm.wat`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/crosstalk_wasm.wat) | **Zero GC pause** (< 350 bytes WASM) | **Native JIT speed** |
-
-See [`embedded/assembly/README.md`](file:///Users/Josh/Documents/cross-talk/embedded/assembly/README.md) and [`embedded/crosstalk_micro.h`](file:///Users/Josh/Documents/cross-talk/embedded/crosstalk_micro.h) for embedded guides.
+The landing page and the cockpit (a browser view of a hub's channels) live in [`website/`](website/). They are not part of the npm package. See [`website/README.md`](website/README.md) to deploy them.
 
 ---
 
-## 👤 Architect & Origins
+## Development
 
-### Conceived & Engineered by Josh Ayokhai
-- **X / Twitter**: [@ajokhai](https://x.com/ajokhai) (`x.com/ajokhai`)
-- **GitHub**: [@ajokhai](https://github.com/ajokhai)
-- **Repository**: [github.com/ajokhai/cross-talk](https://github.com/ajokhai/cross-talk)
+```sh
+npm install
+npm run dev      # hub with tsx
+npm test
+npm run build
+```
 
-Josh conceived and architected **CrossTalk** to solve the primary bottlenecks in multi-agent autonomous engineering:
-1. **Zero Context-Dumping**: Stopping LLMs from spending 90%+ of their tokens re-dumping chat histories at each other for simple handoffs.
-2. **Deterministic Conflict Prevention**: Preventing simultaneous edits across developers, terminals, and git branches.
-3. **Pervasive Swarm Intelligence**: Bridging frontier cloud models (Grok, ChatGPT, Gemini, Claude) with physical hardware, microcontrollers, and robotics over a unified, ultra-compact bitstream protocol.
+## License
 
-### Origins & Inspiration
-CrossTalk pays tribute to Anton Pidkuiko & Boris Starkov's viral [PennyroyalTea/gibberlink](https://github.com/PennyroyalTea/gibberlink) prototype created at the ElevenLabs Hackathon, which proved that AI models could communicate via acoustic sound frequencies. CrossTalk took that initial spark and evolved it into a full-duplex binary WebSocket mesh, XDialect token compression, Subnet Boundary Guard, and multi-model consensus network.
-
----
-
-## 📜 License
-MIT License © [Josh Ayokhai](https://x.com/ajokhai)
-
-
-
+MIT © [Josh Ayokhai](https://x.com/ajokhai)
