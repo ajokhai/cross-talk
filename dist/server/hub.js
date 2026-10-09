@@ -473,14 +473,54 @@ export class MeshHub {
                 }
                 break;
             }
-            case 'query_state': {
+            case 'switch_channel': {
                 const client = this.getClientByWs(ws);
-                const channel = client?.channel || 'default';
+                if (!client) {
+                    this.send(ws, { type: 'error', message: 'Not registered yet' });
+                    return;
+                }
+                const targetChannel = packet.channel || 'default';
+                client.channel = targetChannel;
+                const agentsInTarget = targetChannel === '*'
+                    ? this.getAllAgents().filter(a => a.id !== client.agent.id)
+                    : this.getAgentsInChannel(targetChannel).filter(a => a.id !== client.agent.id);
+                const locksInTarget = targetChannel === '*'
+                    ? this.lockManager.getLocks()
+                    : this.lockManager.getLocks(targetChannel);
+                const recentInTarget = targetChannel === '*'
+                    ? this.getAllRecentMessages()
+                    : this.getRecentMessages(targetChannel);
                 this.send(ws, {
                     type: 'state_snapshot',
-                    agents: this.getAgentsInChannel(channel),
-                    locks: this.lockManager.getLocks(channel),
-                    recentMessages: this.getRecentMessages(channel)
+                    channel: targetChannel,
+                    mesh: {
+                        agents: agentsInTarget,
+                        locks: locksInTarget,
+                        recentMessages: recentInTarget
+                    }
+                });
+                break;
+            }
+            case 'query_state': {
+                const client = this.getClientByWs(ws);
+                const requestedChannel = packet.channel || client?.channel || 'default';
+                const agentsInTarget = requestedChannel === '*'
+                    ? this.getAllAgents().filter(a => a.id !== client?.agent.id)
+                    : this.getAgentsInChannel(requestedChannel).filter(a => a.id !== client?.agent.id);
+                const locksInTarget = requestedChannel === '*'
+                    ? this.lockManager.getLocks()
+                    : this.lockManager.getLocks(requestedChannel);
+                const recentInTarget = requestedChannel === '*'
+                    ? this.getAllRecentMessages()
+                    : this.getRecentMessages(requestedChannel);
+                this.send(ws, {
+                    type: 'state_snapshot',
+                    channel: requestedChannel,
+                    mesh: {
+                        agents: agentsInTarget,
+                        locks: locksInTarget,
+                        recentMessages: recentInTarget
+                    }
                 });
                 break;
             }
@@ -523,7 +563,7 @@ export class MeshHub {
     }
     broadcastToChannel(channel, packet, excludeIds = []) {
         for (const [id, client] of this.clients.entries()) {
-            if (client.channel === channel && !excludeIds.includes(id)) {
+            if ((client.channel === channel || client.channel === '*') && !excludeIds.includes(id)) {
                 this.send(client.ws, packet);
             }
         }
@@ -554,6 +594,43 @@ export class MeshHub {
     }
     getRecentMessages(channel) {
         return this.messageHistory.get(channel) || [];
+    }
+    getAllRecentMessages(limit = 100) {
+        const all = [];
+        for (const msgs of this.messageHistory.values()) {
+            all.push(...msgs);
+        }
+        all.sort((a, b) => a.timestamp - b.timestamp);
+        return all.slice(-limit);
+    }
+    getSessions() {
+        const channelSet = new Set(['default']);
+        for (const client of this.clients.values()) {
+            if (client.channel && client.channel !== '*')
+                channelSet.add(client.channel);
+        }
+        for (const ch of this.messageHistory.keys()) {
+            channelSet.add(ch);
+        }
+        for (const lock of this.lockManager.getLocks()) {
+            if (lock.channel)
+                channelSet.add(lock.channel);
+        }
+        const sessions = [];
+        for (const ch of channelSet) {
+            const msgs = this.messageHistory.get(ch) || [];
+            const locks = this.lockManager.getLocks(ch);
+            const agents = this.getAgentsInChannel(ch);
+            const lastMsgTime = msgs.length > 0 ? msgs[msgs.length - 1].timestamp : 0;
+            sessions.push({
+                channel: ch,
+                agentCount: agents.length,
+                lockCount: locks.length,
+                messageCount: msgs.length,
+                lastActivity: lastMsgTime || this.startTime
+            });
+        }
+        return sessions;
     }
     appendMessageHistory(channel, msg) {
         this.totalMessagesRouted++;

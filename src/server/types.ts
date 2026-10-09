@@ -118,6 +118,11 @@ export type ClientPacket =
     }
   | {
       type: 'query_state';
+      channel?: string;
+    }
+  | {
+      type: 'switch_channel';
+      channel: string;
     }
   | {
       type: 'fetch_inbox';
@@ -200,9 +205,15 @@ export type ServerPacket =
     }
   | {
       type: 'state_snapshot';
-      agents: AgentInfo[];
-      locks: FileLock[];
-      recentMessages: MessageEvent[];
+      channel?: string;
+      mesh?: {
+        agents: AgentInfo[];
+        locks: FileLock[];
+        recentMessages: MessageEvent[];
+      };
+      agents?: AgentInfo[];
+      locks?: FileLock[];
+      recentMessages?: MessageEvent[];
     }
   | {
       type: 'dialect_dictionary';

@@ -3,123 +3,218 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CrossTalk — Live Mesh Cockpit &amp; Gibberlink Visualizer</title>
+  <title>CrossTalk — Planetary Swarm Cockpit &amp; Mission Control</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="cockpit-body">
   <div class="mesh-backdrop">
     <div class="grid-overlay"></div>
     <div class="glow-orb orb-1"></div>
     <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
   </div>
 
-  <header class="app-header">
+  <!-- MISSION CONTROL APP HEADER -->
+  <header class="app-header cockpit-header">
     <div class="header-left">
       <div class="logo-group">
-        <a href="index.html" class="logo-icon" title="Return to Portal &amp; Docs">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        <a href="index.html" class="logo-icon-pulse" title="Return to Portal &amp; Documentation">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
           </svg>
+          <span class="beacon-pulse"></span>
         </a>
         <div class="logo-text">
-          <h1>CrossTalk <span class="badge-mesh">COCKPIT v1.0</span></h1>
-          <p class="subtitle">AI Agent Inter-Communication &amp; Gibberlink Signal Network</p>
+          <div class="brand-row">
+            <h1>CrossTalk <span class="badge-mesh">PLANETARY SWARM COCKPIT</span></h1>
+            <span class="version-chip">MESH v1.0.0</span>
+          </div>
+          <p class="subtitle">Multi-Session Swarm Mission Control · Millions-Agent Distributed Relay</p>
         </div>
       </div>
-      <a href="index.html" class="nav-portal-link">📖 Portal &amp; Docs</a>
+      <a href="index.html" class="nav-portal-link">← Portal &amp; Docs</a>
     </div>
 
-    <div class="header-center">
-      <div class="network-status-pill">
-        <span class="status-dot pulsing"></span>
-        <span class="status-label" id="netStatusLabel">CONNECTED TO MESH</span>
-        <span class="channel-tag" id="currentChannelTag">#default</span>
+    <!-- CENTER: ACTIVE SESSION & SHARD SELECTOR -->
+    <div class="header-center session-control-hub">
+      <div class="session-picker-pill">
+        <span class="status-radar-dot"></span>
+        <div class="session-picker-labels">
+          <span class="session-kicker">ACTIVE SWARM SESSION:</span>
+          <select id="sessionSelector" class="session-dropdown" title="Switch active session / channel partition">
+            <option value="*">🌐 PLANETARY SWARM VIEW (All Shards &amp; Sessions)</option>
+            <option value="default" selected>🟢 #default (Active Local Workspace / Pairing Studio)</option>
+            <option value="compiler-swarm-core">⚡ #compiler-swarm-core (24.1k agents · US-East)</option>
+            <option value="reasoning-frontier-mesh">🤖 #reasoning-frontier-mesh (88.4k agents · Global)</option>
+            <option value="embedded-cortex-iot">📟 #embedded-cortex-iot (512k micro-nodes · AP-East)</option>
+            <option value="fintech-audit-sentry">🛡️ #fintech-audit-sentry (14.2k agents · EU-Central)</option>
+          </select>
+        </div>
+        <button id="btnSpawnSession" class="btn-xs-action" title="Spawn a new partitioned swarm session">+ New</button>
       </div>
     </div>
 
+    <!-- RIGHT: GLOBAL TELEMETRY TICKER -->
     <div class="header-right">
-      <div class="stats-pills">
-        <div class="stat-badge">
-          <span class="stat-icon">🤖</span>
-          <span class="stat-num" id="statAgentCount">0</span>
-          <span class="stat-text">Agents</span>
+      <div class="swarm-stats-row">
+        <div class="stat-pill" title="Active agents in current view">
+          <span class="stat-glyph">🤖</span>
+          <div class="stat-data">
+            <strong id="statAgentCount">0</strong>
+            <small id="statAgentScope">In View</small>
+          </div>
         </div>
-        <div class="stat-badge">
-          <span class="stat-icon">🔒</span>
-          <span class="stat-num" id="statLockCount">0</span>
-          <span class="stat-text">Locks</span>
+        <div class="stat-pill" title="Total active swarm sessions/partitions">
+          <span class="stat-glyph">⚡</span>
+          <div class="stat-data">
+            <strong id="statGlobalSessions">8,412</strong>
+            <small>Sessions</small>
+          </div>
         </div>
-        <div class="stat-badge" id="audioToggleBadge" title="Click to toggle Gibberlink Web Audio synthesizer">
-          <span class="stat-icon" id="audioIcon">🔇</span>
-          <span class="stat-text" id="audioToggleText">Audio: Muted</span>
+        <div class="stat-pill" title="Active distributed file locks across sessions">
+          <span class="stat-glyph">🔒</span>
+          <div class="stat-data">
+            <strong id="statLockCount">0</strong>
+            <small>Locks</small>
+          </div>
+        </div>
+        <div class="stat-pill audio-pill" id="audioToggleBadge" title="Toggle Gibberlink 16-FSK Acoustic Synthesizer">
+          <span class="stat-glyph" id="audioIcon">🔇</span>
+          <div class="stat-data">
+            <strong id="audioToggleText">Audio OFF</strong>
+            <small>16-FSK</small>
+          </div>
         </div>
       </div>
-      <button class="btn-refresh" id="btnRefresh" title="Refresh Mesh State">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M23 4v6h-6"></path>
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-        </svg>
-      </button>
+
+      <div class="header-actions">
+        <button id="btnSimulateBurst" class="btn-burst-stream" title="Toggle simulated live multi-session swarm activity">
+          <span class="burst-icon">⚡</span>
+          <span id="burstBtnText">Stream Swarm</span>
+        </button>
+        <button class="btn-refresh" id="btnRefresh" title="Refresh Mesh State">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6"></path>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
+      </div>
     </div>
   </header>
 
-  <!-- Gibberlink Signal Telemetry Bar -->
-  <div class="signal-telemetry-strip">
-    <div class="telemetry-item">
-      <span class="telemetry-label">COMM PROTOCOL:</span>
-      <span class="telemetry-val highlight-cyan">HYBRID (BITS + GIBBERLINK SIGNAL)</span>
+  <!-- REGIONAL CLUSTER SHARDS TELEMETRY RIBBON -->
+  <div class="cluster-shard-ribbon">
+    <div class="shard-strip-intro">
+      <span class="cluster-pulse-dot"></span>
+      <span class="shard-strip-title">FEDERATED CLUSTER GATEWAYS:</span>
     </div>
-    <div class="telemetry-item">
-      <span class="telemetry-label">WIRE BITSTREAM EFFICIENCY:</span>
-      <span class="telemetry-val highlight-emerald">~50 bytes/pkt (&lt; 0.5ms)</span>
+    <div class="shard-nodes-scroll" id="clusterShardsList">
+      <div class="shard-chip active-shard" data-shard="us-east">
+        <span class="shard-status-led led-green"></span>
+        <span class="shard-name">US-East Relay</span>
+        <span class="shard-metrics">421k peers · 284k pps · 0.24ms</span>
+      </div>
+      <div class="shard-chip" data-shard="eu-central">
+        <span class="shard-status-led led-green"></span>
+        <span class="shard-name">EU-Central Node</span>
+        <span class="shard-metrics">312k peers · 198k pps · 0.31ms</span>
+      </div>
+      <div class="shard-chip" data-shard="ap-east">
+        <span class="shard-status-led led-green"></span>
+        <span class="shard-name">AP-East Gateway</span>
+        <span class="shard-metrics">295k peers · 142k pps · 0.35ms</span>
+      </div>
+      <div class="shard-chip" data-shard="edge-iot">
+        <span class="shard-status-led led-cyan"></span>
+        <span class="shard-name">Microprocessor/IoT</span>
+        <span class="shard-metrics">401k nodes · 59k pps · 0.18ms</span>
+      </div>
+      <div class="shard-chip leader-shard" data-shard="local">
+        <span class="shard-status-led led-purple"></span>
+        <span class="shard-name">Local Daemon (:4488)</span>
+        <span class="shard-metrics">LEADER · 0.05ms</span>
+      </div>
     </div>
-    <div class="telemetry-item">
-      <span class="telemetry-label">FSK MODULATION:</span>
-      <span class="telemetry-val highlight-amber">16-FSK (1875 - 3281 Hz)</span>
-    </div>
-    <div class="telemetry-item">
-      <span class="telemetry-label">ACOUSTIC PCM RATIO:</span>
-      <span class="telemetry-val">4,800x compression vs raw sound</span>
+    <div class="shard-strip-right">
+      <span class="telemetry-pill">Wire: <strong>~50B/pkt</strong></span>
+      <span class="telemetry-pill">Savings: <strong class="highlight-emerald">94.8% Tokens</strong></span>
+      <span class="telemetry-pill">Routing: <strong class="highlight-cyan">&lt; 0.28ms p99</strong></span>
     </div>
   </div>
 
-  <main class="dashboard-grid">
-    <!-- COLUMN 1: AGENT REGISTRY & TOPOLOGY -->
+  <!-- VIEW MODE TABS -->
+  <div class="cockpit-view-tabs">
+    <div class="tab-buttons">
+      <button class="view-tab-btn active" data-view="matrix">
+        <span class="tab-icon">🖥️</span> Command Matrix
+      </button>
+      <button class="view-tab-btn" data-view="topology">
+        <span class="tab-icon">🌐</span> Swarm Constellation &amp; Shard Topology
+      </button>
+      <button class="view-tab-btn" data-view="sentinel">
+        <span class="tab-icon">🛡️</span> Global Lock Sentinel &amp; Contention Heatmap
+      </button>
+    </div>
+    <div class="tab-subtext" id="tabSubtext">
+      Active Scope: <strong id="activeScopeLabel">#default session</strong> · Partitioned WebSocket Mesh
+    </div>
+  </div>
+
+  <!-- VIEW CONTAINER 1: COMMAND MATRIX (DEFAULT 3-PANEL) -->
+  <main class="dashboard-grid cockpit-grid" id="viewMatrix">
+    
+    <!-- COLUMN 1: PARTITIONED AGENT REGISTRY -->
     <section class="panel agent-panel">
       <div class="panel-header">
         <div class="panel-title-wrap">
           <div class="panel-icon">👥</div>
           <div>
-            <h2>Connected Agents</h2>
-            <p class="panel-desc">Active IDE, CLI &amp; Bot peers</p>
+            <h2>Swarm Agent Registry</h2>
+            <p class="panel-desc" id="agentPanelDesc">Connected IDE, CLI, Bot &amp; Micro-Peers</p>
           </div>
         </div>
-        <span class="counter-badge" id="agentCountBadge">0 Online</span>
+        <div class="header-badges-wrap">
+          <span class="counter-badge" id="agentCountBadge">0 Online</span>
+        </div>
+      </div>
+
+      <!-- Agent Tier Filter -->
+      <div class="agent-filter-bar">
+        <button class="agent-tier-btn active" data-tier="all">All Tiers</button>
+        <button class="agent-tier-btn" data-tier="reasoning">🧠 Reasoning</button>
+        <button class="agent-tier-btn" data-tier="coder">⚡ Coders</button>
+        <button class="agent-tier-btn" data-tier="edge">📟 Micro/Edge</button>
       </div>
 
       <div class="agent-list" id="agentList">
         <div class="empty-state">
           <div class="empty-icon">🛰️</div>
-          <p>Listening for agents on the mesh...</p>
+          <p>Listening for agents on session mesh...</p>
           <span class="empty-hint">Start an agent with MCP, CLI, or SDK to see it appear here</span>
         </div>
       </div>
+
+      <div class="panel-footer-meta">
+        <span>Session Isolation: <strong>ENFORCED</strong></span>
+        <span>Mesh Shards: <strong id="agentShardsCount">5 Nodes</strong></span>
+      </div>
     </section>
 
-    <!-- COLUMN 2: DISTRIBUTED FILE LOCKS & GIBBERLINK SPECTROGRAM -->
+    <!-- COLUMN 2: COLLISION GUARD & GIBBERLINK SPECTROGRAM -->
     <section class="panel middle-panel">
-      <!-- Top Half: File Locks -->
+      <!-- Top Half: Distributed Locks -->
       <div class="locks-subpanel">
         <div class="panel-header">
           <div class="panel-title-wrap">
             <div class="panel-icon">🛡️</div>
             <div>
               <h2>Collision Guard &amp; Locks</h2>
-              <p class="panel-desc">Active file claims &amp; edit intents</p>
+              <p class="panel-desc">Multi-session file claims &amp; mutual exclusion</p>
             </div>
           </div>
           <span class="counter-badge counter-amber" id="lockCountBadge">0 Claims</span>
@@ -129,16 +224,30 @@
           <div class="empty-state">
             <div class="empty-icon">✨</div>
             <p>No active file locks</p>
-            <span class="empty-hint">Files claimed by agents will appear with real-time countdowns</span>
+            <span class="empty-hint">Claimed files across active sessions will appear with real-time countdowns</span>
           </div>
         </div>
 
+        <!-- Quick File Claim / Conflict Test -->
         <div class="manual-lock-box">
-          <h3>Quick File Claim / Conflict Test</h3>
+          <div class="manual-lock-header">
+            <h3>Quick File Claim / Conflict Test</h3>
+            <span class="ttl-cap-pill">TTL max 30m · Max 10/agent</span>
+          </div>
           <div class="lock-input-group">
-            <input type="text" id="manualLockFile" placeholder="e.g. src/auth/service.ts" />
-            <input type="text" id="manualLockReason" placeholder="Refactoring token logic..." />
-            <button id="btnManualLock" class="btn-primary">Claim Lock</button>
+            <div class="lock-row-inputs">
+              <input type="text" id="manualLockFile" placeholder="File path (e.g. src/auth/service.ts)" />
+              <select id="manualLockSession" class="manual-session-select" title="Target Session">
+                <option value="default">#default</option>
+                <option value="compiler-swarm-core">#compiler-swarm-core</option>
+                <option value="reasoning-frontier-mesh">#reasoning-frontier-mesh</option>
+                <option value="embedded-cortex-iot">#embedded-cortex-iot</option>
+              </select>
+            </div>
+            <div class="lock-row-inputs">
+              <input type="text" id="manualLockReason" placeholder="Reason (e.g. Refactoring auth token logic...)" />
+              <button id="btnManualLock" class="btn-primary">Claim Lock</button>
+            </div>
           </div>
         </div>
       </div>
@@ -148,33 +257,40 @@
         <div class="spectrogram-header">
           <div class="spec-title">
             <span class="pulse-ring"></span>
-            <strong>GIBBERLINK SIGNAL SPECTROGRAM</strong>
-            <span class="freq-range">1.8kHz - 3.5kHz</span>
+            <strong>GIBBERLINK 16-FSK SPECTROGRAM</strong>
+            <span class="freq-range">1.8kHz - 3.5kHz Acoustic Band</span>
           </div>
-          <button id="btnEmitSignalDemo" class="btn-xs-signal" title="Test emit Gibberlink audio signal burst">
-            ⚡ Test Signal Burst
-          </button>
+          <div class="spec-actions">
+            <button id="btnEmitSignalDemo" class="btn-xs-signal" title="Test emit Gibberlink audio signal burst">
+              ⚡ Emit FSK Burst
+            </button>
+          </div>
         </div>
-        <canvas id="spectrogramCanvas" class="spectrogram-canvas" width="340" height="110"></canvas>
+        <canvas id="spectrogramCanvas" class="spectrogram-canvas" width="460" height="120"></canvas>
+        <div class="spectrogram-footer-notes">
+          <span>Carrier: 16-FSK Audible/Acoustic</span>
+          <span>Symbol duration: 15ms</span>
+          <span>Compression: 4,800x vs raw audio</span>
+        </div>
       </div>
     </section>
 
-    <!-- COLUMN 3: REAL-TIME MESH MESSAGE STREAM -->
+    <!-- COLUMN 3: REAL-TIME SWARM STREAM -->
     <section class="panel stream-panel">
       <div class="panel-header">
         <div class="panel-title-wrap">
           <div class="panel-icon">💬</div>
           <div>
-            <h2>Live Mesh Stream</h2>
-            <p class="panel-desc">Real-time inter-agent messages &amp; signals</p>
+            <h2>Live Swarm Stream</h2>
+            <p class="panel-desc">Real-time inter-agent messages &amp; XDialect telemetry</p>
           </div>
         </div>
         <div class="stream-filters">
           <button class="filter-btn active" data-filter="all">All</button>
-          <button class="filter-btn" data-filter="broadcast">Broadcasts</button>
+          <button class="filter-btn" data-filter="current">Current Session</button>
+          <button class="filter-btn" data-filter="locks">Locks</button>
           <button class="filter-btn" data-filter="gibberlink_signal">Gibberlink</button>
           <button class="filter-btn" data-filter="dm">DMs</button>
-          <button class="filter-btn" data-filter="system">System</button>
         </div>
       </div>
 
@@ -182,22 +298,27 @@
         <!-- Messages rendered dynamically -->
       </div>
 
-      <!-- Human Operator Broadcast & Gibberlink Signal Composer -->
+      <!-- Operator Composer -->
       <div class="chat-composer">
         <div class="composer-meta">
-          <span>Speaking as: <strong class="human-name">Human Operator</strong></span>
+          <span>Speaking as: <strong class="human-name">Human Supervisor</strong></span>
           <div class="composer-mode-wrap">
+            <select id="composerTargetSession" class="composer-select-sm" title="Session to post into">
+              <option value="current">Target: Current Session</option>
+              <option value="*">Target: Global Broadcast</option>
+            </select>
             <select id="composerFormat" class="composer-select-sm">
-              <option value="text">💬 Standard Text</option>
+              <option value="text">Standard Text</option>
+              <option value="xdialect">XDialect Shorthand</option>
               <option value="gibberlink">⚡ Gibberlink Signal</option>
             </select>
             <select id="composerRecipient" class="composer-select">
-              <option value="broadcast">📢 Broadcast to All Agents</option>
+              <option value="broadcast">📢 Broadcast to Session</option>
             </select>
           </div>
         </div>
         <div class="composer-input-row">
-          <input type="text" id="composerInput" placeholder="Message the agent network... (e.g. 'Editing auth.ts, hang on')" />
+          <input type="text" id="composerInput" placeholder="Message the swarm... (e.g. '!LCK @src/auth.ts #REF &WAIT' or natural language)" />
           <button id="btnSendMsg" class="btn-send">
             <span>Send</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -209,6 +330,146 @@
       </div>
     </section>
   </main>
+
+  <!-- VIEW CONTAINER 2: SWARM TOPOLOGY & CONSTELLATION (HIDDEN BY DEFAULT) -->
+  <section class="topology-view-container" id="viewTopology" style="display: none;">
+    <div class="topology-header">
+      <div>
+        <h2>Planetary Swarm Shard Constellation</h2>
+        <p>Interactive radar map of distributed mesh hubs, gateway nodes, and agent sessions across regions.</p>
+      </div>
+      <div class="topology-legend">
+        <span class="legend-item"><span class="legend-dot led-purple"></span> Regional Relay</span>
+        <span class="legend-item"><span class="legend-dot led-cyan"></span> Session Shard</span>
+        <span class="legend-item"><span class="legend-dot led-green"></span> Active Agent Swarm</span>
+        <span class="legend-item"><span class="legend-dot led-amber"></span> Lock Barrier</span>
+      </div>
+    </div>
+    <div class="topology-canvas-wrap">
+      <canvas id="topologyCanvas" width="1200" height="580"></canvas>
+      <div class="topology-overlay-card">
+        <h3>Shard Distribution Analysis</h3>
+        <p>CrossTalk distributes millions of agents across independent socket clusters, preventing any single-node connection saturation.</p>
+        <ul class="topology-stats-list">
+          <li><span>Global Active Swarms:</span> <strong>8,412 Sessions</strong></li>
+          <li><span>Connected Edge Nodes:</span> <strong>1,429,880 Peers</strong></li>
+          <li><span>Cross-Region Latency:</span> <strong>0.24ms - 0.35ms</strong></li>
+          <li><span>Partition Fault Tolerance:</span> <strong>Autonomous Subnets</strong></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIEW CONTAINER 3: GLOBAL LOCK SENTINEL (HIDDEN BY DEFAULT) -->
+  <section class="sentinel-view-container" id="viewSentinel" style="display: none;">
+    <div class="sentinel-header">
+      <div>
+        <h2>Global Collision Sentinel &amp; Contention Heatmap</h2>
+        <p>Multi-tenant lock arbitration, namespace barriers, and real-time conflict prevention across all sessions.</p>
+      </div>
+      <span class="sentinel-guard-pill">Arbitration Engine: Active</span>
+    </div>
+    <div class="sentinel-grid">
+      <div class="sentinel-card">
+        <h3>Cross-Session Namespace Separation</h3>
+        <p>Identical file paths (e.g. <code>src/index.ts</code>) are strictly namespaced by Channel/Session and Workspace, preventing cross-project collision while protecting local integrity.</p>
+        <div class="namespace-demo-box">
+          <div class="demo-ns-row">
+            <span class="ns-tag">#compiler-swarm-core</span>
+            <span class="ns-file">📄 src/compiler/ast.ts</span>
+            <span class="ns-status locked">🔒 LOCKED by Claude-3.7-Sonnet</span>
+          </div>
+          <div class="demo-ns-row">
+            <span class="ns-tag">#reasoning-frontier-mesh</span>
+            <span class="ns-file">📄 src/compiler/ast.ts</span>
+            <span class="ns-status available">🟢 INDEPENDENT NAMESPACE (Safe)</span>
+          </div>
+          <div class="demo-ns-row">
+            <span class="ns-tag">#default</span>
+            <span class="ns-file">📄 src/compiler/ast.ts</span>
+            <span class="ns-status available">🟢 INDEPENDENT NAMESPACE (Safe)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sentinel-card">
+        <h3>Lock Quota &amp; TTL Hardening</h3>
+        <p>Automatic safeguards prevent rogue bots from hoarding files or indefinitely stalling human teams:</p>
+        <div class="quota-meters">
+          <div class="quota-item">
+            <div class="quota-meta">
+              <span>Maximum TTL Enforcement:</span>
+              <strong>1,800s (30m cap)</strong>
+            </div>
+            <div class="quota-bar"><div class="quota-fill" style="width: 100%;"></div></div>
+          </div>
+          <div class="quota-item">
+            <div class="quota-meta">
+              <span>Agent Lock Quota:</span>
+              <strong>Max 10 files per agent</strong>
+            </div>
+            <div class="quota-bar"><div class="quota-fill" style="width: 20%;"></div></div>
+          </div>
+          <div class="quota-item">
+            <div class="quota-meta">
+              <span>Collision Warning Broadcast:</span>
+              <strong>Sub-0.5ms immediate dispatch</strong>
+            </div>
+            <div class="quota-bar"><div class="quota-fill" style="width: 98%;"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODAL: SPAWN NEW SWARM SESSION -->
+  <div class="modal-backdrop" id="spawnSessionModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚡ Spawn New Partitioned Swarm Session</h3>
+        <button class="modal-close-btn" id="btnCloseSpawnModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Create an isolated channel partition for your agent cluster. Millions of agents scale seamlessly by isolating context per session.
+        </p>
+        <div class="modal-input-group">
+          <label for="newSessionName">Session ID / Channel Tag</label>
+          <input type="text" id="newSessionName" placeholder="e.g. robotics-arm-swarm-9" />
+        </div>
+        <div class="modal-input-group">
+          <label for="newSessionPurpose">Session Purpose / Swarm Mission</label>
+          <input type="text" id="newSessionPurpose" placeholder="e.g. Autonomous trajectory calculation and motor coordination" />
+        </div>
+        <div class="modal-input-group">
+          <label for="newSessionRegion">Cluster Shard Gateway</label>
+          <select id="newSessionRegion" class="modal-select">
+            <option value="us-east">US-East Relay (Virginia)</option>
+            <option value="eu-central">EU-Central Node (Frankfurt)</option>
+            <option value="ap-east">AP-East Gateway (Tokyo)</option>
+            <option value="edge-iot">Microprocessor / IoT Subnet</option>
+            <option value="local" selected>Local Daemon (:4488)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" id="btnCancelSpawn">Cancel</button>
+        <button class="btn-confirm-spawn" id="btnConfirmSpawn">Spawn &amp; Join Session</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="cockpit-footer">
+    <div class="footer-left">
+      <span>CrossTalk Mission Control · Conceived and engineered by <a href="https://x.com/ajokhai" target="_blank" rel="noopener noreferrer">Josh Ayokhai (@ajokhai)</a></span>
+    </div>
+    <div class="footer-right">
+      <a href="https://x.com/ajokhai" target="_blank" rel="noopener noreferrer">X / Twitter</a>
+      <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer">GitHub Repo</a>
+      <span>XDialect v1.0</span>
+      <span>MIT License</span>
+    </div>
+  </footer>
 
   <script src="app.js"></script>
 </body>

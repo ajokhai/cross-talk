@@ -29,6 +29,14 @@ export declare class MeshHub {
     getAgentsInChannel(channel: string): AgentInfo[];
     getAllAgents(): AgentInfo[];
     getRecentMessages(channel: string): MessageEvent[];
+    getAllRecentMessages(limit?: number): MessageEvent[];
+    getSessions(): Array<{
+        channel: string;
+        agentCount: number;
+        lockCount: number;
+        messageCount: number;
+        lastActivity: number;
+    }>;
     private appendMessageHistory;
     getStats(channel?: string): {
         totalMessagesRouted: number;
