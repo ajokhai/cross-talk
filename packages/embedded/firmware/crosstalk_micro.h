@@ -66,6 +66,14 @@ typedef enum {
 #define XT_FLOW_DONE    (1 << 2)  /* &DONE: Task finished */
 #define XT_FLOW_PROCEED (1 << 3)  /* &PROCEED: Clear to proceed */
 
+/* Frame header flag bits (byte 3) */
+#define XT_FLAG_ACK_REQUESTED  (1 << 0)  /* Device wants a reply (DIRECT_MSG: reply expected) */
+#define XT_FLAG_RESPONSE       (1 << 1)  /* Host reply to a device request */
+#define XT_FLAG_CONFLICT       (1 << 2)  /* Someone wants a lock this device holds */
+
+/* Agent names (REGISTER, DM to/from) are at most this many bytes on the wire. */
+#define XT_MAX_NAME_LEN        32
+
 /* Static Raw Packet Container */
 typedef struct {
     uint8_t  buffer[XT_MAX_PACKET_SIZE];
@@ -133,10 +141,15 @@ static inline int xt_encode_claim(
     uint16_t ttl_sec
 ) {
     uint8_t payload[XT_MAX_PACKET_SIZE - XT_HEADER_SIZE];
-    uint8_t target_len = (uint8_t)strlen(target_file);
-    uint8_t reason_len = (uint8_t)(reason ? strlen(reason) : 0);
+    size_t target_len, reason_len;
 
-    if (5 + 1 + target_len + 1 + reason_len > sizeof(payload)) {
+    if (!pkt || !target_file) {
+        return -1;
+    }
+    target_len = strlen(target_file);
+    reason_len = reason ? strlen(reason) : 0;
+    /* Lengths travel as one byte each, and the whole payload must fit the packet. */
+    if (target_len > 255 || reason_len > 255 || 5 + 1 + target_len + 1 + reason_len > sizeof(payload)) {
         return -1;
     }
 
@@ -146,16 +159,16 @@ static inline int xt_encode_claim(
     payload[3] = (uint8_t)((ttl_sec >> 8) & 0xFF);
     payload[4] = (uint8_t)(ttl_sec & 0xFF);
 
-    payload[5] = target_len;
+    payload[5] = (uint8_t)target_len;
     memcpy(&payload[6], target_file, target_len);
 
-    uint16_t reason_offset = 6 + target_len;
-    payload[reason_offset] = reason_len;
+    uint16_t reason_offset = (uint16_t)(6 + target_len);
+    payload[reason_offset] = (uint8_t)reason_len;
     if (reason_len > 0) {
         memcpy(&payload[reason_offset + 1], reason, reason_len);
     }
 
-    uint16_t total_payload_len = reason_offset + 1 + reason_len;
+    uint16_t total_payload_len = (uint16_t)(reason_offset + 1 + reason_len);
     return xt_build_packet(pkt, XT_OP_LOCK_ACQUIRE, 0x00, 0, payload, total_payload_len);
 }
 
@@ -166,8 +179,16 @@ static inline int xt_encode_release(
     xt_packet_t* pkt,
     const char* target_file
 ) {
-    uint8_t payload[64];
-    uint8_t target_len = (uint8_t)strlen(target_file);
+    uint8_t payload[XT_MAX_PACKET_SIZE - XT_HEADER_SIZE];
+    size_t target_len;
+
+    if (!pkt || !target_file) {
+        return -1;
+    }
+    target_len = strlen(target_file);
+    if (target_len > 255 || 7 + target_len > sizeof(payload)) {
+        return -1; /* Would overflow the payload buffer */
+    }
 
     payload[0] = XT_TOK_REL;
     payload[1] = 0x00;
@@ -175,11 +196,11 @@ static inline int xt_encode_release(
     payload[3] = 0x00;
     payload[4] = 0x00;
 
-    payload[5] = target_len;
+    payload[5] = (uint8_t)target_len;
     memcpy(&payload[6], target_file, target_len);
     payload[6 + target_len] = 0; /* 0-length reason */
 
-    uint16_t total_payload_len = 7 + target_len;
+    uint16_t total_payload_len = (uint16_t)(7 + target_len);
     return xt_build_packet(pkt, XT_OP_LOCK_RELEASE, 0x00, 0, payload, total_payload_len);
 }
 
@@ -217,6 +238,141 @@ static inline int xt_decode_packet(
     return 0;
 }
 
+
+/* ==============================================================================
+ * Conversation helpers (host bridge profile)
+ *
+ * A device joins a CrossTalk conversation through the host bridge
+ * (`crosstalk-bridge` in packages/embedded). Payload layouts:
+ *
+ *   Device -> host                       Host -> device (unsolicited)
+ *   REGISTER    UTF-8 name (<= 32 B)     BROADCAST  [from_len:1][from][text]
+ *   HEARTBEAT   empty or status text     DIRECT_MSG [from_len:1][from][text]
+ *   BROADCAST   UTF-8 text               LOCK_ACQUIRE packed !LCK (holder in reason),
+ *   DIRECT_MSG  [to_len:1][to][text]       or packed !WARN with XT_FLAG_CONFLICT
+ *   STATE_QUERY empty                    LOCK_RELEASE packed !REL
+ *
+ * Replies carry XT_FLAG_RESPONSE: REGISTER -> agent id text, HEARTBEAT -> empty,
+ * LOCK_ACK / LOCK_DENIED -> packed XDialect, STATE_QUERY -> "members=N locks=M".
+ * Note the direction: device BROADCAST is plain text, host BROADCAST is
+ * attributed ([from_len][from][text]).
+ *
+ * Decoders return pointers into the received buffer; strings are NOT
+ * NUL-terminated, so use the returned lengths.
+ * ============================================================================== */
+
+/* True if the bridge would read this first byte as packed XDialect, not text. */
+static inline int xt_is_packed_action(uint8_t byte) {
+    return (byte >= 0x10 && byte <= 0x15) || byte == 0x70 || byte == 0x71;
+}
+
+/* REGISTER: announce the device's agent name. Send it as the first frame. */
+static inline int xt_encode_register(xt_packet_t* pkt, const char* name) {
+    size_t len;
+    if (!pkt || !name) return -1;
+    len = strlen(name);
+    if (len == 0 || len > XT_MAX_NAME_LEN) return -1;
+    return xt_build_packet(pkt, XT_OP_REGISTER, 0x00, 0, (const uint8_t*)name, (uint16_t)len);
+}
+
+/* HEARTBEAT: keep-alive; optional status text becomes the agent's current task. */
+static inline int xt_encode_heartbeat(xt_packet_t* pkt, const char* status) {
+    size_t len = status ? strlen(status) : 0;
+    if (!pkt || len > XT_MAX_PACKET_SIZE - XT_HEADER_SIZE) return -1;
+    return xt_build_packet(pkt, XT_OP_HEARTBEAT, 0x00, 0, (const uint8_t*)status, (uint16_t)len);
+}
+
+/* BROADCAST: say something in the conversation. Text that starts with a
+ * packed-XDialect action byte (0x10-0x15, 0x70, 0x71) is rejected because the
+ * bridge would parse it as shorthand. */
+static inline int xt_encode_text(xt_packet_t* pkt, const char* text) {
+    size_t len;
+    if (!pkt || !text) return -1;
+    len = strlen(text);
+    if (len == 0 || len > XT_MAX_PACKET_SIZE - XT_HEADER_SIZE) return -1;
+    if (xt_is_packed_action((uint8_t)text[0])) return -1;
+    return xt_build_packet(pkt, XT_OP_BROADCAST, 0x00, 0, (const uint8_t*)text, (uint16_t)len);
+}
+
+/* DIRECT_MSG: private message to a channel-mate by agent name or id.
+ * Set reply_expected to 0 for acknowledgements so agents don't reply in a loop. */
+static inline int xt_encode_dm(xt_packet_t* pkt, const char* to, const char* text, int reply_expected) {
+    uint8_t payload[XT_MAX_PACKET_SIZE - XT_HEADER_SIZE];
+    size_t to_len, text_len;
+    if (!pkt || !to || !text) return -1;
+    to_len = strlen(to);
+    text_len = strlen(text);
+    if (to_len == 0 || to_len > XT_MAX_NAME_LEN || text_len == 0) return -1;
+    if (1 + to_len + text_len > sizeof(payload)) return -1;
+    payload[0] = (uint8_t)to_len;
+    memcpy(&payload[1], to, to_len);
+    memcpy(&payload[1 + to_len], text, text_len);
+    return xt_build_packet(pkt, XT_OP_DIRECT_MSG, reply_expected ? XT_FLAG_ACK_REQUESTED : 0x00, 0,
+                           payload, (uint16_t)(1 + to_len + text_len));
+}
+
+/* STATE_QUERY: ask how many members and locks the conversation has. */
+static inline int xt_encode_state_query(xt_packet_t* pkt) {
+    if (!pkt) return -1;
+    return xt_build_packet(pkt, XT_OP_STATE_QUERY, 0x00, 0, 0, 0);
+}
+
+/* Downlink BROADCAST / DIRECT_MSG: [from_len:1][from][text].
+ * Returns 0, or -1 if the frame is not one of those or is malformed. */
+static inline int xt_decode_attributed(
+    const xt_frame_t* frame,
+    const char** from, uint8_t* from_len,
+    const char** text, uint16_t* text_len
+) {
+    uint8_t n;
+    if (!frame || !from || !from_len || !text || !text_len) return -1;
+    if (frame->opcode != XT_OP_BROADCAST && frame->opcode != XT_OP_DIRECT_MSG) return -1;
+    if (frame->payload_len < 1 || !frame->payload) return -1;
+    n = frame->payload[0];
+    if ((uint16_t)(1 + n) > frame->payload_len) return -1;
+    *from = (const char*)&frame->payload[1];
+    *from_len = n;
+    *text = (const char*)&frame->payload[1 + n];
+    *text_len = (uint16_t)(frame->payload_len - 1 - n);
+    return 0;
+}
+
+/* A packed XDialect payload, as sent in LOCK_* frames:
+ * [action:1][intent:1][flow:1][ttl:2 BE][target_len:1][target][reason_len:1][reason] */
+typedef struct {
+    uint8_t  action;      /* XT_TOK_* */
+    uint8_t  intent;      /* XT_INTENT_* or 0 */
+    uint8_t  flow;        /* XT_FLOW_* bits */
+    uint16_t ttl;         /* seconds */
+    const char* target;   /* file path, not NUL-terminated */
+    uint8_t  target_len;
+    const char* reason;   /* e.g. the lock holder's name; not NUL-terminated */
+    uint8_t  reason_len;
+} xt_packed_t;
+
+/* Decodes the packed XDialect payload of LOCK_ACQUIRE / LOCK_ACK / LOCK_DENIED /
+ * LOCK_RELEASE frames. Returns 0, or -1 if it is truncated or inconsistent. */
+static inline int xt_decode_packed(const xt_frame_t* frame, xt_packed_t* out) {
+    const uint8_t* p;
+    uint16_t len, reason_at;
+    if (!frame || !out || !frame->payload) return -1;
+    p = frame->payload;
+    len = frame->payload_len;
+    if (len < 7) return -1;
+    out->action = p[0];
+    out->intent = p[1];
+    out->flow = p[2];
+    out->ttl = (uint16_t)(((uint16_t)p[3] << 8) | p[4]);
+    out->target_len = p[5];
+    reason_at = (uint16_t)(6 + out->target_len);
+    if (reason_at >= len) return -1;              /* need the reason length byte */
+    out->target = (const char*)&p[6];
+    out->reason_len = p[reason_at];
+    if ((uint16_t)(reason_at + 1 + out->reason_len) > len) return -1;
+    out->reason = (const char*)&p[reason_at + 1];
+    return 0;
+}
+
 #ifdef __cplusplus
 }
 
@@ -251,6 +407,38 @@ public:
             return true;
         }
         return false;
+    }
+
+    template<typename StreamType>
+    static bool registerName(StreamType& serial, const char* name) {
+        xt_packet_t pkt;
+        if (xt_encode_register(&pkt, name) != 0) return false;
+        sendPacket(serial, pkt);
+        return true;
+    }
+
+    template<typename StreamType>
+    static bool say(StreamType& serial, const char* text) {
+        xt_packet_t pkt;
+        if (xt_encode_text(&pkt, text) != 0) return false;
+        sendPacket(serial, pkt);
+        return true;
+    }
+
+    template<typename StreamType>
+    static bool directMessage(StreamType& serial, const char* to, const char* text, bool replyExpected = true) {
+        xt_packet_t pkt;
+        if (xt_encode_dm(&pkt, to, text, replyExpected ? 1 : 0) != 0) return false;
+        sendPacket(serial, pkt);
+        return true;
+    }
+
+    template<typename StreamType>
+    static bool heartbeat(StreamType& serial, const char* status = 0) {
+        xt_packet_t pkt;
+        if (xt_encode_heartbeat(&pkt, status) != 0) return false;
+        sendPacket(serial, pkt);
+        return true;
     }
 };
 
