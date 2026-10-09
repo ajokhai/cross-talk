@@ -193,22 +193,37 @@ class FrameReader:
     """Splits a byte stream (UART, socket) into frames: [len:2 BE][frame].
 
     Feed it whatever bytes arrive; it returns complete, valid frames as dicts
-    (see CrossTalkMicro.unpack_frame). If a length prefix is impossible (too
-    big, or the frame does not start with 'X' v1), it drops one byte and
-    resyncs, so line noise at boot cannot stall the stream.
+    (see CrossTalkMicro.unpack_frame). If a prefix is impossible (shorter than
+    a header, or not followed by 'X' v1), it drops one byte and resyncs, so
+    line noise at boot cannot stall the stream. A well-formed frame larger than
+    max_frame is skipped whole, so its payload is never misread as frames.
     """
 
     def __init__(self, max_frame: int = XT_MAX_PACKET_SIZE):
         self.max_frame = max_frame
         self.buf = bytearray()
+        self.skip = 0  # bytes left of an oversized frame being discarded
 
     def feed(self, data: bytes):
         self.buf.extend(data)
         frames = []
-        while len(self.buf) >= 2:
+        while True:
+            if self.skip:
+                n = min(self.skip, len(self.buf))
+                self.buf = self.buf[n:]
+                self.skip -= n
+                if self.skip:
+                    break
+            if len(self.buf) < 2:
+                break
             n = (self.buf[0] << 8) | self.buf[1]
-            if n < XT_HEADER_SIZE or n > self.max_frame or (len(self.buf) >= 4 and (self.buf[2] != XT_MAGIC or self.buf[3] != XT_VERSION)):
+            if n < XT_HEADER_SIZE or (len(self.buf) >= 4 and (self.buf[2] != XT_MAGIC or self.buf[3] != XT_VERSION)):
                 self.buf = self.buf[1:]
+                continue
+            if n > self.max_frame:
+                if len(self.buf) < 4:
+                    break  # need the magic/version bytes to tell a big frame from noise
+                self.skip = 2 + n
                 continue
             if len(self.buf) < 2 + n:
                 break
