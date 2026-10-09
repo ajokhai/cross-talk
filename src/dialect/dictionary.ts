@@ -11,8 +11,6 @@ export interface DialectToken {
   category: 'action' | 'intent' | 'modifier' | 'flow';
   meaning: string;        // Canonical English description
   humanTemplate: string;  // English expansion template
-  zhMeaning?: string;     // Canonical Chinese description (中文说明)
-  zhTemplate?: string;    // Chinese expansion template (中文展开模板)
 }
 
 export interface DialectDictionary {
@@ -27,7 +25,6 @@ export interface DialectDictionary {
       shorthand: string;
       human: string;
       meaning: string;
-      zh?: string;
     }>;
   };
 }
@@ -44,54 +41,42 @@ export const DIALECT_V1: DialectDictionary = {
       numericId: 0x10,
       category: 'action',
       meaning: 'Claim exclusive lock on file',
-      humanTemplate: 'Claiming exclusive file lock on {target} for {intent}: "{reason}".',
-      zhMeaning: '申请文件独占锁',
-      zhTemplate: '申请独占锁定文件 {target} 进行{intent}：“{reason}”。'
+      humanTemplate: 'Claiming exclusive file lock on {target} for {intent}: "{reason}".'
     },
     '!REL': {
       code: '!REL',
       numericId: 0x11,
       category: 'action',
       meaning: 'Release lock on file',
-      humanTemplate: 'Releasing file lock on {target}. File is now open for other agents.',
-      zhMeaning: '释放文件锁',
-      zhTemplate: '已释放文件 {target} 的锁，其他智能体可安全编辑。'
+      humanTemplate: 'Releasing file lock on {target}. File is now open for other agents.'
     },
     '!BCST': {
       code: '!BCST',
       numericId: 0x12,
       category: 'action',
       meaning: 'Broadcast announcement to mesh',
-      humanTemplate: 'Announcing to all agents: {reason}.',
-      zhMeaning: '全网广播公告',
-      zhTemplate: '向网络中所有智能体广播：“{reason}”。'
+      humanTemplate: 'Announcing to all agents: {reason}.'
     },
     '!DM': {
       code: '!DM',
       numericId: 0x13,
       category: 'action',
       meaning: 'Direct message to specific agent',
-      humanTemplate: 'Direct message to {recipient}: {reason}.',
-      zhMeaning: '定向私信发送',
-      zhTemplate: '发送私信给智能体 {recipient}：“{reason}”。'
+      humanTemplate: 'Direct message to {recipient}: {reason}.'
     },
     '!WARN': {
       code: '!WARN',
       numericId: 0x14,
       category: 'action',
       meaning: 'File collision or conflict alert',
-      humanTemplate: 'Conflict Alert: {target} is currently locked! Please hold.',
-      zhMeaning: '文件冲突警告',
-      zhTemplate: '冲突警告：文件 {target} 当前已被锁定！请稍等。'
+      humanTemplate: 'Conflict Alert: {target} is currently locked! Please hold.'
     },
     '!PASS': {
       code: '!PASS',
       numericId: 0x15,
       category: 'action',
       meaning: 'Handoff task / file lock to another agent',
-      humanTemplate: 'Handing off {target} to {recipient} with context: "{reason}".',
-      zhMeaning: '移交任务与文件锁',
-      zhTemplate: '将文件 {target} 移交给智能体 {recipient}，说明：“{reason}”。'
+      humanTemplate: 'Handing off {target} to {recipient} with context: "{reason}".'
     },
 
     // Intents / Verbs (Prefix: #)
@@ -100,72 +85,56 @@ export const DIALECT_V1: DialectDictionary = {
       numericId: 0x30,
       category: 'intent',
       meaning: 'Refactoring existing code without changing external behavior',
-      humanTemplate: 'refactoring',
-      zhMeaning: '代码重构',
-      zhTemplate: '重构代码'
+      humanTemplate: 'refactoring'
     },
     '#FEAT': {
       code: '#FEAT',
       numericId: 0x31,
       category: 'intent',
       meaning: 'Implementing new feature or capability',
-      humanTemplate: 'implementing new feature',
-      zhMeaning: '新功能开发',
-      zhTemplate: '实现新功能'
+      humanTemplate: 'implementing new feature'
     },
     '#FIX': {
       code: '#FIX',
       numericId: 0x32,
       category: 'intent',
       meaning: 'Fixing bug or error condition',
-      humanTemplate: 'fixing bug',
-      zhMeaning: '修复缺陷',
-      zhTemplate: '修复错误缺陷'
+      humanTemplate: 'fixing bug'
     },
     '#TEST': {
       code: '#TEST',
       numericId: 0x33,
       category: 'intent',
       meaning: 'Running or authoring test suites',
-      humanTemplate: 'testing',
-      zhMeaning: '测试用例执行',
-      zhTemplate: '编写或运行测试'
+      humanTemplate: 'testing'
     },
     '#BLD': {
       code: '#BLD',
       numericId: 0x34,
       category: 'intent',
       meaning: 'Compiling or building codebase',
-      humanTemplate: 'building',
-      zhMeaning: '代码编译与构建',
-      zhTemplate: '编译构建项目'
+      humanTemplate: 'building'
     },
     '#MIG': {
       code: '#MIG',
       numericId: 0x35,
       category: 'intent',
       meaning: 'Database or schema migration',
-      humanTemplate: 'migrating schema',
-      zhMeaning: '数据结构迁移',
-      zhTemplate: '数据库或协议迁移'
+      humanTemplate: 'migrating schema'
     },
     '#REV': {
       code: '#REV',
       numericId: 0x36,
       category: 'intent',
       meaning: 'Code review or auditing',
-      humanTemplate: 'reviewing',
-      zhMeaning: '代码审查',
-      zhTemplate: '审查代码'
+      humanTemplate: 'reviewing'
     },
     '#DOC': {
       code: '#DOC',
       numericId: 0x37,
       category: 'intent',
       meaning: 'Updating documentation or comments',
-      humanTemplate: 'documenting',
-      zhMeaning: '文档更新',
-      zhTemplate: '编写文档与注释'
+      humanTemplate: 'documenting'
     },
 
     // Flow & Coordination Control (Prefix: &)
@@ -174,36 +143,28 @@ export const DIALECT_V1: DialectDictionary = {
       numericId: 0x50,
       category: 'flow',
       meaning: 'Hang on / do not touch until finished',
-      humanTemplate: 'Hang on for me to finish before touching it.',
-      zhMeaning: '等我完成再修改',
-      zhTemplate: '请稍候，等我修改完成再操作。'
+      humanTemplate: 'Hang on for me to finish before touching it.'
     },
     '&ACK': {
       code: '&ACK',
       numericId: 0x51,
       category: 'flow',
       meaning: 'Acknowledged / will wait',
-      humanTemplate: 'Understood, holding off.',
-      zhMeaning: '已收到，暂不修改',
-      zhTemplate: '已确认，暂停修改并保持等待。'
+      humanTemplate: 'Understood, holding off.'
     },
     '&DONE': {
       code: '&DONE',
       numericId: 0x52,
       category: 'flow',
       meaning: 'Task finished / ready for next step',
-      humanTemplate: 'Finished work.',
-      zhMeaning: '工作完成',
-      zhTemplate: '操作已完成。'
+      humanTemplate: 'Finished work.'
     },
     '&PROCEED': {
       code: '&PROCEED',
       numericId: 0x53,
       category: 'flow',
       meaning: 'Clear to proceed',
-      humanTemplate: 'You are clear to proceed now.',
-      zhMeaning: '可以继续操作',
-      zhTemplate: '其他智能体现在可以继续推进。'
+      humanTemplate: 'You are clear to proceed now.'
     },
 
     // Queries (Prefix: ?)

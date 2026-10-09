@@ -1,0 +1,26 @@
+{
+  "name": "@cross-talk/embedded",
+  "version": "0.1.0",
+  "description": "CrossTalk binary wire format, stream transports and microcontroller firmware",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "firmware"
+  ],
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "cross-talk": "*"
+  },
+  "license": "MIT"
+}

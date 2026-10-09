@@ -141,110 +141,25 @@ export class DialectEngine {
   }
 
   /**
-   * Expands concise XDialect shorthand into natural Chinese (中文支持).
-   */
-  public static toChinese(shorthand: string): string {
-    const parsed = this.parse(shorthand);
-    if (!parsed) return shorthand;
-
-    const parts: string[] = [];
-    const targetStr = parsed.target ? `"${parsed.target}"` : '';
-    const reasonStr = parsed.reason ? `（${parsed.reason}）` : '';
-
-    let intentDesc = '';
-    if (parsed.intent) {
-      const token = this.dictionary.tokens[parsed.intent];
-      intentDesc = token?.zhMeaning || token?.meaning || parsed.intent;
-    }
-
-    switch (parsed.action) {
-      case '!LCK': {
-        const intentPart = intentDesc ? `，进行${intentDesc}${reasonStr}` : (reasonStr ? `进行${reasonStr}` : '');
-        parts.push(`正在编辑 ${targetStr}${intentPart}。`);
-        if (parsed.ttl) {
-          parts.push(`（保持锁定 ${parsed.ttl} 秒）。`);
-        }
-        break;
-      }
-
-      case '!REL': {
-        parts.push(`已完成对 ${targetStr} 的修改。文件锁已释放，其他智能体可安全编辑。`);
-        break;
-      }
-
-      case '!BCST': {
-        parts.push(`广播公告：${parsed.reason || '通用消息'}。`);
-        break;
-      }
-
-      case '!DM': {
-        const to = parsed.recipient ? `发给 ${parsed.recipient}` : '';
-        parts.push(`定向私信${to}：${parsed.reason || ''}。`);
-        break;
-      }
-
-      case '!WARN': {
-        parts.push(`冲突警报：文件 ${targetStr} 已被其他智能体锁定！请勿修改。`);
-        break;
-      }
-
-      case '!PASS': {
-        parts.push(`任务移交：将文件 ${targetStr} 移交给 ${parsed.recipient || '下一智能体'}（${parsed.reason || ''}）。`);
-        break;
-      }
-
-      case '?WHO': {
-        parts.push('正在查询网络中当前活跃的智能体。');
-        break;
-      }
-
-      case '?LOCKS': {
-        parts.push('正在查询当前所有被锁定的文件状态。');
-        break;
-      }
-
-      default: {
-        if (parsed.reason) parts.push(parsed.reason);
-      }
-    }
-
-    // Append Chinese flow modifiers (e.g. &WAIT -> "请稍候，等我修改完成再操作。")
-    if (parsed.flow && parsed.flow.length > 0) {
-      for (const f of parsed.flow) {
-        const token = this.dictionary.tokens[f];
-        if (token && token.zhTemplate) {
-          parts.push(token.zhTemplate);
-        } else if (token) {
-          parts.push(token.humanTemplate);
-        }
-      }
-    }
-
-    return parts.join(' ');
-  }
-
-  /**
-   * Compiles natural human English or Chinese statements into concise XDialect shorthand.
+   * Compiles natural English statements into concise XDialect shorthand.
    */
   public static fromHuman(text: string): string {
     const lower = text.toLowerCase();
     const tokens: string[] = [];
 
     // Detect file path
-    const fileMatch = text.match(/(?:file|path|editing|touching|modify|修改|编辑|锁定|文件)\s*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/i) ||
+    const fileMatch = text.match(/(?:file|path|editing|touching|modify)\s*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/i) ||
                       text.match(/([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/);
     const file = fileMatch ? fileMatch[1] : null;
 
-    // Detect action (English & Chinese)
-    if (lower.includes('lock') || lower.includes('editing') || lower.includes("i'm editing") || lower.includes('modifying') ||
-        text.includes('锁定') || text.includes('正在修改') || text.includes('正在编辑')) {
+    // Detect action
+    if (lower.includes('lock') || lower.includes('editing') || lower.includes("i'm editing") || lower.includes('modifying')) {
       tokens.push('!LCK');
-    } else if (lower.includes('release') || lower.includes('unlock') || lower.includes('finished editing') ||
-               text.includes('释放') || text.includes('解锁') || text.includes('修改完成') || text.includes('改完了')) {
+    } else if (lower.includes('release') || lower.includes('unlock') || lower.includes('finished editing')) {
       tokens.push('!REL');
-    } else if (lower.includes('who is') || lower.includes('who is active') || text.includes('谁在') || text.includes('活跃')) {
+    } else if (lower.includes('who is')) {
       tokens.push('?WHO');
-    } else if (lower.includes('what files') || lower.includes('check locks') || text.includes('锁') || text.includes('占用')) {
+    } else if (lower.includes('what files') || lower.includes('check locks')) {
       tokens.push('?LOCKS');
     } else {
       tokens.push('!BCST');
@@ -254,22 +169,21 @@ export class DialectEngine {
       tokens.push(`@${file}`);
     }
 
-    // Detect intent (English & Chinese)
-    if (lower.includes('refactor') || text.includes('重构')) tokens.push('#REF');
-    else if (lower.includes('fix') || lower.includes('bug') || text.includes('修复') || text.includes('bug') || text.includes('缺陷')) tokens.push('#FIX');
-    else if (lower.includes('feature') || lower.includes('add') || text.includes('功能') || text.includes('开发') || text.includes('新增')) tokens.push('#FEAT');
-    else if (lower.includes('test') || text.includes('测试')) tokens.push('#TEST');
-    else if (lower.includes('migrate') || lower.includes('migration') || text.includes('迁移')) tokens.push('#MIG');
+    // Detect intent
+    if (lower.includes('refactor')) tokens.push('#REF');
+    else if (lower.includes('fix') || lower.includes('bug')) tokens.push('#FIX');
+    else if (lower.includes('feature') || lower.includes('add')) tokens.push('#FEAT');
+    else if (lower.includes('test')) tokens.push('#TEST');
+    else if (lower.includes('migrate') || lower.includes('migration')) tokens.push('#MIG');
 
-    // Detect wait / hang on flow (English & Chinese)
-    if (lower.includes('hang on') || lower.includes('wait') || lower.includes("don't touch") || lower.includes('hold off') ||
-        text.includes('等我') || text.includes('稍等') || text.includes('别碰') || text.includes('请稍候') || text.includes('先别改')) {
+    // Detect wait / hang on flow
+    if (lower.includes('hang on') || lower.includes('wait') || lower.includes("don't touch") || lower.includes('hold off')) {
       tokens.push('&WAIT');
     }
-    if (lower.includes('done') || lower.includes('finished') || text.includes('完成') || text.includes('好了')) {
+    if (lower.includes('done') || lower.includes('finished')) {
       tokens.push('&DONE');
     }
-    if (lower.includes('proceed') || lower.includes('clear') || text.includes('可以继续') || text.includes('可以开始')) {
+    if (lower.includes('proceed') || lower.includes('clear')) {
       tokens.push('&PROCEED');
     }
 
