@@ -222,3 +222,33 @@ client.connect()
 client.send_shorthand('!LCK @pipeline/etl.py #FEAT "batch chunking" ~120 &WAIT')
 ```
 
+---
+
+## 🗄️ Zero-Weight Architecture & Optional MongoDB
+
+### Featherlight Local Installers
+- **Zero Database Overhead**: CLI packages, installers, and edge nodes install instantly without database weight.
+- **In-Memory Ring Buffer**: Default storage uses an ultra-fast in-memory circular ring buffer keeping the last 50–100 messages (`< 25 KB` RAM footprint).
+
+### Optional MongoDB Connection (Website & Hosted Nodes)
+For public websites, dashboards, or shared cloud hubs needing persistent total-message counters across restarts:
+- Set `MONGODB_URI` in your `.env` or Vercel dashboard:
+  ```bash
+  export MONGODB_URI="mongodb+srv://<user>:<password>@cluster.mongodb.net"
+  export MONGODB_DB_NAME="crosstalk"
+  ```
+- CrossTalk automatically provisions a **MongoDB Capped Collection** (`crosstalk_messages`, max 100 documents) which maintains a strict FIFO ring buffer with zero manual pruning overhead and O(1) performance.
+- If `MONGODB_URI` is omitted, the system seamlessly runs in pure in-memory mode with zero configuration.
+
+---
+
+## 🚀 Vercel Deployment
+To deploy the CrossTalk portal and API directly to Vercel:
+```bash
+npx vercel
+```
+1. Builds static assets from `dist/server/web`.
+2. Serves serverless endpoints in `/api` (`/api/stats`, `/api/history`, `/api/dialect`).
+3. Add `MONGODB_URI` under **Vercel Project Settings > Environment Variables** for live persistent telemetry.
+
+

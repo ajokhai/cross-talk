@@ -4,16 +4,40 @@ import { LockManager } from './locks.js';
 import { GibberlinkEngine } from './gibberlink.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
+import { InMemoryStorage } from './storage.js';
 export class MeshHub {
     clients = new Map(); // agentId -> ConnectedClient
     lockManager = new LockManager();
+    storage;
     messageHistory = new Map(); // channel -> MessageEvent[]
     inboxes = new Map(); // agentId -> MessageEvent[]
     maxHistoryPerChannel = 100;
     maxInboxPerAgent = 50;
     totalMessagesRouted = 0;
     startTime = Date.now();
-    constructor() { }
+    constructor(storage) {
+        this.storage = storage || new InMemoryStorage(this.maxHistoryPerChannel);
+        this.storage.getTotalMessageCount().then(cnt => {
+            if (cnt > 0)
+                this.totalMessagesRouted = cnt;
+        }).catch(() => { });
+    }
+    async initStorage(channel = 'default') {
+        try {
+            const recent = await this.storage.getRecentMessages(channel, this.maxHistoryPerChannel);
+            if (recent.length > 0) {
+                this.messageHistory.set(channel, [...recent]);
+            }
+            const count = await this.storage.getTotalMessageCount();
+            if (count > 0) {
+                this.totalMessagesRouted = count;
+            }
+        }
+        catch (_) { }
+    }
+    getStorage() {
+        return this.storage;
+    }
     getLockManager() {
         return this.lockManager;
     }
@@ -463,6 +487,7 @@ export class MeshHub {
         if (history.length > this.maxHistoryPerChannel) {
             history.shift();
         }
+        this.storage.recordMessage(channel, msg).catch(() => { });
     }
     getStats(channel = 'default') {
         const channelHistory = this.messageHistory.get(channel) || [];
@@ -476,6 +501,7 @@ export class MeshHub {
             maxBufferCapacity: this.maxHistoryPerChannel,
             channel,
             meshVersion: DIALECT_V1.version,
+            storageMode: (this.storage.constructor?.name === 'MongoStorage') ? 'mongodb' : 'memory',
             timestamp: Date.now()
         };
     }

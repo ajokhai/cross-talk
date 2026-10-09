@@ -13,6 +13,7 @@ import { LockManager } from './locks.js';
 import { GibberlinkEngine, GibberlinkSignalPacket } from './gibberlink.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
+import { IMeshStorage, InMemoryStorage } from './storage.js';
 
 interface ConnectedClient {
   ws: WebSocket;
@@ -23,6 +24,7 @@ interface ConnectedClient {
 export class MeshHub {
   private clients: Map<string, ConnectedClient> = new Map(); // agentId -> ConnectedClient
   private lockManager: LockManager = new LockManager();
+  private storage: IMeshStorage;
   private messageHistory: Map<string, MessageEvent[]> = new Map(); // channel -> MessageEvent[]
   private inboxes: Map<string, MessageEvent[]> = new Map(); // agentId -> MessageEvent[]
   private maxHistoryPerChannel = 100;
@@ -30,7 +32,29 @@ export class MeshHub {
   private totalMessagesRouted: number = 0;
   private startTime: number = Date.now();
 
-  constructor() {}
+  constructor(storage?: IMeshStorage) {
+    this.storage = storage || new InMemoryStorage(this.maxHistoryPerChannel);
+    this.storage.getTotalMessageCount().then(cnt => {
+      if (cnt > 0) this.totalMessagesRouted = cnt;
+    }).catch(() => {});
+  }
+
+  public async initStorage(channel = 'default') {
+    try {
+      const recent = await this.storage.getRecentMessages(channel, this.maxHistoryPerChannel);
+      if (recent.length > 0) {
+        this.messageHistory.set(channel, [...recent]);
+      }
+      const count = await this.storage.getTotalMessageCount();
+      if (count > 0) {
+        this.totalMessagesRouted = count;
+      }
+    } catch (_) {}
+  }
+
+  public getStorage(): IMeshStorage {
+    return this.storage;
+  }
 
   public getLockManager(): LockManager {
     return this.lockManager;
@@ -575,6 +599,7 @@ export class MeshHub {
     if (history.length > this.maxHistoryPerChannel) {
       history.shift();
     }
+    this.storage.recordMessage(channel, msg).catch(() => {});
   }
 
   public getStats(channel = 'default') {
@@ -589,6 +614,7 @@ export class MeshHub {
       maxBufferCapacity: this.maxHistoryPerChannel,
       channel,
       meshVersion: DIALECT_V1.version,
+      storageMode: (this.storage.constructor?.name === 'MongoStorage') ? 'mongodb' : 'memory',
       timestamp: Date.now()
     };
   }

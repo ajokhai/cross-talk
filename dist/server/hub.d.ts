@@ -1,16 +1,20 @@
 import { WebSocket } from 'ws';
 import { AgentInfo, MessageEvent, ServerPacket } from './types.js';
 import { LockManager } from './locks.js';
+import { IMeshStorage } from './storage.js';
 export declare class MeshHub {
     private clients;
     private lockManager;
+    private storage;
     private messageHistory;
     private inboxes;
     private maxHistoryPerChannel;
     private maxInboxPerAgent;
     private totalMessagesRouted;
     private startTime;
-    constructor();
+    constructor(storage?: IMeshStorage);
+    initStorage(channel?: string): Promise<void>;
+    getStorage(): IMeshStorage;
     getLockManager(): LockManager;
     handleConnection(ws: WebSocket): void;
     private processPacket;
@@ -31,6 +35,7 @@ export declare class MeshHub {
         maxBufferCapacity: number;
         channel: string;
         meshVersion: string;
+        storageMode: string;
         timestamp: number;
     };
     private addToInbox;

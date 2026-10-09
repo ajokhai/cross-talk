@@ -361,15 +361,23 @@ async function fetchMeshStats() {
     const elPeers = document.getElementById('metricActivePeers');
     const elLocks = document.getElementById('metricActiveLocks');
     const elBuffer = document.getElementById('metricBufferLimit');
+    const elStorageBadge = document.getElementById('metricStorageBadge');
 
     if (elTotal) {
-      const base = 12480;
-      const count = base + (data.totalMessagesRouted || 0);
-      elTotal.textContent = count.toLocaleString();
+      elTotal.textContent = (data.totalMessagesRouted || 0).toLocaleString();
     }
     if (elPeers) elPeers.textContent = data.activePeers || 1;
     if (elLocks) elLocks.textContent = data.activeLocks || 0;
     if (elBuffer) elBuffer.textContent = `${data.recentHistoryCount || 0} / 100`;
+    if (elStorageBadge) {
+      if (data.storageMode === 'mongodb') {
+        elStorageBadge.textContent = 'MongoDB Capped';
+        elStorageBadge.title = 'MongoDB Capped Collection (Ring Buffer max 100 msgs)';
+      } else {
+        elStorageBadge.textContent = 'Memory Ring < 25KB';
+        elStorageBadge.title = 'Zero-weight in-memory ring buffer';
+      }
+    }
   } catch (_) {}
 }
 

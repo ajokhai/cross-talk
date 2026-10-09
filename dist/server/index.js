@@ -5,11 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { MeshHub } from './hub.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
+import { createMeshStorage } from './storage.js';
 import { green, cyan, bold } from 'colorette';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-export function startServer(port = 4488, host = '0.0.0.0') {
-    const hub = new MeshHub();
+export async function startServer(port = 4488, host = '0.0.0.0', customStorage) {
+    const storage = customStorage || await createMeshStorage();
+    const hub = new MeshHub(storage);
+    await hub.initStorage('default');
     const webDir = path.join(__dirname, 'web');
     const server = http.createServer((req, res) => {
         // CORS headers for local tools
