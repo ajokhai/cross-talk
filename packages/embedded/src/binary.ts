@@ -8,7 +8,7 @@
  * [3]     Flags (1 byte): bit0=ackRequested, bit1=isResponse, bit2=conflictAlert
  * [4..7]  Timestamp (4-byte uint32, seconds since epoch)
  * [8..9]  Payload Length (2-byte uint16)
- * [10..N] Payload (UTF-8 bytes or structured binary payload)
+ * [10..N] Payload: raw bytes (e.g. DialectEngine.packToBits), UTF-8 text, or JSON
  */
 
 export enum BinaryOpcode {
@@ -32,8 +32,17 @@ export interface BinaryFrame {
     conflictAlert?: boolean;
   };
   timestamp: number;
-  payload: string | object;
+  /**
+   * Encoding: a Buffer is sent as-is, a string as UTF-8, anything else as JSON.
+   * Decoding: JSON if the bytes parse as JSON, else the UTF-8 string if the
+   * bytes are valid UTF-8, else the raw Buffer.
+   */
+  payload: string | object | Buffer;
+  /** Set by decode: the exact payload bytes, whatever `payload` became. */
+  raw?: Buffer;
 }
+
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
 
 export class BinaryCodec {
   private static MAGIC = 0x58;
@@ -45,10 +54,12 @@ export class BinaryCodec {
     if (frame.flags.isResponse) flagsByte |= 1 << 1;
     if (frame.flags.conflictAlert) flagsByte |= 1 << 2;
 
-    const payloadStr = typeof frame.payload === 'string'
+    const payloadBuf = Buffer.isBuffer(frame.payload)
       ? frame.payload
-      : JSON.stringify(frame.payload);
-    const payloadBuf = Buffer.from(payloadStr, 'utf8');
+      : Buffer.from(typeof frame.payload === 'string' ? frame.payload : JSON.stringify(frame.payload), 'utf8');
+    if (payloadBuf.length > 0xffff) {
+      throw new RangeError(`Payload is ${payloadBuf.length} bytes; the frame length field holds at most 65535`);
+    }
 
     // Header: 10 bytes
     const totalLength = 10 + payloadBuf.length;
@@ -85,10 +96,13 @@ export class BinaryCodec {
 
     if (buf.length < 10 + payloadLen) return null;
 
-    const payloadStr = buf.subarray(10, 10 + payloadLen).toString('utf8');
-    let payload: any = payloadStr;
+    const raw = Buffer.from(buf.subarray(10, 10 + payloadLen));
+    let payload: string | object | Buffer = raw;
     try {
-      payload = JSON.parse(payloadStr);
+      payload = strictUtf8.decode(raw);
+      try {
+        payload = JSON.parse(payload);
+      } catch {}
     } catch {}
 
     return {
@@ -99,7 +113,8 @@ export class BinaryCodec {
         conflictAlert: (flagsByte & (1 << 2)) !== 0
       },
       timestamp: sec * 1000,
-      payload
+      payload,
+      raw
     };
   }
 }

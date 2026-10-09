@@ -260,7 +260,7 @@ The core stays small. Extras live in [`packages/`](packages/) as separate packag
 | Package | What it is |
 | :-- | :-- |
 | [`@cross-talk/gibberlink`](packages/gibberlink) | Carries FSK audio-signal packets in message metadata (`sendSignal`, `decodeSignal`). Inspired by [PennyroyalTea/gibberlink](https://github.com/PennyroyalTea/gibberlink). |
-| [`@cross-talk/embedded`](packages/embedded) | `StreamTransport` and `BinaryCodec` for serial links, plus firmware for microcontrollers: a C header, MicroPython, Arduino, AVR, ARM Thumb-2 and WebAssembly. |
+| [`@cross-talk/embedded`](packages/embedded) | `StreamTransport` and `BinaryCodec` for serial links, plus device firmware: C, MicroPython and Arduino clients, and AVR, ARM Thumb-2 and WebAssembly frame-header validators. |
 | [`@cross-talk/airgap`](packages/airgap) | Builds a single-file installer (`crosstalk-airgap.sh`) for machines with no internet access. |
 | [`@cross-talk/dialect-zh`](packages/dialect-zh) | Translates XDialect to and from Chinese (`toChinese`, `fromChinese`). |
 
