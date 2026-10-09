@@ -33,6 +33,12 @@ export class MeshHub {
   private maxHistoryPerChannel = 100;
   private maxInboxPerAgent = 50;
   private totalMessagesRouted: number = 0;
+  private totalBytesTransferred: number = 0;
+  private totalPacketsReceived: number = 0;
+  private totalPacketsSent: number = 0;
+  private totalConflictsBlocked: number = 0;
+  private totalLocksAcquired: number = 0;
+  private totalLocksReleased: number = 0;
   private startTime: number = Date.now();
   private allowedSubnets: string[] = [];
 
@@ -117,6 +123,8 @@ export class MeshHub {
     ws.on('message', (raw: Buffer | string) => {
       try {
         const text = typeof raw === 'string' ? raw : raw.toString('utf8');
+        this.totalPacketsReceived++;
+        this.totalBytesTransferred += typeof raw === 'string' ? Buffer.byteLength(raw, 'utf8') : (raw as Buffer).length;
         const packet = JSON.parse(text) as ClientPacket;
         this.processPacket(ws, packet, clientIp, (id) => {
           currentAgentId = id;
@@ -703,7 +711,10 @@ export class MeshHub {
 
   private send(ws: WebSocket, packet: ServerPacket) {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(packet));
+      const payload = JSON.stringify(packet);
+      this.totalPacketsSent++;
+      this.totalBytesTransferred += Buffer.byteLength(payload, 'utf8');
+      ws.send(payload);
     }
   }
 
@@ -789,14 +800,31 @@ export class MeshHub {
     this.storage.recordMessage(channel, msg).catch(() => {});
   }
 
+  public getTotalBytesTransferred(): number { return this.totalBytesTransferred; }
+  public getTotalPacketsReceived(): number { return this.totalPacketsReceived; }
+  public getTotalPacketsSent(): number { return this.totalPacketsSent; }
+  public getTotalConflictsBlocked(): number { return this.totalConflictsBlocked; }
+  public getTotalLocksAcquired(): number { return this.totalLocksAcquired; }
+  public getTotalLocksReleased(): number { return this.totalLocksReleased; }
+
   public getStats(channel = 'default') {
     const channelHistory = this.messageHistory.get(channel) || [];
     const locks = this.lockManager.getLocks(channel);
+    const mem = process.memoryUsage();
     return {
       totalMessagesRouted: this.totalMessagesRouted,
+      totalBytesTransferred: this.totalBytesTransferred,
+      totalPacketsReceived: this.totalPacketsReceived,
+      totalPacketsSent: this.totalPacketsSent,
+      totalConflictsBlocked: this.totalConflictsBlocked,
+      totalLocksAcquired: this.totalLocksAcquired,
+      totalLocksReleased: this.totalLocksReleased,
       activePeers: this.clients.size,
       activeLocks: locks.length,
+      activeChannelsCount: this.getSessions().length,
       uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
+      memoryRssBytes: mem.rss,
+      memoryHeapUsedBytes: mem.heapUsed,
       recentHistoryCount: channelHistory.length,
       maxBufferCapacity: this.maxHistoryPerChannel,
       channel,

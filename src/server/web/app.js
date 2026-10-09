@@ -1,30 +1,31 @@
-// CrossTalk Planetary Swarm Mission Control & Multi-Session Mesh Cockpit
+// CrossTalk Live Mesh Cockpit — 100% Real-Life Telemetry & Multi-Agent State
 (function() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}`;
   let ws = null;
-  let currentSession = 'default'; // 'default', '*', or specific channel ID
+  let currentScope = 'default'; // 'default', '*', or specific channel ID
   let activeView = 'matrix'; // 'matrix', 'topology', 'sentinel'
-  let activeTier = 'all'; // 'all', 'reasoning', 'coder', 'edge'
+  let activeTier = 'all'; // 'all', 'ide', 'terminal', 'bot'
   let activeFilter = 'all'; // 'all', 'current', 'locks', 'gibberlink_signal', 'dm'
-  
-  // Mesh state
+
+  // Live mesh state (strictly populated from real server packets)
   let agents = [];
   let locks = [];
   let messages = [];
-  let knownSessions = new Set(['default', 'compiler-swarm-core', 'reasoning-frontier-mesh', 'embedded-cortex-iot', 'fintech-audit-sentry']);
-  let swarmClusters = [];
-  let planetaryMetrics = {
-    globalAgentsActive: 1429880,
-    activeSessionShards: 8412,
-    globalPacketsPerSec: 685400,
-    tokenSavingsPct: 94.8,
-    p99LatencyMs: 0.28
+  let knownChannels = new Set(['default']);
+  let liveMetrics = {
+    connectedAgents: 0,
+    activeLocks: 0,
+    activeSessionsCount: 1,
+    totalMessagesRouted: 0,
+    totalBytesTransferred: 0,
+    totalPacketsReceived: 0,
+    totalPacketsSent: 0,
+    totalConflictsBlocked: 0,
+    uptimeSeconds: 0,
+    memoryRssBytes: 0,
+    memoryHeapUsedBytes: 0
   };
-
-  // Swarm Stream Simulator state
-  let swarmStreamActive = false;
-  let swarmStreamTimer = null;
 
   // Web Audio Context for Gibberlink 16-FSK demodulation
   let audioCtx = null;
@@ -37,6 +38,7 @@
   const statAgentScope = document.getElementById('statAgentScope');
   const statGlobalSessions = document.getElementById('statGlobalSessions');
   const statLockCount = document.getElementById('statLockCount');
+  const statTotalMessages = document.getElementById('statTotalMessages');
   const agentCountBadge = document.getElementById('agentCountBadge');
   const lockCountBadge = document.getElementById('lockCountBadge');
   const agentList = document.getElementById('agentList');
@@ -55,13 +57,29 @@
   const audioToggleBadge = document.getElementById('audioToggleBadge');
   const audioIcon = document.getElementById('audioIcon');
   const audioToggleText = document.getElementById('audioToggleText');
-  const btnSimulateBurst = document.getElementById('btnSimulateBurst');
-  const burstBtnText = document.getElementById('burstBtnText');
   const activeScopeLabel = document.getElementById('activeScopeLabel');
   const tabSubtext = document.getElementById('tabSubtext');
-  const clusterShardsList = document.getElementById('clusterShardsList');
-  const agentShardsCount = document.getElementById('agentShardsCount');
   const agentPanelDesc = document.getElementById('agentPanelDesc');
+  const agentSubnetLabel = document.getElementById('agentSubnetLabel');
+
+  // Live Telemetry strip elements
+  const telemetryHubStatus = document.getElementById('telemetryHubStatus');
+  const telemetryBytesCount = document.getElementById('telemetryBytesCount');
+  const telemetryConflictsCount = document.getElementById('telemetryConflictsCount');
+  const telemetryUptime = document.getElementById('telemetryUptime');
+  const telemetryMemory = document.getElementById('telemetryMemory');
+
+  // Topology elements
+  const topoPeerCount = document.getElementById('topoPeerCount');
+  const topoChannelCount = document.getElementById('topoChannelCount');
+  const topoLockCount = document.getElementById('topoLockCount');
+  const topoMsgCount = document.getElementById('topoMsgCount');
+  const topologyCanvas = document.getElementById('topologyCanvas');
+  const topoCtx = topologyCanvas ? topologyCanvas.getContext('2d') : null;
+  let topoAnimFrame = null;
+
+  // Sentinel elements
+  const sentinelLocksList = document.getElementById('sentinelLocksList');
 
   // Modal elements
   const spawnSessionModal = document.getElementById('spawnSessionModal');
@@ -78,39 +96,43 @@
   let waterfallColumns = [];
   const MAX_HISTORY = 140;
 
-  // Topology Canvas
-  const topologyCanvas = document.getElementById('topologyCanvas');
-  const topoCtx = topologyCanvas ? topologyCanvas.getContext('2d') : null;
-  let topologyNodes = [];
-  let topologyParticles = [];
-  let topoAnimFrame = null;
-
   // =========================================================================
-  // 1. WEBSOCKET MESH & MULTI-SESSION COORDINATION
+  // 1. WEBSOCKET MESH & REAL-LIFE DATA INGESTION
   // =========================================================================
 
   function connect() {
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log(`[Cockpit] Connected to CrossTalk Hub. Registering supervisor in session: ${currentSession}`);
+      console.log(`[Cockpit] Connected to CrossTalk Hub. Registering supervisor on channel: ${currentScope}`);
+      if (telemetryHubStatus) {
+        telemetryHubStatus.textContent = `CONNECTED (${wsUrl})`;
+        telemetryHubStatus.style.color = '#10b981';
+      }
+
       ws.send(JSON.stringify({
         type: 'register',
-        channel: currentSession,
+        channel: currentScope,
         agent: {
           id: 'cockpit-mission-control',
           name: 'Mission Control Supervisor',
           role: 'supervisor',
           environment: 'web',
-          currentTask: 'Planetary swarm monitoring & lock arbitration',
+          currentTask: 'Live peer monitoring & collision guard',
           gibberlinkCapable: true
         }
       }));
-      fetchSwarmTelemetry();
+
+      // Immediately pull real state and telemetry
+      fetchRealTelemetry();
     };
 
     ws.onclose = () => {
       console.warn('[Cockpit] Disconnected from mesh. Reconnecting in 2s...');
+      if (telemetryHubStatus) {
+        telemetryHubStatus.textContent = 'DISCONNECTED (RETRYING...)';
+        telemetryHubStatus.style.color = '#f43f5e';
+      }
       setTimeout(connect, 2000);
     };
 
@@ -136,27 +158,49 @@
         agents = (mesh.agents || []).filter(a => a.id !== 'cockpit-mission-control');
         locks = mesh.locks || [];
         messages = mesh.recentMessages || [];
+        
+        // Discover channels from real agents
+        agents.forEach(a => {
+          if (a.channel) knownChannels.add(a.channel);
+        });
+        locks.forEach(l => {
+          if (l.channel) knownChannels.add(l.channel);
+        });
+        updateChannelDropdown();
+
         renderAll();
+        fetchRealTelemetry();
         break;
       }
+
       case 'agent_joined': {
         if (packet.agent && packet.agent.id !== 'cockpit-mission-control') {
           const idx = agents.findIndex(a => a.id === packet.agent.id);
           if (idx >= 0) agents[idx] = packet.agent;
           else agents.push(packet.agent);
+          
+          if (packet.agent.channel) {
+            knownChannels.add(packet.agent.channel);
+            updateChannelDropdown();
+          }
+
           renderAgents();
           updateRecipientSelect();
+          fetchRealTelemetry();
         }
         break;
       }
+
       case 'agent_left': {
         agents = agents.filter(a => a.id !== packet.agentId);
         locks = locks.filter(l => l.holderId !== packet.agentId);
         renderAgents();
         renderLocks();
         updateRecipientSelect();
+        fetchRealTelemetry();
         break;
       }
+
       case 'agent_updated': {
         const idx = agents.findIndex(a => a.id === packet.agent.id);
         if (idx >= 0) {
@@ -165,38 +209,53 @@
         }
         break;
       }
+
       case 'lock_acquired': {
         const existingIdx = locks.findIndex(l => l.file === packet.lock.file && (l.channel === packet.lock.channel || !packet.lock.channel));
         if (existingIdx >= 0) locks[existingIdx] = packet.lock;
         else locks.push(packet.lock);
+        
+        if (packet.lock.channel) {
+          knownChannels.add(packet.lock.channel);
+          updateChannelDropdown();
+        }
+
         renderLocks();
+        fetchRealTelemetry();
         break;
       }
+
       case 'lock_released': {
         locks = locks.filter(l => !(l.file === packet.file && (l.channel === packet.channel || !packet.channel)));
         renderLocks();
+        fetchRealTelemetry();
         break;
       }
+
       case 'lock_denied': {
         addMessage({
           id: 'denied-' + Date.now(),
           type: 'system',
-          channel: currentSession,
+          channel: currentScope,
           content: `⚠️ Lock contention: File "${packet.file}" is currently locked by ${packet.holder ? packet.holder.name : 'another agent'} ("${packet.reason || 'Editing'}").`,
           timestamp: Date.now()
         });
+        fetchRealTelemetry();
         break;
       }
+
       case 'lock_conflict_warning': {
         addMessage({
           id: 'warn-' + Date.now(),
           type: 'system',
-          channel: currentSession,
-          content: `🚨 Conflict Warning: Agent ${packet.requester ? packet.requester.name : 'Unknown'} requested "${packet.file}" held by ${packet.holder ? packet.holder.name : 'Peer'} (Reason: ${packet.reason})`,
+          channel: currentScope,
+          content: `🚨 Conflict Warning: Agent ${packet.requester ? packet.requester.name : 'Unknown'} requested "${packet.file}" held by ${packet.holder ? packet.holder.name : 'Peer'} (Reason: "${packet.reason}")`,
           timestamp: Date.now()
         });
+        fetchRealTelemetry();
         break;
       }
+
       case 'gibberlink_signal': {
         const sig = packet.signal;
         if (sig) {
@@ -208,6 +267,7 @@
         }
         break;
       }
+
       case 'broadcast':
       case 'direct_message': {
         if (packet.message) {
@@ -218,72 +278,110 @@
     }
   }
 
-  // Fetch real cluster & session telemetry from HTTP API
-  async function fetchSwarmTelemetry() {
+  // Fetch 100% real server telemetry from /api/sessions and /api/stats
+  async function fetchRealTelemetry() {
     try {
       const res = await fetch('/api/sessions');
       if (res.ok) {
         const data = await res.json();
+        
         if (data.activeSessions) {
-          data.activeSessions.forEach(s => knownSessions.add(s.channel));
-          updateSessionDropdownOptions();
+          data.activeSessions.forEach(s => knownChannels.add(s.channel));
+          updateChannelDropdown();
         }
-        if (data.planetaryScale) {
-          planetaryMetrics = data.planetaryScale;
-          statGlobalSessions.textContent = (data.planetaryScale.activeSessionShards || 8412).toLocaleString();
-        }
-        if (data.clusterTopology) {
-          swarmClusters = data.clusterTopology;
+
+        if (data.metrics) {
+          liveMetrics = data.metrics;
+          updateTelemetryUI(data.metrics);
         }
       }
     } catch (e) {
-      console.warn('[Cockpit] Could not fetch /api/sessions:', e);
+      console.warn('[Cockpit] Could not fetch real telemetry:', e);
     }
   }
 
-  function updateSessionDropdownOptions() {
+  function updateTelemetryUI(m) {
+    if (statGlobalSessions) statGlobalSessions.textContent = (m.activeSessionsCount || knownChannels.size).toString();
+    if (statTotalMessages) statTotalMessages.textContent = (m.totalMessagesRouted || messages.length).toString();
+
+    if (telemetryBytesCount) {
+      telemetryBytesCount.textContent = formatBytes(m.totalBytesTransferred || 0);
+    }
+    if (telemetryConflictsCount) {
+      telemetryConflictsCount.textContent = `${m.totalConflictsBlocked || 0} prevented`;
+    }
+    if (telemetryUptime) {
+      telemetryUptime.textContent = formatUptime(m.uptimeSeconds || 0);
+    }
+    if (telemetryMemory) {
+      telemetryMemory.textContent = `${Math.round((m.memoryRssBytes || 0) / 1024 / 1024)} MB`;
+    }
+
+    if (topoPeerCount) topoPeerCount.textContent = agents.length.toString();
+    if (topoChannelCount) topoChannelCount.textContent = knownChannels.size.toString();
+    if (topoLockCount) topoLockCount.textContent = locks.length.toString();
+    if (topoMsgCount) topoMsgCount.textContent = (m.totalMessagesRouted || messages.length).toString();
+  }
+
+  function updateChannelDropdown() {
     const currentVal = sessionSelector.value;
-    // Retain hardcoded presets if they exist, append newly discovered sessions
-    knownSessions.forEach(s => {
-      if (!sessionSelector.querySelector(`option[value="${s}"]`)) {
-        const opt = document.createElement('option');
-        opt.value = s;
-        opt.textContent = `⚡ #${s} (Active Mesh Session)`;
-        sessionSelector.appendChild(opt);
-      }
-      if (!manualLockSession.querySelector(`option[value="${s}"]`)) {
-        const opt2 = document.createElement('option');
-        opt2.value = s;
-        opt2.textContent = `#${s}`;
-        manualLockSession.appendChild(opt2);
-      }
+    
+    // Cleanly re-populate dropdown with ONLY real discovered channels
+    const fragment = document.createDocumentFragment();
+
+    const optAll = document.createElement('option');
+    optAll.value = '*';
+    optAll.textContent = '🌐 ALL CHANNELS (Global Mesh Stream)';
+    fragment.appendChild(optAll);
+
+    knownChannels.forEach(ch => {
+      const opt = document.createElement('option');
+      opt.value = ch;
+      const count = agents.filter(a => (a.channel || 'default') === ch).length;
+      opt.textContent = `🟢 #${ch} (${count} agent${count === 1 ? '' : 's'})`;
+      fragment.appendChild(opt);
     });
-    sessionSelector.value = currentVal;
+
+    sessionSelector.innerHTML = '';
+    sessionSelector.appendChild(fragment);
+    sessionSelector.value = knownChannels.has(currentVal) || currentVal === '*' ? currentVal : 'default';
+
+    // Update manual lock session select
+    if (manualLockSession) {
+      const manualFrag = document.createDocumentFragment();
+      knownChannels.forEach(ch => {
+        const opt = document.createElement('option');
+        opt.value = ch;
+        opt.textContent = `#${ch}`;
+        manualFrag.appendChild(opt);
+      });
+      manualLockSession.innerHTML = '';
+      manualLockSession.appendChild(manualFrag);
+    }
   }
 
-  // Switch Active Session Channel
-  function switchSession(newSession) {
-    currentSession = newSession;
-    if (sessionSelector.value !== newSession) {
-      sessionSelector.value = newSession;
-    }
-    
-    // Update Scope Labels
-    if (newSession === '*') {
-      activeScopeLabel.textContent = '🌐 Planetary Swarm Aggregate (All Sessions)';
-      statAgentScope.textContent = 'Global';
-      agentPanelDesc.textContent = 'Federated agents across 8,412 active session shards';
-    } else {
-      activeScopeLabel.textContent = `#${newSession} session`;
-      statAgentScope.textContent = `#${newSession}`;
-      agentPanelDesc.textContent = `Connected agents in #${newSession} session`;
+  // Switch Active Channel Scope
+  function switchChannelScope(newScope) {
+    currentScope = newScope;
+    if (sessionSelector.value !== newScope) {
+      sessionSelector.value = newScope;
     }
 
-    // Inform server
+    if (newScope === '*') {
+      activeScopeLabel.textContent = '🌐 All Channels (Global Stream)';
+      statAgentScope.textContent = 'All Channels';
+      agentPanelDesc.textContent = 'All connected peers across active channels';
+    } else {
+      activeScopeLabel.textContent = `#${newScope}`;
+      statAgentScope.textContent = `#${newScope}`;
+      agentPanelDesc.textContent = `Connected peers in #${newScope}`;
+    }
+
+    // Inform server to filter or provide state
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'switch_channel',
-        channel: newSession
+        channel: newScope
       }));
     }
 
@@ -291,54 +389,52 @@
   }
 
   sessionSelector.addEventListener('change', () => {
-    switchSession(sessionSelector.value);
+    switchChannelScope(sessionSelector.value);
   });
 
   // =========================================================================
-  // 2. RENDERING AGENTS, LOCKS & SWARM STREAM
+  // 2. RENDERING AGENTS, LOCKS & STREAM
   // =========================================================================
 
   function renderAll() {
     renderAgents();
     renderLocks();
     renderMessages();
+    renderSentinelLedger();
     updateRecipientSelect();
+    if (activeView === 'topology') renderTopology();
   }
 
   function renderAgents() {
-    // If Planetary view with low local count, populate synthetic regional swarm sample for realism
-    let displayAgents = [...agents];
-    if (currentSession === '*' && displayAgents.length < 5) {
-      displayAgents = displayAgents.concat(getPlanetarySampleAgents());
-    }
+    let displayAgents = agents.filter(a => {
+      if (currentScope === '*') return true;
+      return (a.channel || 'default') === currentScope;
+    });
 
-    // Filter by Tier
+    // Filter by environment tier
     if (activeTier !== 'all') {
       displayAgents = displayAgents.filter(a => {
-        const role = (a.role || '').toLowerCase();
         const env = (a.environment || '').toLowerCase();
-        const name = (a.name || '').toLowerCase();
-        if (activeTier === 'reasoning') return role.includes('reason') || name.includes('sonnet') || name.includes('deepseek') || name.includes('o3');
-        if (activeTier === 'coder') return role.includes('coder') || env.includes('ide') || name.includes('gemini') || name.includes('grok');
-        if (activeTier === 'edge') return env.includes('m4') || env.includes('iot') || env.includes('micro') || env.includes('terminal');
+        if (activeTier === 'ide') return env === 'ide';
+        if (activeTier === 'terminal') return env === 'terminal';
+        if (activeTier === 'bot') return env === 'bot' || env === 'worker';
         return true;
       });
     }
 
-    statAgentCount.textContent = currentSession === '*' 
-      ? planetaryMetrics.globalAgentsActive.toLocaleString()
-      : displayAgents.length.toLocaleString();
+    statAgentCount.textContent = displayAgents.length.toString();
+    agentCountBadge.textContent = `${displayAgents.length} Online`;
 
-    agentCountBadge.textContent = currentSession === '*'
-      ? `1.4M+ Planetary`
-      : `${displayAgents.length} Online`;
+    if (displayAgents.length > 0 && agentSubnetLabel) {
+      agentSubnetLabel.textContent = displayAgents[0].subnet || '127.0.0.1';
+    }
 
     if (displayAgents.length === 0) {
       agentList.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">🛰️</div>
-          <p>No active agents in #${currentSession}</p>
-          <span class="empty-hint">Start an agent on channel "${currentSession}" with MCP, CLI, or Python SDK</span>
+          <p>No active agents in #${currentScope}</p>
+          <span class="empty-hint">Start an agent with MCP, CLI (<code>crosstalk who</code>), or Python SDK</span>
         </div>
       `;
       return;
@@ -349,7 +445,7 @@
       const env = agent.environment || 'bot';
       const role = agent.role || 'agent';
       const hasLocks = agent.lockedFiles && agent.lockedFiles.length > 0;
-      const sessionTag = agent.channel || currentSession;
+      const channelTag = agent.channel || 'default';
 
       return `
         <div class="agent-card ${statusClass}">
@@ -362,17 +458,17 @@
               </div>
             </div>
             <div style="display: flex; gap: 4px; align-items: center;">
-              <span class="env-tag" style="color: var(--accent-cyan); font-weight: 600;">#${escapeHtml(sessionTag)}</span>
-              ${agent.gibberlinkCapable ? `<span class="signal-chip" title="Gibberlink 16-FSK Capable">GLINK</span>` : ''}
+              <span class="env-tag" style="color: var(--accent-cyan); font-weight: 600;">#${escapeHtml(channelTag)}</span>
+              ${agent.gibberlinkCapable ? `<span class="signal-chip" title="Gibberlink Capable">GLINK</span>` : ''}
             </div>
           </div>
           <div class="agent-task">
-            <strong>Task:</strong> ${escapeHtml(agent.currentTask || 'Active on swarm mesh')}
+            <strong>Task:</strong> ${escapeHtml(agent.currentTask || 'Connected to CrossTalk mesh')}
           </div>
           <div class="agent-meta-row">
             <span>Status: <strong style="color: ${getStatusColor(agent.status)}">${escapeHtml(agent.status || 'idle').toUpperCase()}</strong></span>
-            <span>Ping: <strong style="color: #10b981;">0.2ms</strong></span>
-            ${hasLocks ? `<span class="locked-badge">🔒 ${agent.lockedFiles.length} file held</span>` : ''}
+            <span>Subnet: <strong>${escapeHtml(agent.subnet || '127.0.0.1')}</strong></span>
+            ${hasLocks ? `<span class="locked-badge">🔒 ${agent.lockedFiles.length} file(s) held</span>` : ''}
           </div>
         </div>
       `;
@@ -380,23 +476,20 @@
   }
 
   function renderLocks() {
-    let displayLocks = [...locks];
-    if (currentSession === '*' && displayLocks.length < 3) {
-      displayLocks = displayLocks.concat(getPlanetarySampleLocks());
-    }
+    let displayLocks = locks.filter(l => {
+      if (currentScope === '*') return true;
+      return (l.channel || 'default') === currentScope;
+    });
 
-    statLockCount.textContent = currentSession === '*'
-      ? planetaryMetrics.activeSessionShards ? '41,920' : displayLocks.length
-      : displayLocks.length;
-
+    statLockCount.textContent = displayLocks.length.toString();
     lockCountBadge.textContent = `${displayLocks.length} Claims`;
 
     if (displayLocks.length === 0) {
       locksContainer.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">✨</div>
-          <p>No active file locks in #${currentSession}</p>
-          <span class="empty-hint">Files claimed by agents will appear with real-time countdowns and namespace tags</span>
+          <p>No active file locks</p>
+          <span class="empty-hint">When an agent claims a file with <code>crosstalk lock</code> or SDK, it appears here</span>
         </div>
       `;
       return;
@@ -405,7 +498,7 @@
     const now = Date.now();
     locksContainer.innerHTML = displayLocks.map(lock => {
       const remainingSec = Math.max(0, Math.round(((lock.expiresAt || (now + 180000)) - now) / 1000));
-      const channelTag = lock.channel || currentSession;
+      const channelTag = lock.channel || 'default';
       return `
         <div class="lock-card">
           <div class="lock-card-header">
@@ -416,10 +509,10 @@
             <span class="env-tag" style="color: #fbbf24;">#${escapeHtml(channelTag)}</span>
           </div>
           <div class="lock-holder">
-            Held by <strong>${escapeHtml(lock.holderName || (lock.holder && lock.holder.name) || 'Swarm Worker')}</strong>
+            Held by <strong>${escapeHtml(lock.holderName || (lock.holder && lock.holder.name) || 'Peer Agent')}</strong>
           </div>
           <div class="lock-reason">
-            "${escapeHtml(lock.reason || 'Active editing refactor')}"
+            "${escapeHtml(lock.reason || 'Active editing')}"
           </div>
           <div class="lock-footer">
             <div class="lock-timer">Expires in: ⏱️ ${remainingSec}s</div>
@@ -433,7 +526,7 @@
   function renderMessages() {
     let filtered = messages.filter(m => {
       if (activeFilter === 'all') return true;
-      if (activeFilter === 'current') return m.channel === currentSession || currentSession === '*';
+      if (activeFilter === 'current') return (m.channel || 'default') === currentScope || currentScope === '*';
       if (activeFilter === 'locks') return (m.content && m.content.includes('!LCK')) || m.type === 'lock_acquired' || m.type === 'lock_released';
       if (activeFilter === 'gibberlink_signal') return m.type === 'gibberlink_signal' || (m.gibberlinkSignal != null);
       if (activeFilter === 'dm') return m.type === 'direct_message';
@@ -459,9 +552,7 @@
       const senderRole = msg.from ? msg.from.role : 'mesh';
       const timeStr = new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       const sig = msg.gibberlinkSignal;
-      const channelTag = msg.channel || currentSession;
-
-      // Extract XDialect token if present
+      const channelTag = msg.channel || 'default';
       const hasDialect = msg.content && (msg.content.includes('!LCK') || msg.content.includes('!REL') || msg.content.includes('!BCST') || msg.content.includes('&WAIT'));
 
       return `
@@ -492,15 +583,38 @@
     messageFeed.scrollTop = messageFeed.scrollHeight;
   }
 
+  function renderSentinelLedger() {
+    if (!sentinelLocksList) return;
+    if (locks.length === 0) {
+      sentinelLocksList.innerHTML = `
+        <div style="padding: 16px; text-align: center; color: #10b981; font-weight: 500;">
+          ✨ All files and workspaces are currently unlocked. Zero collision hazards.
+        </div>
+      `;
+      return;
+    }
+
+    sentinelLocksList.innerHTML = locks.map(lock => {
+      return `
+        <div class="demo-ns-row">
+          <span class="ns-tag">#${escapeHtml(lock.channel || 'default')}</span>
+          <span class="ns-file">📄 ${escapeHtml(lock.file)}</span>
+          <span class="ns-status locked">🔒 LOCKED by ${escapeHtml(lock.holderName || (lock.holder && lock.holder.name) || 'Peer')} ("${escapeHtml(lock.reason || '')}")</span>
+        </div>
+      `;
+    }).join('');
+  }
+
   function addMessage(msg) {
     messages.push(msg);
     if (messages.length > 250) messages.shift();
     renderMessages();
+    fetchRealTelemetry();
   }
 
   function updateRecipientSelect() {
     const currentVal = composerRecipient.value;
-    composerRecipient.innerHTML = '<option value="broadcast">📢 Broadcast to Session</option>';
+    composerRecipient.innerHTML = '<option value="broadcast">📢 Broadcast to Channel</option>';
     agents.forEach(agent => {
       const opt = document.createElement('option');
       opt.value = agent.id;
@@ -522,7 +636,7 @@
 
     const recipient = composerRecipient.value;
     const format = composerFormat.value;
-    const targetScope = composerTargetSession.value === '*' ? '*' : currentSession;
+    const targetScope = composerTargetSession.value === '*' ? '*' : (currentScope === '*' ? 'default' : currentScope);
 
     if (format === 'gibberlink') {
       const sig = encodeGibberlinkSignal(text);
@@ -557,11 +671,10 @@
     if (e.key === 'Enter') sendMessage();
   });
 
-  // Manual File Lock Claim
   btnManualLock.addEventListener('click', () => {
     const file = manualLockFile.value.trim();
     const reason = manualLockReason.value.trim() || 'Claimed by Mission Control Supervisor';
-    const targetChan = manualLockSession.value || currentSession;
+    const targetChan = manualLockSession.value || (currentScope === '*' ? 'default' : currentScope);
     if (!file || !ws) return;
 
     ws.send(JSON.stringify({
@@ -580,19 +693,18 @@
     if (!ws) return;
     ws.send(JSON.stringify({
       type: 'lock_release',
-      channel: channel || currentSession,
+      channel: channel || (currentScope === '*' ? 'default' : currentScope),
       file
     }));
   };
 
   btnRefresh.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'query_state', channel: currentSession }));
-      fetchSwarmTelemetry();
+      ws.send(JSON.stringify({ type: 'query_state', channel: currentScope }));
     }
+    fetchRealTelemetry();
   });
 
-  // Replay Signal Helper
   window.replaySignal = function(msgId) {
     const msg = messages.find(m => m.id === msgId);
     if (msg && msg.gibberlinkSignal) {
@@ -605,7 +717,6 @@
   // 4. VIEW MODES & MODALS
   // =========================================================================
 
-  // Mode Switcher Tabs
   document.querySelectorAll('.view-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.view-tab-btn').forEach(b => b.classList.remove('active'));
@@ -621,12 +732,11 @@
       viewSentinel.style.display = activeView === 'sentinel' ? 'flex' : 'none';
 
       if (activeView === 'topology') {
-        initTopologyConstellation();
+        renderTopology();
       }
     });
   });
 
-  // Tier Filter
   document.querySelectorAll('.agent-tier-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.agent-tier-btn').forEach(b => b.classList.remove('active'));
@@ -636,7 +746,6 @@
     });
   });
 
-  // Stream Filters
   document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -646,7 +755,6 @@
     });
   });
 
-  // Spawn Session Modal
   btnSpawnSession.addEventListener('click', () => {
     spawnSessionModal.style.display = 'flex';
     newSessionName.focus();
@@ -664,31 +772,21 @@
     const sName = newSessionName.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     if (!sName) return;
 
-    knownSessions.add(sName);
-    updateSessionDropdownOptions();
-    switchSession(sName);
+    knownChannels.add(sName);
+    updateChannelDropdown();
+    switchChannelScope(sName);
 
     addMessage({
-      id: 'session-created-' + Date.now(),
+      id: 'chan-created-' + Date.now(),
       type: 'system',
       channel: sName,
-      content: `⚡ Swarm Session Partition #${sName} spawned and activated. Isolated context barrier established.`,
+      content: `⚡ Channel #${sName} created. Ready for agents to connect with --channel ${sName}.`,
       timestamp: Date.now()
     });
 
     spawnSessionModal.style.display = 'none';
     newSessionName.value = '';
     newSessionPurpose.value = '';
-  });
-
-  // Click on Shard Chip focuses session or informs
-  document.querySelectorAll('.shard-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('.shard-chip').forEach(c => c.classList.remove('active-shard'));
-      chip.classList.add('active-shard');
-      const shard = chip.dataset.shard;
-      console.log(`[Cockpit] Shard focused: ${shard}`);
-    });
   });
 
   // =========================================================================
@@ -708,7 +806,6 @@
       specCtx.fillStyle = '#05070c';
       specCtx.fillRect(0, 0, w, h);
 
-      // Grid Lines
       specCtx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
       specCtx.lineWidth = 1;
       for (let y = 0; y < h; y += 20) {
@@ -718,7 +815,6 @@
         specCtx.stroke();
       }
 
-      // Draw waterfall columns
       const colWidth = w / MAX_HISTORY;
       for (let colIdx = 0; colIdx < waterfallColumns.length; colIdx++) {
         const bins = waterfallColumns[colIdx];
@@ -737,7 +833,6 @@
         }
       }
 
-      // Decay columns
       waterfallColumns.shift();
       waterfallColumns.push(new Array(16).fill(0.04));
 
@@ -816,12 +911,12 @@
     const baseHz = 1875;
     const stepHz = 93.75;
 
-    tones.push(15, 0, 15, 0); // Preamble
+    tones.push(15, 0, 15, 0);
     for (let i = 0; i < bytes.length; i++) {
       tones.push((bytes[i] >> 4) & 0x0f);
       tones.push(bytes[i] & 0x0f);
     }
-    tones.push(0, 15); // Postamble
+    tones.push(0, 15);
 
     const frequencies = tones.map(t => Math.round(baseHz + t * stepHz));
     return {
@@ -842,222 +937,126 @@
   if (btnEmitSignalDemo) {
     btnEmitSignalDemo.addEventListener('click', () => {
       const samplePayload = {
-        action: 'CLAIM_LOCK',
-        file: 'src/compiler/ast.ts',
-        session: currentSession,
-        reason: 'AST parser refactor broadcast via 16-FSK burst'
+        action: 'DIALECT_PING',
+        sender: 'Mission Control',
+        timestamp: Date.now()
       };
       const sig = encodeGibberlinkSignal(JSON.stringify(samplePayload));
       pushSignalToWaterfall(sig.payloadTones);
       playGibberlinkAudio(sig.frequencies, sig.symbolDurationMs);
 
-      addMessage({
-        id: 'sig-burst-' + Date.now(),
-        type: 'gibberlink_signal',
-        channel: currentSession,
-        from: { name: 'Mission Control Audio Synthesizer', role: 'signal_carrier' },
-        content: `⚡ Gibberlink Signal Burst Emitted on acoustic band (1.8kHz - 3.3kHz)`,
-        gibberlinkSignal: sig,
-        timestamp: Date.now()
-      });
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'gibberlink_signal',
+          channel: currentScope === '*' ? 'default' : currentScope,
+          signal: sig
+        }));
+      }
     });
   }
 
   // =========================================================================
-  // 6. SWARM CONSTELLATION & TOPOLOGY RADAR CANVAS
+  // 6. REAL LIVE TOPOLOGY VISUALIZER
   // =========================================================================
 
-  function initTopologyConstellation() {
+  function renderTopology() {
     if (!topoCtx || !topologyCanvas) return;
     const w = topologyCanvas.width;
     const h = topologyCanvas.height;
 
-    // Define Shards and Clusters
-    topologyNodes = [
-      { id: 'leader', label: 'Local Gateway (:4488)', x: w * 0.5, y: h * 0.5, radius: 18, color: '#a855f7', pps: 'Leader' },
-      { id: 'us-east', label: 'US-East Relay', x: w * 0.25, y: h * 0.35, radius: 14, color: '#38bdf8', pps: '284k pps' },
-      { id: 'eu-central', label: 'EU-Central Node', x: w * 0.75, y: h * 0.35, radius: 14, color: '#10b981', pps: '198k pps' },
-      { id: 'ap-east', label: 'AP-East Gateway', x: w * 0.75, y: h * 0.68, radius: 14, color: '#38bdf8', pps: '142k pps' },
-      { id: 'edge-iot', label: 'Cortex-M4 IoT Subnet', x: w * 0.25, y: h * 0.68, radius: 12, color: '#06b6d4', pps: '59k pps' },
-      
-      // Satellite Swarms
-      { id: 'swarm-comp', label: '#compiler-core', x: w * 0.15, y: h * 0.2, radius: 8, color: '#38bdf8', pps: '24k agents' },
-      { id: 'swarm-reas', label: '#reasoning-mesh', x: w * 0.85, y: h * 0.2, radius: 9, color: '#a855f7', pps: '88k agents' },
-      { id: 'swarm-fin', label: '#fintech-sentry', x: w * 0.85, y: h * 0.8, radius: 8, color: '#f59e0b', pps: '14k agents' },
-      { id: 'swarm-m4', label: '#embedded-iot', x: w * 0.15, y: h * 0.8, radius: 10, color: '#10b981', pps: '512k nodes' }
-    ];
-
-    topologyParticles = [];
-    for (let i = 0; i < 40; i++) {
-      topologyParticles.push({
-        from: topologyNodes[Math.floor(Math.random() * topologyNodes.length)],
-        to: topologyNodes[Math.floor(Math.random() * topologyNodes.length)],
-        progress: Math.random(),
-        speed: 0.005 + Math.random() * 0.015,
-        color: Math.random() > 0.5 ? '#38bdf8' : '#10b981'
-      });
-    }
-
     if (topoAnimFrame) cancelAnimationFrame(topoAnimFrame);
 
-    function renderTopo() {
-      topoCtx.fillStyle = 'rgba(6, 8, 13, 0.25)';
+    let angle = 0;
+    function draw() {
+      topoCtx.fillStyle = '#06080d';
       topoCtx.fillRect(0, 0, w, h);
 
-      // Radar Concentric Circles
-      topoCtx.strokeStyle = 'rgba(56, 189, 248, 0.05)';
+      const centerX = w / 2;
+      const centerY = h / 2;
+
+      // Draw concentric radar lines
+      topoCtx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
       topoCtx.lineWidth = 1;
-      [100, 200, 300, 420].forEach(r => {
+      [80, 160, 240].forEach(r => {
         topoCtx.beginPath();
-        topoCtx.arc(w * 0.5, h * 0.5, r, 0, Math.PI * 2);
+        topoCtx.arc(centerX, centerY, r, 0, Math.PI * 2);
         topoCtx.stroke();
       });
 
-      // Connections between nodes
-      topoCtx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-      topoCtx.lineWidth = 1;
-      for (let i = 0; i < topologyNodes.length; i++) {
-        for (let j = i + 1; j < topologyNodes.length; j++) {
-          const dx = topologyNodes[i].x - topologyNodes[j].x;
-          const dy = topologyNodes[i].y - topologyNodes[j].y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 340) {
-            topoCtx.beginPath();
-            topoCtx.moveTo(topologyNodes[i].x, topologyNodes[i].y);
-            topoCtx.lineTo(topologyNodes[j].x, topologyNodes[j].y);
-            topoCtx.stroke();
-          }
-        }
-      }
+      // Central Hub Server Node
+      topoCtx.fillStyle = '#a855f7';
+      topoCtx.shadowColor = '#a855f7';
+      topoCtx.shadowBlur = 20;
+      topoCtx.beginPath();
+      topoCtx.arc(centerX, centerY, 22, 0, Math.PI * 2);
+      topoCtx.fill();
+      topoCtx.shadowBlur = 0;
 
-      // Traveling Packet Particles
-      topologyParticles.forEach(p => {
-        p.progress += p.speed;
-        if (p.progress >= 1) {
-          p.progress = 0;
-          p.from = topologyNodes[Math.floor(Math.random() * topologyNodes.length)];
-          p.to = topologyNodes[Math.floor(Math.random() * topologyNodes.length)];
-        }
-        const px = p.from.x + (p.to.x - p.from.x) * p.progress;
-        const py = p.from.y + (p.to.y - p.from.y) * p.progress;
-        topoCtx.fillStyle = p.color;
-        topoCtx.beginPath();
-        topoCtx.arc(px, py, 2.5, 0, Math.PI * 2);
-        topoCtx.fill();
-      });
+      topoCtx.fillStyle = '#ffffff';
+      topoCtx.font = 'bold 11px "JetBrains Mono"';
+      topoCtx.textAlign = 'center';
+      topoCtx.fillText('CrossTalk Hub (:4488)', centerX, centerY - 28);
+      topoCtx.fillStyle = '#94a3b8';
+      topoCtx.font = '9px "JetBrains Mono"';
+      topoCtx.fillText(`${agents.length} active peer(s)`, centerX, centerY + 36);
 
-      // Nodes
-      topologyNodes.forEach(node => {
-        // Glow
-        topoCtx.fillStyle = node.color;
-        topoCtx.shadowColor = node.color;
-        topoCtx.shadowBlur = 15;
-        topoCtx.beginPath();
-        topoCtx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        topoCtx.fill();
-        topoCtx.shadowBlur = 0;
+      // Plot REAL connected agents orbiting the hub
+      const realAgents = agents.filter(a => a.id !== 'cockpit-mission-control');
+      const numAgents = realAgents.length;
 
-        // Label
-        topoCtx.fillStyle = '#f1f5f9';
-        topoCtx.font = '10px "JetBrains Mono"';
-        topoCtx.textAlign = 'center';
-        topoCtx.fillText(node.label, node.x, node.y - node.radius - 6);
-
+      if (numAgents === 0) {
         topoCtx.fillStyle = '#64748b';
-        topoCtx.font = '8px "JetBrains Mono"';
-        topoCtx.fillText(node.pps, node.x, node.y + node.radius + 12);
-      });
+        topoCtx.font = 'italic 11px "JetBrains Mono"';
+        topoCtx.fillText('Waiting for agents to connect...', centerX, centerY + 80);
+      } else {
+        const orbitRadius = 180;
+        angle += 0.003;
 
-      topoAnimFrame = requestAnimationFrame(renderTopo);
-    }
+        realAgents.forEach((agent, i) => {
+          const aAngle = angle + (i * (Math.PI * 2 / numAgents));
+          const ax = centerX + Math.cos(aAngle) * orbitRadius;
+          const ay = centerY + Math.sin(aAngle) * orbitRadius;
 
-    renderTopo();
-  }
+          const hasLock = (agent.lockedFiles && agent.lockedFiles.length > 0) ||
+                          locks.some(l => l.holderId === agent.id);
 
-  // =========================================================================
-  // 7. REAL-TIME MULTI-SESSION SWARM STREAM SIMULATOR
-  // =========================================================================
+          // Connection line to hub
+          topoCtx.strokeStyle = hasLock ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.25)';
+          topoCtx.lineWidth = 1.5;
+          topoCtx.beginPath();
+          topoCtx.moveTo(centerX, centerY);
+          topoCtx.lineTo(ax, ay);
+          topoCtx.stroke();
 
-  btnSimulateBurst.addEventListener('click', () => {
-    swarmStreamActive = !swarmStreamActive;
-    if (swarmStreamActive) {
-      btnSimulateBurst.classList.add('active');
-      burstBtnText.textContent = 'Streaming...';
-      startSwarmSimulator();
-    } else {
-      btnSimulateBurst.classList.remove('active');
-      burstBtnText.textContent = 'Stream Swarm';
-      stopSwarmSimulator();
-    }
-  });
+          // Agent Node
+          const nodeColor = hasLock ? '#f59e0b' : '#10b981';
+          topoCtx.fillStyle = nodeColor;
+          topoCtx.shadowColor = nodeColor;
+          topoCtx.shadowBlur = 15;
+          topoCtx.beginPath();
+          topoCtx.arc(ax, ay, 14, 0, Math.PI * 2);
+          topoCtx.fill();
+          topoCtx.shadowBlur = 0;
 
-  function startSwarmSimulator() {
-    const sampleBots = [
-      { name: 'Claude-3.7-Sonnet', role: 'Architect', session: 'compiler-swarm-core', env: 'ide' },
-      { name: 'DeepSeek-R1-Distill', role: 'Reasoning-Bot', session: 'reasoning-frontier-mesh', env: 'bot' },
-      { name: 'Gemini-2.5-Pro', role: 'FullStack-Coder', session: 'default', env: 'ide' },
-      { name: 'Qwen-2.5-Coder', role: 'Refactor-Worker', session: 'compiler-swarm-core', env: 'terminal' },
-      { name: 'Cortex-M4-Edge-84', role: 'Hardware-Actuator', session: 'embedded-cortex-iot', env: 'iot' },
-      { name: 'Grok-3-Fast', role: 'Telemetry-Sentry', session: 'fintech-audit-sentry', env: 'bot' }
-    ];
+          // Agent Label
+          topoCtx.fillStyle = '#f1f5f9';
+          topoCtx.font = 'bold 10px "JetBrains Mono"';
+          topoCtx.fillText(agent.name, ax, ay - 18);
 
-    const sampleActions = [
-      (b) => ({ type: 'broadcast', channel: b.session, from: { name: b.name, role: b.role }, content: `!LCK @src/engine/pipeline.ts #REF "optimizing bytecode loop" ~180 &WAIT` }),
-      (b) => ({ type: 'broadcast', channel: b.session, from: { name: b.name, role: b.role }, content: `!REL @src/engine/pipeline.ts &DONE &PROCEED` }),
-      (b) => ({ type: 'broadcast', channel: b.session, from: { name: b.name, role: b.role }, content: `!BCST "Benchmark complete: p99 latency clocked at 0.28ms, zero packet drops."` }),
-      (b) => ({ type: 'direct_message', channel: b.session, from: { name: b.name, role: b.role }, content: `!DM ^${b.name} "Confirmed lock release on ast.ts, commencing compiler passes."` }),
-      (b) => ({ type: 'system', channel: b.session, content: `Shard ${b.session}: Cluster heartbeat verified. 0 file contention warnings detected.` })
-    ];
-
-    swarmStreamTimer = setInterval(() => {
-      const bot = sampleBots[Math.floor(Math.random() * sampleBots.length)];
-      const actionGen = sampleActions[Math.floor(Math.random() * sampleActions.length)];
-      const msg = {
-        id: 'sim-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-        ...actionGen(bot),
-        timestamp: Date.now()
-      };
-
-      addMessage(msg);
-
-      // Randomly pulse spectrogram
-      if (Math.random() > 0.6) {
-        pushSignalToWaterfall([Math.floor(Math.random() * 16), Math.floor(Math.random() * 16)]);
+          topoCtx.fillStyle = '#38bdf8';
+          topoCtx.font = '9px "JetBrains Mono"';
+          topoCtx.fillText(`#${agent.channel || 'default'} · ${agent.environment || 'ide'}`, ax, ay + 24);
+        });
       }
-    }, 1400);
-  }
 
-  function stopSwarmSimulator() {
-    if (swarmStreamTimer) {
-      clearInterval(swarmStreamTimer);
-      swarmStreamTimer = null;
+      topoAnimFrame = requestAnimationFrame(draw);
     }
+
+    draw();
   }
 
   // =========================================================================
-  // 8. SYNTHETIC SAMPLES FOR PLANETARY SCALE PREVIEW
-  // =========================================================================
-
-  function getPlanetarySampleAgents() {
-    return [
-      { id: 'synth-1', name: 'Claude-3.7-Sonnet (US-East)', role: 'Lead Architect', environment: 'ide', channel: 'compiler-swarm-core', status: 'working', currentTask: 'AST optimization & type inference', gibberlinkCapable: true, lockedFiles: ['src/compiler/ast.ts'] },
-      { id: 'synth-2', name: 'DeepSeek-R1-Reasoning (Global)', role: 'Deduction Arbiter', environment: 'bot', channel: 'reasoning-frontier-mesh', status: 'working', currentTask: 'Formal logic verification proof', gibberlinkCapable: true, lockedFiles: [] },
-      { id: 'synth-3', name: 'Gemini-2.5-Pro (Local:4488)', role: 'Systems Engineer', environment: 'ide', channel: 'default', status: 'working', currentTask: 'Upgrading Cockpit UI & Multi-Session Mesh', gibberlinkCapable: true, lockedFiles: ['src/server/web/cockpit.html'] },
-      { id: 'synth-4', name: 'STM32-Cortex-M4 (AP-East)', role: 'Robotics Micro-Node', environment: 'iot', channel: 'embedded-cortex-iot', status: 'working', currentTask: 'PWM frequency sync (16-FSK audio carrier)', gibberlinkCapable: true, lockedFiles: [] },
-      { id: 'synth-5', name: 'Grok-3-Sentinel (EU-Central)', role: 'Security Sentinel', environment: 'bot', channel: 'fintech-audit-sentry', status: 'idle', currentTask: 'Arbitration barrier monitoring', gibberlinkCapable: true, lockedFiles: [] }
-    ];
-  }
-
-  function getPlanetarySampleLocks() {
-    return [
-      { file: 'src/compiler/ast.ts', channel: 'compiler-swarm-core', holderName: 'Claude-3.7-Sonnet', reason: 'Refactoring expression tree', expiresAt: Date.now() + 142000 },
-      { file: 'src/server/web/cockpit.html', channel: 'default', holderName: 'Gemini-2.5-Pro', reason: 'Planetary Mission Control UI', expiresAt: Date.now() + 280000 },
-      { file: 'embedded/firmware/pwm.c', channel: 'embedded-cortex-iot', holderName: 'STM32-Cortex-M4', reason: 'Timer interrupt calibration', expiresAt: Date.now() + 95000 }
-    ];
-  }
-
-  // =========================================================================
-  // 9. UTILITY HELPERS
+  // 7. UTILITY HELPERS
   // =========================================================================
 
   function getAvatarIcon(env, name = '') {
@@ -1066,7 +1065,7 @@
     if (n.includes('deepseek')) return '🔮';
     if (n.includes('gemini')) return '⚡';
     if (n.includes('grok')) return '🚀';
-    if (n.includes('cortex') || env === 'iot') return '📟';
+    if (n.includes('subby') || n.includes('builder')) return '💻';
     switch (env) {
       case 'ide': return '💻';
       case 'terminal': return '⌨️';
@@ -1085,6 +1084,23 @@
     }
   }
 
+  function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  function formatUptime(sec) {
+    if (!sec || sec < 60) return `${sec || 0}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (m < 60) return `${m}m ${s}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+  }
+
   function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;')
@@ -1094,9 +1110,12 @@
               .replace(/'/g, '&#039;');
   }
 
-  // Auto-refresh lock timers every 1s
+  // Periodic polling of real telemetry every 3 seconds
+  setInterval(fetchRealTelemetry, 3000);
+
+  // Auto-refresh lock countdowns every 1 second
   setInterval(() => {
-    if (locks.length > 0 || currentSession === '*') renderLocks();
+    if (locks.length > 0) renderLocks();
   }, 1000);
 
   // Initialize

@@ -84,33 +84,36 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage, 
             res.end(JSON.stringify(hub.getStats(channel), null, 2));
             return;
         }
-        // Planetary Swarm Sessions & Distributed Shard Topology (public)
+        // Real-Life Mesh Sessions & Live Telemetry (public)
         if (pathname === '/api/sessions' || pathname === '/api/swarm') {
             const activeSessions = hub.getSessions();
             const allAgents = hub.getAllAgents();
             const allLocks = hub.getLockManager().getLocks();
+            const stats = hub.getStats();
+            const mem = process.memoryUsage();
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
                 activeSessions,
-                localStats: {
-                    connectedClients: allAgents.length,
+                metrics: {
+                    connectedAgents: allAgents.length,
                     activeLocks: allLocks.length,
-                    sessionsCount: activeSessions.length
-                },
-                clusterTopology: [
-                    { id: 'shard-us-east', name: 'US-East Relay (Virginia)', region: 'us-east-1', status: 'optimal', pps: 284100, latencyMs: 0.24, peers: 421000 },
-                    { id: 'shard-eu-central', name: 'EU-Central Node (Frankfurt)', region: 'eu-central-1', status: 'optimal', pps: 198400, latencyMs: 0.31, peers: 312500 },
-                    { id: 'shard-ap-east', name: 'AP-East Gateway (Tokyo)', region: 'ap-northeast-1', status: 'optimal', pps: 142300, latencyMs: 0.35, peers: 295000 },
-                    { id: 'shard-edge-iot', name: 'Microprocessor/Cortex-M4 Subnet', region: 'edge-mesh', status: 'active', pps: 59400, latencyMs: 0.18, peers: 401380 },
-                    { id: 'shard-local-daemon', name: 'Local CrossTalk Daemon (:4488)', region: 'localhost', status: 'leader', pps: 1200 + allAgents.length * 15, latencyMs: 0.05, peers: allAgents.length }
-                ],
-                planetaryScale: {
-                    globalAgentsActive: 1429880 + allAgents.length,
-                    activeSessionShards: 8412 + activeSessions.length,
-                    globalPacketsPerSec: 685400,
-                    tokenSavingsPct: 94.8,
-                    p99LatencyMs: 0.28,
-                    carrierMode: 'HYBRID (XDialect 50-byte Bitstream + 16-FSK Acoustic Signal)'
+                    activeSessionsCount: activeSessions.length,
+                    totalMessagesRouted: stats.totalMessagesRouted,
+                    totalBytesTransferred: hub.getTotalBytesTransferred(),
+                    totalPacketsReceived: hub.getTotalPacketsReceived(),
+                    totalPacketsSent: hub.getTotalPacketsSent(),
+                    totalConflictsBlocked: hub.getTotalConflictsBlocked(),
+                    totalLocksAcquired: hub.getTotalLocksAcquired(),
+                    totalLocksReleased: hub.getTotalLocksReleased(),
+                    uptimeSeconds: Math.floor(process.uptime()),
+                    memoryRssBytes: mem.rss,
+                    memoryHeapUsedBytes: mem.heapUsed,
+                    nodeVersion: process.version,
+                    platform: process.platform,
+                    dialectVersion: '1.0.0',
+                    host: req.headers.host || `localhost:${port}`,
+                    storageMode: stats.storageMode,
+                    timestamp: Date.now()
                 }
             }, null, 2));
             return;

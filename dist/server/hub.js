@@ -15,6 +15,12 @@ export class MeshHub {
     maxHistoryPerChannel = 100;
     maxInboxPerAgent = 50;
     totalMessagesRouted = 0;
+    totalBytesTransferred = 0;
+    totalPacketsReceived = 0;
+    totalPacketsSent = 0;
+    totalConflictsBlocked = 0;
+    totalLocksAcquired = 0;
+    totalLocksReleased = 0;
     startTime = Date.now();
     allowedSubnets = [];
     constructor(storage, allowedSubnets) {
@@ -93,6 +99,8 @@ export class MeshHub {
         ws.on('message', (raw) => {
             try {
                 const text = typeof raw === 'string' ? raw : raw.toString('utf8');
+                this.totalPacketsReceived++;
+                this.totalBytesTransferred += typeof raw === 'string' ? Buffer.byteLength(raw, 'utf8') : raw.length;
                 const packet = JSON.parse(text);
                 this.processPacket(ws, packet, clientIp, (id) => {
                     currentAgentId = id;
@@ -570,7 +578,10 @@ export class MeshHub {
     }
     send(ws, packet) {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(packet));
+            const payload = JSON.stringify(packet);
+            this.totalPacketsSent++;
+            this.totalBytesTransferred += Buffer.byteLength(payload, 'utf8');
+            ws.send(payload);
         }
     }
     getClientByWs(ws) {
@@ -644,14 +655,30 @@ export class MeshHub {
         }
         this.storage.recordMessage(channel, msg).catch(() => { });
     }
+    getTotalBytesTransferred() { return this.totalBytesTransferred; }
+    getTotalPacketsReceived() { return this.totalPacketsReceived; }
+    getTotalPacketsSent() { return this.totalPacketsSent; }
+    getTotalConflictsBlocked() { return this.totalConflictsBlocked; }
+    getTotalLocksAcquired() { return this.totalLocksAcquired; }
+    getTotalLocksReleased() { return this.totalLocksReleased; }
     getStats(channel = 'default') {
         const channelHistory = this.messageHistory.get(channel) || [];
         const locks = this.lockManager.getLocks(channel);
+        const mem = process.memoryUsage();
         return {
             totalMessagesRouted: this.totalMessagesRouted,
+            totalBytesTransferred: this.totalBytesTransferred,
+            totalPacketsReceived: this.totalPacketsReceived,
+            totalPacketsSent: this.totalPacketsSent,
+            totalConflictsBlocked: this.totalConflictsBlocked,
+            totalLocksAcquired: this.totalLocksAcquired,
+            totalLocksReleased: this.totalLocksReleased,
             activePeers: this.clients.size,
             activeLocks: locks.length,
+            activeChannelsCount: this.getSessions().length,
             uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
+            memoryRssBytes: mem.rss,
+            memoryHeapUsedBytes: mem.heapUsed,
             recentHistoryCount: channelHistory.length,
             maxBufferCapacity: this.maxHistoryPerChannel,
             channel,

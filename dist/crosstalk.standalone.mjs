@@ -7866,6 +7866,12 @@ var init_hub = __esm({
       maxHistoryPerChannel = 100;
       maxInboxPerAgent = 50;
       totalMessagesRouted = 0;
+      totalBytesTransferred = 0;
+      totalPacketsReceived = 0;
+      totalPacketsSent = 0;
+      totalConflictsBlocked = 0;
+      totalLocksAcquired = 0;
+      totalLocksReleased = 0;
       startTime = Date.now();
       allowedSubnets = [];
       constructor(storage, allowedSubnets) {
@@ -7941,6 +7947,8 @@ var init_hub = __esm({
         ws.on("message", (raw) => {
           try {
             const text = typeof raw === "string" ? raw : raw.toString("utf8");
+            this.totalPacketsReceived++;
+            this.totalBytesTransferred += typeof raw === "string" ? Buffer.byteLength(raw, "utf8") : raw.length;
             const packet = JSON.parse(text);
             this.processPacket(ws, packet, clientIp, (id) => {
               currentAgentId = id;
@@ -8443,7 +8451,10 @@ var init_hub = __esm({
       }
       send(ws, packet) {
         if (ws.readyState === import_websocket.default.OPEN) {
-          ws.send(JSON.stringify(packet));
+          const payload = JSON.stringify(packet);
+          this.totalPacketsSent++;
+          this.totalBytesTransferred += Buffer.byteLength(payload, "utf8");
+          ws.send(payload);
         }
       }
       getClientByWs(ws) {
@@ -8515,14 +8526,42 @@ var init_hub = __esm({
         this.storage.recordMessage(channel, msg).catch(() => {
         });
       }
+      getTotalBytesTransferred() {
+        return this.totalBytesTransferred;
+      }
+      getTotalPacketsReceived() {
+        return this.totalPacketsReceived;
+      }
+      getTotalPacketsSent() {
+        return this.totalPacketsSent;
+      }
+      getTotalConflictsBlocked() {
+        return this.totalConflictsBlocked;
+      }
+      getTotalLocksAcquired() {
+        return this.totalLocksAcquired;
+      }
+      getTotalLocksReleased() {
+        return this.totalLocksReleased;
+      }
       getStats(channel = "default") {
         const channelHistory = this.messageHistory.get(channel) || [];
         const locks = this.lockManager.getLocks(channel);
+        const mem = process.memoryUsage();
         return {
           totalMessagesRouted: this.totalMessagesRouted,
+          totalBytesTransferred: this.totalBytesTransferred,
+          totalPacketsReceived: this.totalPacketsReceived,
+          totalPacketsSent: this.totalPacketsSent,
+          totalConflictsBlocked: this.totalConflictsBlocked,
+          totalLocksAcquired: this.totalLocksAcquired,
+          totalLocksReleased: this.totalLocksReleased,
           activePeers: this.clients.size,
           activeLocks: locks.length,
+          activeChannelsCount: this.getSessions().length,
           uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1e3),
+          memoryRssBytes: mem.rss,
+          memoryHeapUsedBytes: mem.heapUsed,
           recentHistoryCount: channelHistory.length,
           maxBufferCapacity: this.maxHistoryPerChannel,
           channel,
@@ -8827,28 +8866,31 @@ async function startServer(port = 4488, host = "0.0.0.0", customStorage, allowed
       const activeSessions = hub.getSessions();
       const allAgents = hub.getAllAgents();
       const allLocks = hub.getLockManager().getLocks();
+      const stats = hub.getStats();
+      const mem = process.memoryUsage();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         activeSessions,
-        localStats: {
-          connectedClients: allAgents.length,
+        metrics: {
+          connectedAgents: allAgents.length,
           activeLocks: allLocks.length,
-          sessionsCount: activeSessions.length
-        },
-        clusterTopology: [
-          { id: "shard-us-east", name: "US-East Relay (Virginia)", region: "us-east-1", status: "optimal", pps: 284100, latencyMs: 0.24, peers: 421e3 },
-          { id: "shard-eu-central", name: "EU-Central Node (Frankfurt)", region: "eu-central-1", status: "optimal", pps: 198400, latencyMs: 0.31, peers: 312500 },
-          { id: "shard-ap-east", name: "AP-East Gateway (Tokyo)", region: "ap-northeast-1", status: "optimal", pps: 142300, latencyMs: 0.35, peers: 295e3 },
-          { id: "shard-edge-iot", name: "Microprocessor/Cortex-M4 Subnet", region: "edge-mesh", status: "active", pps: 59400, latencyMs: 0.18, peers: 401380 },
-          { id: "shard-local-daemon", name: "Local CrossTalk Daemon (:4488)", region: "localhost", status: "leader", pps: 1200 + allAgents.length * 15, latencyMs: 0.05, peers: allAgents.length }
-        ],
-        planetaryScale: {
-          globalAgentsActive: 1429880 + allAgents.length,
-          activeSessionShards: 8412 + activeSessions.length,
-          globalPacketsPerSec: 685400,
-          tokenSavingsPct: 94.8,
-          p99LatencyMs: 0.28,
-          carrierMode: "HYBRID (XDialect 50-byte Bitstream + 16-FSK Acoustic Signal)"
+          activeSessionsCount: activeSessions.length,
+          totalMessagesRouted: stats.totalMessagesRouted,
+          totalBytesTransferred: hub.getTotalBytesTransferred(),
+          totalPacketsReceived: hub.getTotalPacketsReceived(),
+          totalPacketsSent: hub.getTotalPacketsSent(),
+          totalConflictsBlocked: hub.getTotalConflictsBlocked(),
+          totalLocksAcquired: hub.getTotalLocksAcquired(),
+          totalLocksReleased: hub.getTotalLocksReleased(),
+          uptimeSeconds: Math.floor(process.uptime()),
+          memoryRssBytes: mem.rss,
+          memoryHeapUsedBytes: mem.heapUsed,
+          nodeVersion: process.version,
+          platform: process.platform,
+          dialectVersion: "1.0.0",
+          host: req.headers.host || `localhost:${port}`,
+          storageMode: stats.storageMode,
+          timestamp: Date.now()
         }
       }, null, 2));
       return;
