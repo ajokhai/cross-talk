@@ -9,7 +9,8 @@ export class SubnetGuard {
    * Normalizes an IP string (unwraps IPv6 mapped IPv4 like ::ffff:192.168.1.10)
    */
   public static normalizeIp(rawIp: string): string {
-    if (!rawIp) return '127.0.0.1';
+    // An unknown address must never be mistaken for localhost.
+    if (!rawIp) return '';
     let ip = rawIp.trim();
     if (ip.startsWith('::ffff:')) {
       ip = ip.substring(7);
@@ -18,6 +19,11 @@ export class SubnetGuard {
       return '127.0.0.1';
     }
     return ip;
+  }
+
+  /** True when a bind address only accepts local connections. */
+  public static isLoopbackHost(host: string): boolean {
+    return host === 'localhost' || host === '::1' || this.matchesCidr(host, '127.0.0.0/8');
   }
 
   /**

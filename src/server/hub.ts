@@ -1,943 +1,635 @@
-import { WebSocket } from 'ws';
 import crypto from 'node:crypto';
 import {
-  AgentInfo,
-  FileLock,
-  MessageEvent,
-  ClientPacket,
-  ServerPacket,
-  AgentEnvironment,
-  AgentStatus
-} from './types.js';
-import { LockManager } from './locks.js';
-import { GibberlinkEngine, GibberlinkSignalPacket } from './gibberlink.js';
-import { DIALECT_V1 } from '../dialect/dictionary.js';
+  PROTOCOL_VERSION,
+  type AgentInfo,
+  type AgentRef,
+  type ChannelInfo,
+  type ChannelMessage,
+  type ChannelSnapshot,
+  type ChannelVisibility,
+  type DirectMessage,
+  type ErrorCode,
+  type FileLock,
+  type HelloFrame,
+  type HubError,
+  type RequestFrame,
+  type ResultData,
+  type ServerFrame
+} from '../protocol.js';
+import { LockManager, type LockManagerOptions } from './locks.js';
 import { DialectEngine } from '../dialect/engine.js';
-import { IMeshStorage, InMemoryStorage } from './storage.js';
-import { SubnetGuard } from './subnet.js';
-import http from 'node:http';
 
-interface ConnectedClient {
-  ws: WebSocket;
-  agent: AgentInfo;
-  channel: string;
-  ip?: string;
+export const SERVER_VERSION = '1.0.0';
+
+/** Anything that can carry hub frames to an agent: a WebSocket, an HTTP long-poll queue, a test double. */
+export interface Peer {
+  send(frame: ServerFrame): void;
+  close(code?: number, reason?: string): void;
 }
 
+export interface HubOptions {
+  /** Messages kept per channel and returned in snapshots. */
+  historyLimit?: number;
+  maxChannelsPerAgent?: number;
+  maxMembersPerChannel?: number;
+  maxChannels?: number;
+  /** Live channels that can be created from one network address. */
+  maxChannelsPerAddress?: number;
+  maxAgents?: number;
+  /** Simultaneous connections (WebSocket + HTTP sessions) from one network address. */
+  maxConnectionsPerAddress?: number;
+  maxMessageChars?: number;
+  /** How long an empty channel with history survives before it is deleted. */
+  emptyChannelTtlMs?: number;
+  /** Grace period for an empty channel nobody has written in yet (e.g. created, address shared, creator gone). */
+  unusedChannelTtlMs?: number;
+  /** Token bucket per connection: burst size and refill per second. */
+  rateLimit?: { burst: number; perSecond: number };
+  locks?: LockManagerOptions;
+  /** Persistence hook, called for every channel message (e.g. write to a database). */
+  onMessage?: (message: ChannelMessage) => void;
+  now?: () => number;
+}
+
+export class HubFailure extends Error {
+  constructor(readonly code: ErrorCode, message: string, readonly details?: unknown) {
+    super(message);
+  }
+}
+
+const fail = (code: ErrorCode, message: string, details?: unknown): never => {
+  throw new HubFailure(code, message, details);
+};
+
+interface Channel {
+  id: string;
+  name: string;
+  topic: string;
+  visibility: ChannelVisibility;
+  createdBy: AgentRef;
+  createdFrom: string;
+  createdAt: number;
+  lastActivity: number;
+  members: Set<string>;
+  history: ChannelMessage[];
+  emptySince?: number;
+}
+
+export class Connection {
+  agent?: AgentInfo;
+  readonly channels = new Set<string>();
+  /** @internal */ released = false;
+  private tokens: number;
+  private refilledAt: number;
+
+  constructor(
+    readonly peer: Peer,
+    readonly address: string,
+    private readonly limit: { burst: number; perSecond: number },
+    now: number
+  ) {
+    this.tokens = limit.burst;
+    this.refilledAt = now;
+  }
+
+  get ref(): AgentRef {
+    return { id: this.agent!.id, name: this.agent!.name };
+  }
+
+  /** Returns false when the connection has exhausted its rate budget. */
+  take(now: number): boolean {
+    const elapsed = (now - this.refilledAt) / 1000;
+    this.tokens = Math.min(this.limit.burst, this.tokens + elapsed * this.limit.perSecond);
+    this.refilledAt = now;
+    if (this.tokens < 1) return false;
+    this.tokens -= 1;
+    return true;
+  }
+}
+
+const newId = (prefix: string) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Strips control and invisible formatting characters (bidi overrides, zero-width) and clamps length. */
+const cleanText = (value: unknown, max: number): string =>
+  typeof value === 'string' ? value.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
+
+/**
+ * The CrossTalk hub: agents connect, create or join channels, and talk,
+ * DM and coordinate file locks inside those channels.
+ *
+ * Transport-agnostic: callers hand it a `Peer` per connection and feed it
+ * decoded frames. See `server/index.ts` for the WebSocket and HTTP bindings.
+ */
 export class MeshHub {
-  private clients: Map<string, ConnectedClient> = new Map(); // agentId -> ConnectedClient
-  private lockManager: LockManager = new LockManager();
-  private storage: IMeshStorage;
-  private messageHistory: Map<string, MessageEvent[]> = new Map(); // channel -> MessageEvent[]
-  private inboxes: Map<string, MessageEvent[]> = new Map(); // agentId -> MessageEvent[]
-  private maxHistoryPerChannel = 100;
-  private maxInboxPerAgent = 50;
-  private totalMessagesRouted: number = 0;
-  private totalBytesTransferred: number = 0;
-  private totalPacketsReceived: number = 0;
-  private totalPacketsSent: number = 0;
-  private totalConflictsBlocked: number = 0;
-  private totalLocksAcquired: number = 0;
-  private totalLocksReleased: number = 0;
-  private startTime: number = Date.now();
-  private allowedSubnets: string[] = [];
+  readonly locks: LockManager;
+  private readonly channels = new Map<string, Channel>(); // address -> channel
+  private readonly agents = new Map<string, Connection>(); // agent id -> connection
+  private readonly perAddress = new Map<string, number>(); // address -> open connections
+  private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now'>>;
+  private readonly onMessage?: (message: ChannelMessage) => void;
+  private readonly now: () => number;
+  private sweeper?: NodeJS.Timeout;
 
-  constructor(storage?: IMeshStorage, allowedSubnets?: string[]) {
-    this.storage = storage || new InMemoryStorage(this.maxHistoryPerChannel);
-    this.allowedSubnets = allowedSubnets || [];
-    this.storage.getTotalMessageCount().then(cnt => {
-      if (cnt > 0) this.totalMessagesRouted = cnt;
-    }).catch(() => {});
+  constructor(options: HubOptions = {}) {
+    this.now = options.now ?? Date.now;
+    this.locks = new LockManager({ now: this.now, ...options.locks });
+    this.onMessage = options.onMessage;
+    this.opts = {
+      historyLimit: options.historyLimit ?? 100,
+      maxChannelsPerAgent: options.maxChannelsPerAgent ?? 32,
+      maxMembersPerChannel: options.maxMembersPerChannel ?? 50,
+      maxChannels: options.maxChannels ?? 10_000,
+      maxChannelsPerAddress: options.maxChannelsPerAddress ?? 32,
+      maxAgents: options.maxAgents ?? 10_000,
+      maxConnectionsPerAddress: options.maxConnectionsPerAddress ?? 64,
+      maxMessageChars: options.maxMessageChars ?? 16_000,
+      emptyChannelTtlMs: options.emptyChannelTtlMs ?? 60 * 60 * 1000,
+      unusedChannelTtlMs: options.unusedChannelTtlMs ?? 10 * 60 * 1000,
+      rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 }
+    };
   }
 
-  public setAllowedSubnets(subnets: string[]) {
-    this.allowedSubnets = subnets;
+  /** Starts the periodic sweep for expired locks and abandoned channels. */
+  start(intervalMs = 5000): this {
+    this.sweeper ??= setInterval(() => this.sweep(), intervalMs);
+    this.sweeper.unref?.();
+    return this;
   }
 
-  public getAllowedSubnets(): string[] {
-    return this.allowedSubnets;
+  stop(): void {
+    if (this.sweeper) clearInterval(this.sweeper);
+    this.sweeper = undefined;
   }
 
-  public async initStorage(channel = 'default') {
+  // -------------------------------------------------------------------------
+  // Connection lifecycle
+  // -------------------------------------------------------------------------
+
+  /**
+   * Admits a new connection from `address` (an IP, or any stable client key).
+   * Throws a HubFailure with code 'rate_limited' when the address or hub is at capacity.
+   */
+  connect(peer: Peer, address = 'unknown'): Connection {
+    const open = this.perAddress.get(address) ?? 0;
+    if (open >= this.opts.maxConnectionsPerAddress) fail('rate_limited', 'Too many connections from your address');
+    if (this.agents.size >= this.opts.maxAgents) fail('rate_limited', 'Hub is at capacity');
+    this.perAddress.set(address, open + 1);
+    return new Connection(peer, address, this.opts.rateLimit, this.now());
+  }
+
+  /** Handles a raw text frame from a streaming transport (WebSocket). */
+  async receive(conn: Connection, raw: string): Promise<void> {
+    let frame: unknown;
     try {
-      const recent = await this.storage.getRecentMessages(channel, this.maxHistoryPerChannel);
-      if (recent.length > 0) {
-        this.messageHistory.set(channel, [...recent]);
-      }
-      const count = await this.storage.getTotalMessageCount();
-      if (count > 0) {
-        this.totalMessagesRouted = count;
-      }
-    } catch (_) {}
-  }
-
-  public getStorage(): IMeshStorage {
-    return this.storage;
-  }
-
-  public getLockManager(): LockManager {
-    return this.lockManager;
-  }
-
-  public handleConnection(ws: WebSocket, req?: http.IncomingMessage) {
-    let currentAgentId: string | null = null;
-    const clientIp = req?.socket?.remoteAddress || (req?.headers['x-forwarded-for'] as string)?.split(',')[0] || '127.0.0.1';
-
-    if (!SubnetGuard.isAllowed(clientIp, this.allowedSubnets)) {
-      console.warn(`[MeshHub] ⛔ Connection rejected from ${clientIp}: outside authorized subnet policy.`);
-      ws.close(4003, 'Subnet policy violation');
+      frame = JSON.parse(raw);
+    } catch {
+      conn.peer.send({ type: 'error', error: { code: 'bad_request', message: 'Frame is not valid JSON' } });
       return;
     }
-
-    // Optional Token Authentication via CROSSTALK_AUTH_TOKEN
-    const authToken = process.env.CROSSTALK_AUTH_TOKEN?.trim() || '';
-    if (authToken) {
-      let clientToken: string | null = null;
-      if (req?.url) {
-        try {
-          const parsedUrl = new URL(req.url, 'http://localhost');
-          clientToken = parsedUrl.searchParams.get('token') || parsedUrl.searchParams.get('auth_token');
-        } catch (_) {}
-      }
-      if (!clientToken && req?.headers) {
-        const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-          clientToken = authHeader.slice(7).trim();
-        } else if (req.headers['x-crosstalk-token']) {
-          clientToken = String(req.headers['x-crosstalk-token']).trim();
-        } else if (req.headers['sec-websocket-protocol']) {
-          const protos = String(req.headers['sec-websocket-protocol']).split(',').map(p => p.trim());
-          if (protos.includes(authToken)) {
-            clientToken = authToken;
-          }
-        }
-      }
-
-      if (clientToken !== authToken) {
-        console.warn(`[MeshHub] ⛔ Connection rejected from ${clientIp}: invalid or missing CROSSTALK_AUTH_TOKEN.`);
-        ws.close(4401, 'Unauthorized: Invalid or missing CROSSTALK_AUTH_TOKEN');
-        return;
-      }
+    if (!isPlainObject(frame) || typeof frame.type !== 'string') {
+      conn.peer.send({ type: 'error', error: { code: 'bad_request', message: 'Frame must be an object with a "type"' } });
+      return;
     }
-
-    ws.on('message', (raw: Buffer | string) => {
+    if (frame.type === 'hello') {
       try {
-        const text = typeof raw === 'string' ? raw : raw.toString('utf8');
-        this.totalPacketsReceived++;
-        this.totalBytesTransferred += typeof raw === 'string' ? Buffer.byteLength(raw, 'utf8') : (raw as Buffer).length;
-        const packet = JSON.parse(text) as ClientPacket;
-        this.processPacket(ws, packet, clientIp, (id) => {
-          currentAgentId = id;
-        });
-      } catch (err: any) {
-        this.send(ws, {
-          type: 'error',
-          message: `Malformed packet: ${err.message}`
-        });
+        conn.peer.send(this.hello(conn, frame as unknown as HelloFrame));
+      } catch (err) {
+        conn.peer.send({ type: 'error', error: this.toHubError(err) });
       }
-    });
-
-    ws.on('close', () => {
-      if (currentAgentId) {
-        this.handleDisconnect(currentAgentId);
-      }
-    });
-
-    ws.on('error', (err) => {
-      console.error(`[MeshHub] Socket error for agent ${currentAgentId || 'unknown'}:`, err);
-    });
+      return;
+    }
+    conn.peer.send(await this.request(conn, frame));
   }
 
-  private processPacket(
-    ws: WebSocket,
-    packet: ClientPacket,
-    clientIp: string,
-    setAgentId: (id: string) => void
-  ) {
-    switch (packet.type) {
-      case 'register': {
-        const channel = packet.channel || 'default';
-        const rawAgent = packet.agent;
-        const id = rawAgent.id || `agent-${crypto.randomBytes(4).toString('hex')}`;
-        setAgentId(id);
+  hello(conn: Connection, frame: HelloFrame): Extract<ServerFrame, { type: 'welcome' }> {
+    if (conn.agent) fail('bad_request', 'Already registered');
+    if (conn.released) fail('not_registered', 'Connection is closed');
+    if (frame.protocol !== PROTOCOL_VERSION) {
+      fail('bad_request', `Unsupported protocol ${frame.protocol}; this hub speaks ${PROTOCOL_VERSION}`);
+    }
+    const raw: Record<string, unknown> = isPlainObject(frame.agent) ? frame.agent : {};
+    const name = cleanText(raw.name, 64);
+    if (!name) fail('bad_request', 'agent.name is required');
+    const environments = ['ide', 'terminal', 'bot', 'web'] as const;
+    const now = this.now();
+    const agent: AgentInfo = {
+      id: newId('ag'),
+      name,
+      role: cleanText(raw.role, 64) || 'agent',
+      environment: environments.includes(raw.environment as any) ? (raw.environment as AgentInfo['environment']) : 'bot',
+      branch: cleanText(raw.branch, 128) || undefined,
+      status: 'idle',
+      currentTask: cleanText(raw.currentTask, 280),
+      connectedAt: now,
+      lastSeen: now
+    };
+    conn.agent = agent;
+    this.agents.set(agent.id, conn);
+    return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION };
+  }
 
-        const agent: AgentInfo = {
-          id,
-          name: rawAgent.name || `Agent-${id.slice(0, 6)}`,
-          role: rawAgent.role || 'assistant',
-          environment: rawAgent.environment || 'ide',
-          workspace: rawAgent.workspace || 'default-workspace',
-          status: 'idle',
-          currentTask: rawAgent.currentTask || 'Connected to CrossTalk mesh',
-          lockedFiles: [],
-          connectedAt: Date.now(),
-          lastSeen: Date.now(),
-          gibberlinkCapable: rawAgent.gibberlinkCapable ?? true,
-          dialectVersion: rawAgent.dialectVersion || DIALECT_V1.version,
-          branch: rawAgent.branch || 'main',
-          subnet: clientIp
-        };
+  /** Removes the agent from every channel, releasing its locks. Safe to call twice. */
+  disconnect(conn: Connection): void {
+    if (conn.released) return;
+    conn.released = true;
+    const open = (this.perAddress.get(conn.address) ?? 1) - 1;
+    if (open > 0) this.perAddress.set(conn.address, open);
+    else this.perAddress.delete(conn.address);
+    if (!conn.agent) return;
+    for (const name of [...conn.channels]) this.removeMember(conn, name, 'disconnected');
+    this.agents.delete(conn.agent.id);
+  }
 
-        const existing = this.clients.get(id);
-        if (existing && existing.ws !== ws) {
-          try {
-            existing.ws.close();
-          } catch {}
-        }
-
-        this.clients.set(id, { ws, agent, channel });
-
-        if (!this.inboxes.has(id)) {
-          this.inboxes.set(id, []);
-        }
-
-        const activeLocks = this.lockManager.getLocks(channel);
-        const currentAgents = this.getAgentsInChannel(channel);
-        const recentMessages = this.getRecentMessages(channel);
-
-        // Always provide the versioned dialect dictionary on connect!
-        this.send(ws, {
-          type: 'registered',
-          agentId: id,
-          channel,
-          dialect: DIALECT_V1,
-          mesh: {
-            agents: currentAgents,
-            locks: activeLocks,
-            recentMessages
-          }
-        });
-
-        this.broadcastToChannel(
-          channel,
-          {
-            type: 'agent_joined',
-            agent
-          },
-          [id]
-        );
-
-        this.recordAndBroadcastSystemMessage(
-          channel,
-          `Agent [${agent.name}] (${agent.role} in ${agent.environment}) connected with XDialect v${agent.dialectVersion}.`
-        );
-
-        console.log(`[MeshHub] Registered ${agent.name} (${id}) on channel '${channel}' with XDialect v${DIALECT_V1.version}`);
-        break;
-      }
-
-      case 'heartbeat': {
-        const client = this.getClientByWs(ws);
-        if (!client) break;
-        client.agent.lastSeen = Date.now();
-        if (packet.status) client.agent.status = packet.status;
-        if (packet.currentTask) client.agent.currentTask = packet.currentTask;
-
-        this.broadcastToChannel(client.channel, {
-          type: 'agent_updated',
-          agent: client.agent
-        });
-        break;
-      }
-
-      case 'broadcast': {
-        const client = this.getClientByWs(ws);
-        if (!client) {
-          this.send(ws, { type: 'error', message: 'Not registered yet' });
-          return;
-        }
-
-        const msg: MessageEvent = {
-          id: `msg-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
-          type: 'broadcast',
-          channel: client.channel,
-          from: client.agent,
-          content: packet.content,
-          timestamp: Date.now(),
-          metadata: packet.metadata
-        };
-
-        this.appendMessageHistory(client.channel, msg);
-        this.broadcastToChannel(client.channel, {
-          type: 'broadcast',
-          message: msg
-        });
-
-        console.log(`[MeshHub] [${client.channel}] ${client.agent.name}: ${packet.content}`);
-        break;
-      }
-
-      case 'shorthand_broadcast': {
-        const client = this.getClientByWs(ws);
-        if (!client) {
-          this.send(ws, { type: 'error', message: 'Not registered yet' });
-          return;
-        }
-
-        const shorthand = packet.shorthand;
-        const parsed = DialectEngine.parse(shorthand);
-        const human = DialectEngine.toHuman(parsed);
-        const bits = DialectEngine.packToBits(parsed);
-
-        // Auto-handle lock actions declared in shorthand
-        if (parsed.action === '!LCK' && parsed.target) {
-          const res = this.lockManager.acquire(
-            parsed.target,
-            client.agent,
-            parsed.reason || parsed.intent || 'Shorthand lock',
-            parsed.ttl || 300,
-            client.channel
-          );
-          if (res.success && res.lock) {
-            if (!client.agent.lockedFiles.includes(res.lock.file)) {
-              client.agent.lockedFiles.push(res.lock.file);
-            }
-            this.broadcastToChannel(client.channel, {
-              type: 'lock_acquired',
-              lock: res.lock,
-              byMe: false
-            }, [client.agent.id]);
-          } else if (res.quotaExceeded) {
-            this.send(ws, {
-              type: 'lock_denied',
-              file: parsed.target,
-              reason: res.error || 'Lock quota exceeded'
-            });
-          }
-        } else if (parsed.action === '!REL' && parsed.target) {
-          const res = this.lockManager.release(
-            parsed.target,
-            client.agent.id,
-            false,
-            client.channel,
-            client.agent.workspace
-          );
-          if (res.success && res.lock) {
-            client.agent.lockedFiles = client.agent.lockedFiles.filter(f => f !== res.lock?.file);
-            this.broadcastToChannel(client.channel, {
-              type: 'lock_released',
-              file: res.lock.file,
-              releasedBy: client.agent.name
-            });
-          }
-        }
-
-        const msg: MessageEvent = {
-          id: `shorthand-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
-          type: 'dialect_shorthand',
-          channel: client.channel,
-          from: client.agent,
-          content: human,
-          timestamp: Date.now(),
-          metadata: packet.metadata,
-          shorthand: {
-            raw: shorthand,
-            human,
-            bitSize: bits.length,
-            action: parsed.action,
-            target: parsed.target,
-            intent: parsed.intent
-          }
-        };
-
-        this.appendMessageHistory(client.channel, msg);
-        this.broadcastToChannel(client.channel, {
-          type: 'broadcast',
-          message: msg
-        });
-
-        console.log(`[MeshHub] [XDialect] ${client.agent.name}: "${shorthand}" -> (${bits.length} wire bytes)`);
-        break;
-      }
-
-      case 'direct_message': {
-        const client = this.getClientByWs(ws);
-        if (!client) {
-          this.send(ws, { type: 'error', message: 'Not registered yet' });
-          return;
-        }
-
-        const targetClient = this.clients.get(packet.to);
-        const msg: MessageEvent = {
-          id: `dm-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
-          type: 'direct_message',
-          channel: client.channel,
-          from: client.agent,
-          to: packet.to,
-          content: packet.content,
-          timestamp: Date.now(),
-          isAck: packet.isAck,
-          replyExpected: packet.replyExpected,
-          branch: client.agent.branch,
-          metadata: packet.metadata
-        };
-
-        this.addToInbox(packet.to, msg);
-
-        if (targetClient) {
-          this.send(targetClient.ws, {
-            type: 'direct_message',
-            message: msg
-          });
-        }
-
-        // Sender confirmation: Send direct_message_sent to prevent infinite self-echo feedback loops
-        this.send(ws, {
-          type: 'direct_message_sent',
-          messageId: msg.id,
-          to: packet.to,
-          timestamp: Date.now()
-        });
-
-        console.log(`[MeshHub] DM [${client.agent.name} -> ${targetClient?.agent.name || packet.to}]: ${packet.content}`);
-        break;
-      }
-
-      case 'disconnect': {
-        const client = this.getClientByWs(ws);
-        if (client) {
-          console.log(`[MeshHub] Agent ${client.agent.name} initiated graceful disconnect: ${packet.reason || 'client_shutdown'}`);
-          this.handleDisconnect(client.agent.id);
-        }
-        break;
-      }
-
-      case 'gibberlink_signal': {
-        const client = this.getClientByWs(ws);
-        if (!client) {
-          this.send(ws, { type: 'error', message: 'Not registered yet' });
-          return;
-        }
-
-        const signal = packet.signal;
-        const decoded = GibberlinkEngine.decode(signal);
-
-        if (decoded.valid && decoded.data && typeof decoded.data === 'object') {
-          if (decoded.data.action === 'LOCK' && decoded.data.file) {
-            this.lockManager.acquire(
-              decoded.data.file,
-              client.agent,
-              decoded.data.reason || 'Gibberlink signal lock',
-              decoded.data.ttlSeconds || 300,
-              client.channel
-            );
-          } else if (decoded.data.action === 'UNLOCK' && decoded.data.file) {
-            this.lockManager.release(
-              decoded.data.file,
-              client.agent.id,
-              false,
-              client.channel,
-              client.agent.workspace
-            );
-          }
-        }
-
-        const msg: MessageEvent = {
-          id: `glink-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
-          type: 'gibberlink_signal',
-          channel: client.channel,
-          from: client.agent,
-          to: packet.to,
-          content: decoded.text || signal.text || '[Gibberlink Audio Signal Stream]',
-          timestamp: Date.now(),
-          gibberlinkSignal: signal
-        };
-
-        this.appendMessageHistory(client.channel, msg);
-
-        if (packet.to) {
-          this.addToInbox(packet.to, msg);
-          const targetClient = this.clients.get(packet.to);
-          if (targetClient) {
-            this.send(targetClient.ws, {
-              type: 'gibberlink_signal',
-              message: msg,
-              signal
-            });
-          }
-          this.send(ws, {
-            type: 'gibberlink_signal',
-            message: msg,
-            signal
-          });
-        } else {
-          this.broadcastToChannel(client.channel, {
-            type: 'gibberlink_signal',
-            message: msg,
-            signal
-          });
-        }
-
-        console.log(`[MeshHub] [Gibberlink Signal] ${client.agent.name} emitted ${signal.frequencies.length} tones (${signal.totalDurationMs}ms audio signal)`);
-        break;
-      }
-
-      case 'get_dialect': {
-        this.send(ws, {
-          type: 'dialect_dictionary',
-          dictionary: DIALECT_V1
-        });
-        break;
-      }
-
-      case 'lock_acquire': {
-        const client = this.getClientByWs(ws);
-        if (!client) {
-          this.send(ws, { type: 'error', message: 'Not registered yet' });
-          return;
-        }
-
-        const res = this.lockManager.acquire(
-          packet.file,
-          client.agent,
-          packet.reason,
-          packet.ttlSeconds || 300,
-          client.channel
-        );
-
-        if (res.success && res.lock) {
-          if (!client.agent.lockedFiles.includes(res.lock.file)) {
-            client.agent.lockedFiles.push(res.lock.file);
-          }
-
-          this.broadcastToChannel(client.channel, {
-            type: 'lock_acquired',
-            lock: res.lock,
-            byMe: false
-          }, [client.agent.id]);
-
-          this.send(ws, {
-            type: 'lock_acquired',
-            lock: res.lock,
-            byMe: true
-          });
-
-          this.recordAndBroadcastSystemMessage(
-            client.channel,
-            `File claimed: [${res.lock.file}] locked by ${client.agent.name} ("${packet.reason}")`
-          );
-        } else if (res.quotaExceeded) {
-          this.send(ws, {
-            type: 'lock_denied',
-            file: packet.file,
-            reason: res.error || 'Lock quota exceeded (maximum 10 locks per agent)'
-          });
-          return;
-        } else if (res.existingHolder) {
-          const holderClient = this.clients.get(res.existingHolder.id);
-          const holderAgent = holderClient ? holderClient.agent : ({
-            id: res.existingHolder.id,
-            name: res.existingHolder.name,
-            role: 'agent',
-            environment: 'unknown' as AgentEnvironment,
-            workspace: '',
-            status: 'working' as AgentStatus,
-            currentTask: res.existingHolder.reason,
-            lockedFiles: [packet.file],
-            connectedAt: 0,
-            lastSeen: 0
-          });
-
-          this.send(ws, {
-            type: 'lock_denied',
-            file: packet.file,
-            holder: holderAgent,
-            reason: res.existingHolder.reason,
-            expiresAt: res.existingHolder.expiresAt
-          });
-
-          if (holderClient) {
-            this.send(holderClient.ws, {
-              type: 'lock_conflict_warning',
-              file: packet.file,
-              requester: client.agent,
-              holder: holderAgent,
-              reason: packet.reason
-            });
-
-            const conflictNotice: MessageEvent = {
-              id: `warn-${Date.now()}`,
-              type: 'system',
-              channel: client.channel,
-              from: client.agent,
-              to: holderClient.agent.id,
-              content: `Conflict Warning: Agent ${client.agent.name} attempted to lock file '${packet.file}' which you currently hold (Reason: "${packet.reason}").`,
-              timestamp: Date.now()
-            };
-            this.addToInbox(holderClient.agent.id, conflictNotice);
-          }
-        }
-        break;
-      }
-
-      case 'lock_release': {
-        const client = this.getClientByWs(ws);
-        if (!client) {
-          this.send(ws, { type: 'error', message: 'Not registered yet' });
-          return;
-        }
-
-        const res = this.lockManager.release(
-          packet.file,
-          client.agent.id,
-          false,
-          client.channel,
-          client.agent.workspace
-        );
-        if (res.success && res.lock) {
-          client.agent.lockedFiles = client.agent.lockedFiles.filter(f => f !== res.lock?.file);
-
-          this.broadcastToChannel(client.channel, {
-            type: 'lock_released',
-            file: res.lock.file,
-            releasedBy: client.agent.name
-          });
-
-          this.recordAndBroadcastSystemMessage(
-            client.channel,
-            `File released: [${res.lock.file}] is now unlocked by ${client.agent.name}.`
-          );
-        }
-        break;
-      }
-
-      case 'switch_channel': {
-        const client = this.getClientByWs(ws);
-        if (!client) {
-          this.send(ws, { type: 'error', message: 'Not registered yet' });
-          return;
-        }
-        const targetChannel = (packet as any).channel || 'default';
-        client.channel = targetChannel;
-        const agentsInTarget = targetChannel === '*'
-          ? this.getAllAgents().filter(a => a.id !== client.agent.id)
-          : this.getAgentsInChannel(targetChannel).filter(a => a.id !== client.agent.id);
-        const locksInTarget = targetChannel === '*'
-          ? this.lockManager.getLocks()
-          : this.lockManager.getLocks(targetChannel);
-        const recentInTarget = targetChannel === '*'
-          ? this.getAllRecentMessages()
-          : this.getRecentMessages(targetChannel);
-
-        this.send(ws, {
-          type: 'state_snapshot',
-          channel: targetChannel,
-          mesh: {
-            agents: agentsInTarget,
-            locks: locksInTarget,
-            recentMessages: recentInTarget
-          }
-        });
-        break;
-      }
-
-      case 'query_state': {
-        const client = this.getClientByWs(ws);
-        const requestedChannel = (packet as any).channel || client?.channel || 'default';
-        const agentsInTarget = requestedChannel === '*'
-          ? this.getAllAgents().filter(a => a.id !== client?.agent.id)
-          : this.getAgentsInChannel(requestedChannel).filter(a => a.id !== client?.agent.id);
-        const locksInTarget = requestedChannel === '*'
-          ? this.lockManager.getLocks()
-          : this.lockManager.getLocks(requestedChannel);
-        const recentInTarget = requestedChannel === '*'
-          ? this.getAllRecentMessages()
-          : this.getRecentMessages(requestedChannel);
-
-        this.send(ws, {
-          type: 'state_snapshot',
-          channel: requestedChannel,
-          mesh: {
-            agents: agentsInTarget,
-            locks: locksInTarget,
-            recentMessages: recentInTarget
-          }
-        });
-        break;
-      }
-
-      case 'fetch_inbox': {
-        const client = this.getClientByWs(ws);
-        if (!client) return;
-        const since = packet.since || 0;
-        const agentInbox = this.inboxes.get(client.agent.id) || [];
-        const filtered = agentInbox.filter(m => m.timestamp >= since);
-        this.send(ws, {
-          type: 'inbox_batch',
-          messages: filtered
-        });
-        break;
-      }
+  /** Dispatches one request frame and returns its `result` frame. */
+  async request(conn: Connection, frame: Record<string, unknown>): Promise<ServerFrame> {
+    const id = typeof frame.id === 'string' && frame.id.length <= 128 ? frame.id : '';
+    try {
+      if (!id) fail('bad_request', 'Requests need a string "id" (max 128 chars)');
+      if (!conn.agent) fail('not_registered', 'Send "hello" first');
+      if (!conn.take(this.now())) fail('rate_limited', 'Too many requests; slow down');
+      conn.agent!.lastSeen = this.now();
+      const data = await this.dispatch(conn, frame as unknown as RequestFrame);
+      return { type: 'result', id, ok: true, data };
+    } catch (err) {
+      return { type: 'result', id, ok: false, error: this.toHubError(err) };
     }
   }
 
-  private handleDisconnect(agentId: string) {
-    const client = this.clients.get(agentId);
-    if (!client) return;
-
-    this.clients.delete(agentId);
-
-    const releasedLocks = this.lockManager.releaseAllByAgent(agentId);
-    for (const lock of releasedLocks) {
-      this.broadcastToChannel(client.channel, {
-        type: 'lock_released',
-        file: lock.file,
-        releasedBy: client.agent.name
-      });
+  private toHubError(err: unknown): HubError {
+    if (err instanceof HubFailure) {
+      return err.details === undefined
+        ? { code: err.code, message: err.message }
+        : { code: err.code, message: err.message, details: err.details };
     }
-
-    this.broadcastToChannel(client.channel, {
-      type: 'agent_left',
-      agentId,
-      name: client.agent.name,
-      reason: 'Disconnected'
-    });
-
-    this.recordAndBroadcastSystemMessage(
-      client.channel,
-      `Agent [${client.agent.name}] disconnected.`
-    );
-
-    console.log(`[MeshHub] Disconnected agent ${client.agent.name} (${agentId})`);
+    console.error('[crosstalk] internal error:', err);
+    return { code: 'internal', message: 'Internal hub error' };
   }
 
-  public broadcastToChannel(channel: string, packet: ServerPacket, excludeIds: string[] = []) {
-    for (const [id, client] of this.clients.entries()) {
-      if ((client.channel === channel || client.channel === '*') && !excludeIds.includes(id)) {
-        this.send(client.ws, packet);
-      }
+  private async dispatch(conn: Connection, f: RequestFrame): Promise<unknown> {
+    switch (f.type) {
+      case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility);
+      case 'channel.join': return this.joinChannel(conn, f.channel);
+      case 'channel.leave': return this.leaveChannel(conn, f.channel);
+      case 'channel.list': return this.listChannels(conn, f.scope ?? 'joined', f.limit, f.cursor);
+      case 'channel.state': return this.snapshot(this.memberChannel(conn, f.channel));
+      case 'message.send': return this.postMessage(conn, f.channel, f.content, f.metadata);
+      case 'shorthand.send': return this.postShorthand(conn, f.channel, f.shorthand);
+      case 'dm.send': return this.sendDirect(conn, f.to, f.content, f.replyExpected, f.metadata);
+      case 'lock.acquire': return this.acquireLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
+      case 'lock.release': return this.releaseLock(conn, f.channel, f.file);
+      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask);
+      default: return fail('bad_request', `Unknown request type "${(f as { type: string }).type}"`);
     }
   }
 
-  private send(ws: WebSocket, packet: ServerPacket) {
-    if (ws.readyState === WebSocket.OPEN) {
-      const payload = JSON.stringify(packet);
-      this.totalPacketsSent++;
-      this.totalBytesTransferred += Buffer.byteLength(payload, 'utf8');
-      ws.send(payload);
+  // -------------------------------------------------------------------------
+  // Channels
+  // -------------------------------------------------------------------------
+
+  static isAddress(value: unknown): value is string {
+    return typeof value === 'string' && /^xt_[A-Za-z0-9_-]{22}$/.test(value);
+  }
+
+  /** Creates a conversation with a fresh, unguessable address and joins the creator to it. */
+  private createChannel(conn: Connection, rawName: unknown, topic: unknown, visibility: unknown): ChannelSnapshot {
+    if (visibility !== undefined && visibility !== 'public' && visibility !== 'private') {
+      fail('bad_request', 'visibility must be "public" or "private"');
+    }
+    if (this.channels.size >= this.opts.maxChannels) fail('quota_exceeded', 'Hub channel limit reached');
+    let fromAddress = 0;
+    for (const c of this.channels.values()) if (c.createdFrom === conn.address) fromAddress++;
+    if (fromAddress >= this.opts.maxChannelsPerAddress) {
+      fail('quota_exceeded', `At most ${this.opts.maxChannelsPerAddress} live channels per network address`);
+    }
+    this.ensureRoom(conn);
+
+    const now = this.now();
+    const channel: Channel = {
+      id: `xt_${crypto.randomBytes(16).toString('base64url')}`,
+      name: cleanText(rawName, 64) || 'untitled',
+      topic: cleanText(topic, 280),
+      visibility: visibility === 'public' ? 'public' : 'private',
+      createdBy: conn.ref,
+      createdFrom: conn.address,
+      createdAt: now,
+      lastActivity: now,
+      members: new Set(),
+      history: []
+    };
+    this.channels.set(channel.id, channel);
+    this.addMember(conn, channel);
+    return this.snapshot(channel);
+  }
+
+  private joinChannel(conn: Connection, address: unknown): ChannelSnapshot {
+    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    if (!channel) return fail('not_found', 'No conversation at that address');
+    if (!channel.members.has(conn.agent!.id)) {
+      if (channel.members.size >= this.opts.maxMembersPerChannel) fail('quota_exceeded', 'Channel is full');
+      this.ensureRoom(conn);
+      this.addMember(conn, channel);
+    }
+    return this.snapshot(channel);
+  }
+
+  private leaveChannel(conn: Connection, address: unknown): { channel: string } {
+    const channel = this.memberChannel(conn, address);
+    this.removeMember(conn, channel.id, 'left');
+    return { channel: channel.id };
+  }
+
+  private ensureRoom(conn: Connection): void {
+    if (conn.channels.size >= this.opts.maxChannelsPerAgent) {
+      fail('quota_exceeded', `An agent can be in at most ${this.opts.maxChannelsPerAgent} channels`);
     }
   }
 
-  private getClientByWs(ws: WebSocket): ConnectedClient | undefined {
-    for (const client of this.clients.values()) {
-      if (client.ws === ws) return client;
-    }
-    return undefined;
+  private addMember(conn: Connection, channel: Channel): void {
+    channel.members.add(conn.agent!.id);
+    channel.emptySince = undefined;
+    conn.channels.add(channel.id);
+    this.emit(channel, { type: 'member.joined', channel: channel.id, agent: conn.agent! }, conn.agent!.id);
   }
 
-  public getAgentsInChannel(channel: string): AgentInfo[] {
-    const list: AgentInfo[] = [];
-    for (const client of this.clients.values()) {
-      if (client.channel === channel) {
-        list.push(client.agent);
-      }
+  private removeMember(conn: Connection, id: string, reason: 'left' | 'disconnected'): void {
+    const channel = this.channels.get(id);
+    conn.channels.delete(id);
+    if (!channel) return;
+    channel.members.delete(conn.agent!.id);
+
+    for (const lock of this.locks.releaseAllBy(conn.agent!.id, id)) {
+      this.emit(channel, { type: 'lock.released', channel: id, file: lock.file, by: conn.ref, reason: 'disconnected' });
     }
-    return list;
+    this.emit(channel, { type: 'member.left', channel: id, agent: conn.ref, reason });
+    if (channel.members.size === 0) channel.emptySince = this.now();
   }
 
-  public getAllAgents(): AgentInfo[] {
-    return Array.from(this.clients.values()).map(c => c.agent);
+  private deleteChannel(channel: Channel): void {
+    this.channels.delete(channel.id);
+    this.locks.releaseChannel(channel.id);
   }
 
-  public getRecentMessages(channel: string): MessageEvent[] {
-    return this.messageHistory.get(channel) || [];
+  private memberChannel(conn: Connection, address: unknown): Channel {
+    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    if (!channel || !channel.members.has(conn.agent!.id)) {
+      return fail('not_member', 'You are not in that channel. Join it by its address first.');
+    }
+    return channel;
   }
 
-  public getAllRecentMessages(limit = 100): MessageEvent[] {
-    const all: MessageEvent[] = [];
-    for (const msgs of this.messageHistory.values()) {
-      all.push(...msgs);
-    }
-    all.sort((a, b) => a.timestamp - b.timestamp);
-    return all.slice(-limit);
-  }
-
-  public getSessions(): Array<{
-    channel: string;
-    agentCount: number;
-    lockCount: number;
-    messageCount: number;
-    lastActivity: number;
-  }> {
-    const channelSet = new Set<string>(['default']);
-    for (const client of this.clients.values()) {
-      if (client.channel && client.channel !== '*') channelSet.add(client.channel);
-    }
-    for (const ch of this.messageHistory.keys()) {
-      channelSet.add(ch);
-    }
-    for (const lock of this.lockManager.getLocks()) {
-      if (lock.channel) channelSet.add(lock.channel);
-    }
-
-    const sessions = [];
-    for (const ch of channelSet) {
-      const msgs = this.messageHistory.get(ch) || [];
-      const locks = this.lockManager.getLocks(ch);
-      const agents = this.getAgentsInChannel(ch);
-      const lastMsgTime = msgs.length > 0 ? msgs[msgs.length - 1].timestamp : 0;
-      sessions.push({
-        channel: ch,
-        agentCount: agents.length,
-        lockCount: locks.length,
-        messageCount: msgs.length,
-        lastActivity: lastMsgTime || this.startTime
-      });
-    }
-    return sessions;
-  }
-
-  private appendMessageHistory(channel: string, msg: MessageEvent) {
-    this.totalMessagesRouted++;
-    if (!this.messageHistory.has(channel)) {
-      this.messageHistory.set(channel, []);
-    }
-    const history = this.messageHistory.get(channel)!;
-    history.push(msg);
-    if (history.length > this.maxHistoryPerChannel) {
-      history.shift();
-    }
-    this.storage.recordMessage(channel, msg).catch(() => {});
-  }
-
-  public getTotalBytesTransferred(): number { return this.totalBytesTransferred; }
-  public getTotalPacketsReceived(): number { return this.totalPacketsReceived; }
-  public getTotalPacketsSent(): number { return this.totalPacketsSent; }
-  public getTotalConflictsBlocked(): number { return this.totalConflictsBlocked; }
-  public getTotalLocksAcquired(): number { return this.totalLocksAcquired; }
-  public getTotalLocksReleased(): number { return this.totalLocksReleased; }
-
-  public getStats(channel = 'default') {
-    const channelHistory = this.messageHistory.get(channel) || [];
-    const locks = this.lockManager.getLocks(channel);
-    const mem = process.memoryUsage();
+  private info(channel: Channel): ChannelInfo {
     return {
-      totalMessagesRouted: this.totalMessagesRouted,
-      totalBytesTransferred: this.totalBytesTransferred,
-      totalPacketsReceived: this.totalPacketsReceived,
-      totalPacketsSent: this.totalPacketsSent,
-      totalConflictsBlocked: this.totalConflictsBlocked,
-      totalLocksAcquired: this.totalLocksAcquired,
-      totalLocksReleased: this.totalLocksReleased,
-      activePeers: this.clients.size,
-      activeLocks: locks.length,
-      activeChannelsCount: this.getSessions().length,
-      uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
-      memoryRssBytes: mem.rss,
-      memoryHeapUsedBytes: mem.heapUsed,
-      recentHistoryCount: channelHistory.length,
-      maxBufferCapacity: this.maxHistoryPerChannel,
-      channel,
-      meshVersion: DIALECT_V1.version,
-      storageMode: (this.storage.constructor?.name === 'MongoStorage') ? 'mongodb' : 'memory',
-      timestamp: Date.now()
+      id: channel.id,
+      name: channel.name,
+      topic: channel.topic,
+      visibility: channel.visibility,
+      createdBy: channel.createdBy,
+      createdAt: channel.createdAt,
+      lastActivity: channel.lastActivity,
+      memberCount: channel.members.size,
+      maxMembers: this.opts.maxMembersPerChannel
     };
   }
 
-  private addToInbox(agentId: string, msg: MessageEvent) {
-    if (!this.inboxes.has(agentId)) {
-      this.inboxes.set(agentId, []);
-    }
-    const inbox = this.inboxes.get(agentId)!;
-    inbox.push(msg);
-    if (inbox.length > this.maxInboxPerAgent) {
-      inbox.shift();
-    }
-  }
-
-  public recordAndBroadcastSystemMessage(channel: string, content: string) {
-    const msg: MessageEvent = {
-      id: `sys-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
-      type: 'system',
-      channel,
-      content,
-      timestamp: Date.now()
-    };
-    this.appendMessageHistory(channel, msg);
-    this.broadcastToChannel(channel, {
-      type: 'broadcast',
-      message: msg
-    });
-  }
-
-  public injectBroadcast(channel: string, fromName: string, content: string, role = 'system') {
-    const syntheticAgent: AgentInfo = {
-      id: `ext-${Date.now()}`,
-      name: fromName,
-      role,
-      environment: 'terminal',
-      workspace: 'local',
-      status: 'working',
-      currentTask: content,
-      lockedFiles: [],
-      connectedAt: Date.now(),
-      lastSeen: Date.now(),
-      gibberlinkCapable: true
-    };
-    const msg: MessageEvent = {
-      id: `msg-${Date.now()}`,
-      type: 'broadcast',
-      channel,
-      from: syntheticAgent,
-      content,
-      timestamp: Date.now()
-    };
-    this.appendMessageHistory(channel, msg);
-    this.broadcastToChannel(channel, {
-      type: 'broadcast',
-      message: msg
-    });
-    return msg;
-  }
-
-  public createInvite(options: {
-    channel?: string;
-    branch?: string;
-    allowedSubnet?: string;
-    host?: string;
-  } = {}) {
-    const channel = options.channel || 'default';
-    const branch = options.branch || 'main';
-    const host = options.host || 'localhost:4488';
-    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
-    const cleanHost = host.replace(/^(http|https|ws|wss):\/\//, '');
-    const wsScheme = host.startsWith('https') ? 'wss' : 'ws';
-    const httpScheme = host.startsWith('https') ? 'https' : 'http';
-
-    const randomSuffix = crypto.randomBytes(2).toString('hex').toUpperCase();
-    const branchTag = branch.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8).toUpperCase() || 'SYNC';
-    const code = `XT-${randomSuffix}-${branchTag}`;
-
-    const subnetLock = options.allowedSubnet || (isLocal ? '192.168.0.0/16' : 'any');
-
+  private snapshot(channel: Channel): ChannelSnapshot {
     return {
-      code,
-      channel,
-      branch,
-      subnetLock,
-      options: {
-        centralRelay: {
-          name: 'Central Hosted Bridge (Key / Code / Link)',
-          code,
-          joinLink: `${httpScheme}://${cleanHost}/?room=${code}&branch=${branch}`,
-          wsUrl: `${wsScheme}://${cleanHost}`,
-          agentPrompt: `Join CrossTalk session ${code} on branch ${branch}`,
-          cliCommand: `crosstalk join ${code} --branch ${branch}`
-        },
-        openMesh: {
-          name: 'Open Mesh (Discovery Topic Rendezvous)',
-          topic: `mesh://open/repo-${branchTag.toLowerCase()}`,
-          agentPrompt: `Connect to open mesh channel 'team-${branchTag.toLowerCase()}' on branch ${branch}`,
-          cliCommand: `crosstalk up team-${branchTag.toLowerCase()} --mode mesh --branch ${branch}`
-        },
-        directP2P: {
-          name: 'Direct Computer-to-Computer (Subnet Locked)',
-          address: `${wsScheme}://${cleanHost}`,
-          subnetLock,
-          agentPrompt: `Connect directly to peer ${wsScheme}://${cleanHost} on branch ${branch} with subnet lock ${subnetLock}`,
-          cliCommand: `crosstalk join ${wsScheme}://${cleanHost} --branch ${branch} --subnet ${subnetLock}`
-        }
-      }
+      channel: this.info(channel),
+      members: [...channel.members].map(id => this.agents.get(id)?.agent).filter((a): a is AgentInfo => !!a),
+      locks: this.locks.list(channel.id),
+      messages: channel.history.slice(-this.opts.historyLimit)
     };
+  }
+
+  /**
+   * `joined`: the caller's channels. `public`: the opt-in discovery directory,
+   * most recently active first, paginated with an opaque cursor.
+   */
+  listChannels(conn: Connection | undefined, scope: unknown = 'joined', limit?: unknown, cursor?: unknown): ResultData['channel.list'] {
+    if (scope === 'joined') {
+      const mine = conn ? [...conn.channels].map(id => this.channels.get(id)).filter((c): c is Channel => !!c) : [];
+      return { channels: mine.map(c => this.info(c)) };
+    }
+    if (scope !== 'public') fail('bad_request', 'scope must be "joined" or "public"');
+    const size = Math.max(1, Math.min(typeof limit === 'number' ? Math.floor(limit) : 50, 100));
+    const offset = typeof cursor === 'string' && /^\d+$/.test(cursor) ? Number(cursor) : 0;
+    const listed = [...this.channels.values()]
+      .filter(c => c.visibility === 'public')
+      .sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
+    const page = listed.slice(offset, offset + size).map(c => this.info(c));
+    return offset + size < listed.length ? { channels: page, cursor: String(offset + size) } : { channels: page };
+  }
+
+  /** Read-only view for HTTP observers. Knowing the address is the capability. */
+  snapshotByAddress(address: string): ChannelSnapshot | undefined {
+    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    return channel ? this.snapshot(channel) : undefined;
+  }
+
+  /** Lock lookup for editor hooks. */
+  checkLock(address: string, rawFile: string): { locked: boolean; lock?: FileLock } | undefined {
+    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    if (!channel) return undefined;
+    const lock = this.locks.get(channel.id, LockManager.normalizePath(rawFile));
+    return lock ? { locked: true, lock } : { locked: false };
+  }
+
+  stats() {
+    return {
+      agents: this.agents.size,
+      channels: this.channels.size,
+      locks: this.locks.list().length
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Messaging
+  // -------------------------------------------------------------------------
+
+  private messageText(content: unknown): string {
+    if (typeof content !== 'string' || !content.trim()) fail('bad_request', 'content must be a non-empty string');
+    const text = content as string;
+    if (text.length > this.opts.maxMessageChars) {
+      fail('bad_request', `content exceeds ${this.opts.maxMessageChars} characters`);
+    }
+    return text;
+  }
+
+  private metadata(value: unknown): Record<string, unknown> | undefined {
+    if (value === undefined) return undefined;
+    if (!isPlainObject(value)) fail('bad_request', 'metadata must be an object');
+    if (JSON.stringify(value).length > this.opts.maxMessageChars) fail('bad_request', 'metadata is too large');
+    return value as Record<string, unknown>;
+  }
+
+  private record(channel: Channel, message: ChannelMessage, sender: Connection): ChannelMessage {
+    channel.history.push(message);
+    if (channel.history.length > this.opts.historyLimit) channel.history.shift();
+    channel.lastActivity = message.timestamp;
+    this.emit(channel, { type: 'message', message }, sender.agent!.id);
+    try {
+      this.onMessage?.(message);
+    } catch (err) {
+      console.error('[crosstalk] onMessage hook failed:', err);
+    }
+    return message;
+  }
+
+  private postMessage(conn: Connection, address: unknown, content: unknown, metadata: unknown): ChannelMessage {
+    const channel = this.memberChannel(conn, address);
+    const message: ChannelMessage = {
+      id: newId('msg'),
+      channel: channel.id,
+      kind: 'chat',
+      from: conn.ref,
+      content: this.messageText(content),
+      timestamp: this.now()
+    };
+    const meta = this.metadata(metadata);
+    if (meta) message.metadata = meta;
+    return this.record(channel, message, conn);
+  }
+
+  /** XDialect shorthand. `!LCK` / `!REL` with a target also take or release the lock. */
+  private postShorthand(conn: Connection, address: unknown, shorthand: unknown): ChannelMessage {
+    const channel = this.memberChannel(conn, address);
+    const raw = this.messageText(shorthand);
+    const parsed = DialectEngine.parse(raw);
+
+    if (parsed.action === '!LCK' && parsed.target) {
+      this.acquireLock(conn, channel.id, parsed.target, parsed.reason || parsed.intent || 'XDialect lock', parsed.ttl);
+    } else if (parsed.action === '!REL' && parsed.target) {
+      this.releaseLock(conn, channel.id, parsed.target);
+    }
+
+    return this.record(channel, {
+      id: newId('msg'),
+      channel: channel.id,
+      kind: 'shorthand',
+      from: conn.ref,
+      content: DialectEngine.toHuman(parsed),
+      timestamp: this.now(),
+      shorthand: { raw, action: parsed.action, target: parsed.target, intent: parsed.intent }
+    }, conn);
+  }
+
+  /** DMs are only allowed between agents that share at least one channel. */
+  private sendDirect(conn: Connection, to: unknown, content: unknown, replyExpected: unknown, metadata: unknown): DirectMessage {
+    const target = this.resolvePeer(conn, to);
+    const message: DirectMessage = {
+      id: newId('dm'),
+      from: conn.ref,
+      to: target.ref,
+      content: this.messageText(content),
+      timestamp: this.now(),
+      replyExpected: replyExpected !== false
+    };
+    const meta = this.metadata(metadata);
+    if (meta) message.metadata = meta;
+    target.peer.send({ type: 'dm', message });
+    return message;
+  }
+
+  /** Finds a reachable agent by id, or by case-insensitive name among channel-mates. */
+  private resolvePeer(conn: Connection, to: unknown): Connection {
+    const key = cleanText(to, 128);
+    if (!key) fail('bad_request', '"to" must be an agent id or name');
+
+    const reachable = new Map<string, Connection>();
+    for (const name of conn.channels) {
+      for (const id of this.channels.get(name)?.members ?? []) {
+        const other = this.agents.get(id);
+        if (other && id !== conn.agent!.id) reachable.set(id, other);
+      }
+    }
+
+    const byId = reachable.get(key);
+    if (byId) return byId;
+    const byName = [...reachable.values()].filter(c => c.agent!.name.toLowerCase() === key.toLowerCase());
+    if (byName.length === 1) return byName[0];
+    if (byName.length > 1) {
+      fail('bad_request', `Several agents are named "${key}"; use an id`, { ids: byName.map(c => c.agent!.id) });
+    }
+    return fail('not_found', `No agent "${key}" shares a channel with you`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Locks & presence
+  // -------------------------------------------------------------------------
+
+  private acquireLock(conn: Connection, address: unknown, rawFile: unknown, reason: unknown, ttlSeconds: unknown): FileLock {
+    const channel = this.memberChannel(conn, address);
+    const file = LockManager.normalizePath(rawFile as string);
+    if (!file) fail('bad_request', 'file must be a non-empty path');
+    const why = cleanText(reason, 280) || 'editing';
+    const result = this.locks.acquire(channel.id, file, conn.ref, why, typeof ttlSeconds === 'number' ? ttlSeconds : undefined);
+
+    if (!result.ok && result.reason === 'quota') {
+      return fail('quota_exceeded', `An agent can hold at most ${result.limit} locks`);
+    }
+    if (!result.ok) {
+      const holder = this.agents.get(result.lock.holder.id);
+      holder?.peer.send({ type: 'lock.contended', lock: result.lock, requester: conn.ref, reason: why });
+      return fail('lock_held', `${file} is locked by ${result.lock.holder.name}: ${result.lock.reason}`, result.lock);
+    }
+    channel.lastActivity = this.now();
+    this.emit(channel, { type: 'lock.acquired', lock: result.lock }, conn.agent!.id);
+    return result.lock;
+  }
+
+  private releaseLock(conn: Connection, address: unknown, rawFile: unknown): { channel: string; file: string } {
+    const channel = this.memberChannel(conn, address);
+    const file = LockManager.normalizePath(rawFile as string);
+    if (!file) fail('bad_request', 'file must be a non-empty path');
+    const { released, heldBy } = this.locks.release(channel.id, file, conn.agent!.id);
+    if (heldBy) fail('forbidden', `${file} is held by ${heldBy.holder.name}, not you`, heldBy);
+    if (released) {
+      this.emit(channel, { type: 'lock.released', channel: channel.id, file, by: conn.ref, reason: 'released' }, conn.agent!.id);
+    }
+    return { channel: channel.id, file };
+  }
+
+  private updateStatus(conn: Connection, status: unknown, currentTask: unknown): AgentInfo {
+    const agent = conn.agent!;
+    if (status !== undefined) {
+      if (status !== 'idle' && status !== 'working' && status !== 'waiting') {
+        fail('bad_request', 'status must be idle, working or waiting');
+      }
+      agent.status = status as AgentInfo['status'];
+    }
+    if (currentTask !== undefined) agent.currentTask = cleanText(currentTask, 280);
+    for (const name of conn.channels) {
+      const channel = this.channels.get(name);
+      if (channel) this.emit(channel, { type: 'member.updated', channel: name, agent }, agent.id);
+    }
+    return agent;
+  }
+
+  // -------------------------------------------------------------------------
+  // Plumbing
+  // -------------------------------------------------------------------------
+
+  private emit(channel: Channel, frame: ServerFrame, exceptId?: string): void {
+    for (const id of channel.members) {
+      if (id !== exceptId) this.agents.get(id)?.peer.send(frame);
+    }
+  }
+
+  /** Expires stale locks and deletes channels that have been empty too long. */
+  sweep(): void {
+    for (const lock of this.locks.sweepExpired()) {
+      const channel = this.channels.get(lock.channel);
+      if (channel) {
+        this.emit(channel, { type: 'lock.released', channel: lock.channel, file: lock.file, by: lock.holder, reason: 'expired' });
+      }
+    }
+    const now = this.now();
+    for (const channel of [...this.channels.values()]) {
+      if (channel.members.size > 0 || channel.emptySince === undefined) continue;
+      const ttl = channel.history.length ? this.opts.emptyChannelTtlMs : this.opts.unusedChannelTtlMs;
+      if (channel.emptySince + ttl <= now) this.deleteChannel(channel);
+    }
   }
 }
