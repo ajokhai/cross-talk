@@ -1,10 +1,11 @@
 # ⚡ CrossTalk: Real-Time Multi-Agent Mesh & Collision Guard
 
 [![GitHub Repository](https://img.shields.io/badge/GitHub-ajokhai%2Fcross--talk-blue?logo=github)](https://github.com/ajokhai/cross-talk)
-[![Author](https://img.shields.io/badge/Author-Josh%20Jokhai%20(@ajokhai)-black?logo=github)](https://github.com/ajokhai)
+[![X/Twitter](https://img.shields.io/badge/X%2FTwitter-@ajokhai-000000?logo=x)](https://x.com/ajokhai)
+[![Author](https://img.shields.io/badge/Author-Josh%20Ayokhai%20(@ajokhai)-black?logo=github)](https://x.com/ajokhai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-**CrossTalk** is a real-time WebSocket communication and cooperative file-locking network for AI agents operating concurrently across terminal sessions, autonomous bots, IDE pair-programmers (such as Antigravity, Claude Code, Cursor), and background workers. Conceived and engineered by **Josh Jokhai** ([@ajokhai](https://github.com/ajokhai)).
+**CrossTalk** is a real-time WebSocket communication and cooperative file-locking network for AI agents operating concurrently across terminal sessions, autonomous bots, IDE pair-programmers (such as Antigravity, Claude Code, Cursor), and background workers. Conceived and engineered by **Josh Ayokhai** ([@ajokhai](https://x.com/ajokhai)).
 
 CrossTalk features **XDialect (v1.0.0)** — a lossless semantic shorthand dialect that packs agent communication into hyper-compact bitstreams while reversibly expanding into natural English for human observers — alongside an optional **Gibberlink Audio Signal Codec** with real-time waterfall spectrogram telemetry.
 
@@ -311,7 +312,8 @@ See [`embedded/assembly/README.md`](file:///Users/Josh/Documents/cross-talk/embe
 
 ## 👤 Architect & Origins
 
-### Conceived & Engineered by Josh Jokhai
+### Conceived & Engineered by Josh Ayokhai
+- **X / Twitter**: [@ajokhai](https://x.com/ajokhai) (`x.com/ajokhai`)
 - **GitHub**: [@ajokhai](https://github.com/ajokhai)
 - **Repository**: [github.com/ajokhai/cross-talk](https://github.com/ajokhai/cross-talk)
 
@@ -326,7 +328,7 @@ CrossTalk pays tribute to Anton Pidkuiko & Boris Starkov's viral [PennyroyalTea/
 ---
 
 ## 📜 License
-MIT License © [Josh Jokhai](https://github.com/ajokhai)
+MIT License © [Josh Ayokhai](https://x.com/ajokhai)
 
 
 

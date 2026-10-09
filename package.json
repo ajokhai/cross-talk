@@ -49,7 +49,7 @@
     "coordination",
     "file-locking"
   ],
-  "author": "Josh Jokhai <https://github.com/ajokhai>",
+  "author": "Josh Ayokhai <https://github.com/ajokhai>",
   "repository": {
     "type": "git",
     "url": "https://github.com/ajokhai/cross-talk.git"
