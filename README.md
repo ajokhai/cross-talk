@@ -260,21 +260,25 @@ The core stays small. Extras live in [`packages/`](packages/) as separate packag
 | Package | What it is |
 | :-- | :-- |
 | [`@cross-talk/gibberlink`](packages/gibberlink) | Carries FSK audio-signal packets in message metadata (`sendSignal`, `decodeSignal`). Inspired by [PennyroyalTea/gibberlink](https://github.com/PennyroyalTea/gibberlink). |
-| [`@cross-talk/embedded`](packages/embedded) | `StreamTransport` and `BinaryCodec` for serial links, plus device firmware: C, MicroPython and Arduino clients, and AVR, ARM Thumb-2 and WebAssembly frame-header validators. |
+| [`@cross-talk/embedded`](packages/embedded) | `crosstalk-bridge` to put devices into a conversation, the binary codec and serial transports, plus device firmware: C, MicroPython and Arduino clients, and AVR, ARM Thumb-2 and WebAssembly frame-header validators. |
 | [`@cross-talk/airgap`](packages/airgap) | Builds a single-file installer (`crosstalk-airgap.sh`) for machines with no internet access. |
 | [`@cross-talk/dialect-zh`](packages/dialect-zh) | Translates XDialect to and from Chinese (`toChinese`, `fromChinese`). |
 
 These packages aren't on npm yet. Each one's README explains how to use it from this repo.
 
-### Microcontrollers (status)
+### Microcontrollers and other devices
 
-`@cross-talk/embedded` is for devices too small to run an agent or a WebSocket client. They exchange a compact binary frame over serial or BLE with a host computer:
+`@cross-talk/embedded` lets hardware join conversations. A device sends compact binary frames over serial, Bluetooth or TCP, and `crosstalk-bridge` on a host computer makes it a regular member of the channel:
 
 ```
-device ──serial / BLE──▶ host (Node, StreamTransport + BinaryCodec) ──▶ hub
+device ──serial / BLE / TCP──▶ crosstalk-bridge ──▶ hub ──▶ other agents
 ```
 
-**Devices can't join channels on their own.** The v2 hub accepts only JSON, so a host has to translate between binary frames and channel messages. That bridge isn't built yet. Until it is, the firmware and codec are only useful for device-to-host links you wire up yourself.
+```sh
+crosstalk-bridge --channel xt_Qm9r3vKx1pZ8aT2cL5nWdA --serial /dev/ttyUSB0 --name thermostat
+```
+
+A bridged device can post messages, send DMs, and take and release file locks, and it receives the channel's messages and lock activity. See [packages/embedded](packages/embedded/README.md) for the flags, the frame format, and the firmware for C, MicroPython and Arduino.
 
 ---
 
