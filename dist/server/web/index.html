@@ -4,406 +4,486 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CrossTalk — Universal AI Agent Mesh Network &amp; XDialect Protocol</title>
-  <meta name="description" content="Sub-millisecond inter-agent communication, cooperative file locking, and XDialect lossless shorthand protocol across IDEs, terminals, and microcontrollers.">
+  <meta name="description" content="Ultra-light inter-agent mesh network, cooperative file locking, and XDialect lossless shorthand protocol across IDEs, branches, and subnets.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="portal-body">
-  <!-- Glowing Background Ambience -->
-  <div class="mesh-backdrop">
-    <div class="grid-overlay"></div>
-    <div class="glow-orb orb-1"></div>
-    <div class="glow-orb orb-2"></div>
-  </div>
+<body class="cal-body">
+  <!-- Subtle Canvas Grid -->
+  <div class="cal-bg-grid"></div>
 
-  <!-- Toast Notification Container -->
+  <!-- Toast Notification -->
   <div id="toastNotification" class="toast-popup">
     <span id="toastIcon">✔</span>
     <span id="toastMsg">Copied to clipboard</span>
   </div>
 
-  <!-- Navigation Bar -->
-  <nav class="portal-nav">
-    <div class="nav-container">
-      <div class="nav-left">
-        <div class="logo-group">
-          <div class="logo-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+  <!-- Navigation Bar (Cal.com Style) -->
+  <header class="cal-nav-wrap">
+    <nav class="cal-nav">
+      <div class="nav-brand">
+        <a href="/" class="brand-link">
+          <div class="brand-mark">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+              <path d="M2 17l10 5 10-5"></path>
+              <path d="M2 12l10 5 10-5"></path>
             </svg>
           </div>
-          <div class="logo-text">
-            <span class="portal-brand">CrossTalk</span>
-            <span class="badge-mesh">MESH v1.0</span>
-          </div>
-        </div>
+          <span class="brand-title">CrossTalk</span>
+        </a>
+        <span class="cal-pill-badge">Mesh v1.0</span>
       </div>
 
-      <div class="nav-links">
-        <a href="#socket-section" class="nav-item">Socket Endpoint</a>
-        <a href="#device-requirements" class="nav-item">Device Requirements</a>
-        <a href="#how-to-use" class="nav-item">How to Use</a>
-        <a href="#xdialect-section" class="nav-item">XDialect</a>
-        <a href="#github-reference" class="nav-item">GitHub &amp; Origins</a>
+      <div class="cal-nav-links">
+        <a href="#pairing-studio">Agent Pairing</a>
+        <a href="#xdialect-section">XDialect</a>
+        <a href="#context-stream">Context Stream</a>
+        <a href="#hardware-matrix">Hardware</a>
+        <a href="#integration-guide">Docs &amp; SDK</a>
       </div>
 
-      <div class="nav-actions">
-        <a href="cockpit.html" class="btn-cockpit-link">
-          <span class="pulse-dot"></span>
-          <span>Open Live Cockpit</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-            <polyline points="12 5 19 12 12 19"></polyline>
-          </svg>
+      <div class="cal-nav-actions">
+        <a href="cockpit.html" class="cal-btn cal-btn-secondary">
+          <span class="pulse-indicator"></span>
+          <span>Cockpit</span>
+        </a>
+        <a href="#pairing-studio" class="cal-btn cal-btn-primary">
+          <span>Pair Agents</span>
         </a>
       </div>
-    </div>
-  </nav>
-
-  <!-- Hero Section -->
-  <header class="portal-hero">
-    <div class="hero-badge-wrap">
-      <span class="hero-pill">⚡ ZERO-COLLISION MULTI-AGENT COORDINATION</span>
-    </div>
-    <h1 class="hero-title">
-      Universal WebSocket Network &amp; Shorthand Protocol for <span class="gradient-text">AI Agents</span>
-    </h1>
-    <p class="hero-description">
-      Allow conversational IDE agents, background terminal workers, autonomous bots, and microcontrollers to coordinate with sub-millisecond bitstreams and cooperative file locks.
-    </p>
-
-    <!-- Socket Address & Live Ping Bar -->
-    <div class="socket-hub-box" id="socket-section">
-      <div class="socket-box-header">
-        <div class="socket-status-label">
-          <span class="status-indicator-dot" id="socketPingDot"></span>
-          <span id="socketPingText">Ready to connect</span>
-        </div>
-        <span class="protocol-tag">WebSocket · IPC · Bluetooth · Serial</span>
-      </div>
-
-      <div class="socket-input-row">
-        <div class="input-icon-wrap">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-          </svg>
-        </div>
-        <input 
-          type="text" 
-          id="socketAddressInput" 
-          value="ws://localhost:4488" 
-          placeholder="Paste socket address (e.g. ws://localhost:4488, wss://hub.crosstalk.dev)" 
-        />
-        <button id="btnCopySocket" class="btn-action-primary" title="Copy socket address to clipboard">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-          <span>Copy Address</span>
-        </button>
-        <button id="btnPingSocket" class="btn-action-secondary" title="Test WebSocket connectivity">
-          <span>Test Ping</span>
-        </button>
-      </div>
-
-      <div class="socket-presets-row">
-        <span class="presets-label">Quick Endpoints:</span>
-        <button class="socket-preset-pill" data-url="ws://localhost:4488">ws://localhost:4488 (Default)</button>
-        <button class="socket-preset-pill" data-url="ws://127.0.0.1:4488">127.0.0.1:4488</button>
-        <button class="socket-preset-pill" data-url="unix:///tmp/crosstalk.sock">unix:///tmp/crosstalk.sock (IPC)</button>
-        <button class="socket-preset-pill" data-url="wss://hub.crosstalk.network">wss://hub.crosstalk.network (Cloud)</button>
-      </div>
-
-      <div class="quick-terminal-command">
-        <span class="cli-prefix">$</span>
-        <code id="cliInstallSnippet">npm install -g cross-talk &amp;&amp; crosstalk up my-project</code>
-        <button class="btn-copy-sm" onclick="window.copyText('npm install -g cross-talk &amp;&amp; crosstalk up my-project')">Copy</button>
-      </div>
-    </div>
-
-    <!-- Live Mesh Network Metrics Bar -->
-    <div class="mesh-metrics-strip">
-      <div class="metric-card">
-        <div class="metric-value-wrap">
-          <span class="metric-val" id="metricTotalMessages">12,480</span>
-          <span class="metric-trend">⚡ Live</span>
-        </div>
-        <div class="metric-lbl">Total Messages Routed</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-value-wrap">
-          <span class="metric-val" id="metricActivePeers">3</span>
-          <span class="metric-sub-badge">Online</span>
-        </div>
-        <div class="metric-lbl">Active Mesh Nodes</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-value-wrap">
-          <span class="metric-val" id="metricActiveLocks">0</span>
-          <span class="metric-sub-badge">Guarded</span>
-        </div>
-        <div class="metric-lbl">Cooperative File Locks</div>
-      </div>
-      <div class="metric-card highlight-metric">
-        <div class="metric-value-wrap">
-          <span class="metric-val" id="metricBufferLimit">100 / 100</span>
-          <span class="metric-ring-badge" id="metricStorageBadge">&lt; 25 KB</span>
-        </div>
-        <div class="metric-lbl">Ring Buffer (Recent 50-100 Msgs)</div>
-      </div>
-    </div>
+    </nav>
   </header>
 
-  <!-- Interactive XDialect Shorthand Playground -->
-  <section class="portal-section" id="xdialect-section">
-    <div class="section-header">
-      <div class="section-tag">XDIALECT v1.0.0 · CROSS-BORDER &amp; MULTI-LINGUAL</div>
-      <h2>Lossless Agent Shorthand Playground</h2>
-      <p>Agents exchange 34-byte compact tokens that reversibly expand into human English or Chinese (支持 DeepSeek, Qwen, GLM 等国内大模型).</p>
-    </div>
+  <main class="cal-main">
+    <!-- Hero Section -->
+    <section class="cal-hero">
+      <div class="hero-chip">
+        <span class="chip-spark">✦</span>
+        <span>Zero-Collision Multi-Agent Coordination Protocol</span>
+      </div>
+      <h1 class="hero-heading">
+        Connect AI agents across machines,<br>branches, and local subnets.
+      </h1>
+      <p class="hero-lead">
+        Sub-millisecond binary shorthand, cooperative file locking, and cross-branch synchronization for pairs of autonomous agents in Antigravity, Cursor, Claude Code, and background daemons.
+      </p>
 
-    <div class="playground-card">
-      <div class="playground-grid">
-        <!-- Input Column -->
-        <div class="playground-col">
-          <div class="col-head">
-            <label for="dialectInput">Input (Natural English / 中文 / XDialect)</label>
-            <div class="quick-examples">
-              <button class="pill-btn" onclick="window.setPlayground('!LCK @src/auth.ts #REF &quot;jwt validation&quot; ~180 &amp;WAIT')">Refactor Lock</button>
-              <button class="pill-btn" onclick="window.setPlayground('!REL @src/auth.ts &amp;DONE &amp;PROCEED')">Release File</button>
-              <button class="pill-btn" onclick="window.setPlayground('正在修改 src/api.py，修复bug，等我完成')">🇨🇳 中文输入</button>
-              <button class="pill-btn" onclick="window.setPlayground('!WARN @src/db.ts #MIG &amp;WAIT')">Collision Alert</button>
+      <!-- Fast Endpoint Bar -->
+      <div class="endpoint-pill-bar">
+        <div class="endpoint-status">
+          <span class="endpoint-dot" id="socketPingDot"></span>
+          <span class="endpoint-label" id="socketPingText">Hub Ready</span>
+        </div>
+        <div class="endpoint-input-wrap">
+          <input type="text" id="socketAddressInput" value="ws://localhost:4488" spellcheck="false" />
+        </div>
+        <div class="endpoint-actions">
+          <button id="btnCopySocket" class="cal-btn-sm cal-btn-primary">Copy Endpoint</button>
+          <button id="btnPingSocket" class="cal-btn-sm cal-btn-secondary">Test Ping</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cal.com Style Agent Pairing & Cross-Branch Studio -->
+    <section class="cal-section" id="pairing-studio">
+      <div class="section-intro">
+        <span class="section-kicker">CROSS-BRANCH AGENT COORDINATION</span>
+        <h2 class="section-title">Invite a Peer Agent to Join Your Session</h2>
+        <p class="section-desc">
+          When you and your friend are pair-programming with agents on different git branches or machines, generate a pairing invite with one click.
+        </p>
+      </div>
+
+      <div class="pairing-studio-card">
+        <!-- Configuration Header -->
+        <div class="studio-header">
+          <div class="studio-profile">
+            <div class="studio-avatar">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+                <line x1="9" y1="9" x2="9.01" y2="9"></line>
+                <line x1="15" y1="9" x2="15.01" y2="9"></line>
+              </svg>
+            </div>
+            <div>
+              <div class="studio-title-row">
+                <h3 class="studio-title">CrossTalk Mesh Session Link</h3>
+                <span class="studio-badge-live">Active Mesh</span>
+              </div>
+              <p class="studio-subtitle">Generates pairing codes, web relay links, and IDE prompts for peer agents.</p>
             </div>
           </div>
-          <textarea id="dialectInput" rows="4">!LCK @src/auth.ts #REF "jwt validation" ~180 &WAIT</textarea>
+
+          <!-- Cal.com Segmented Control for 3 Options -->
+          <div class="cal-segmented-control" role="tablist">
+            <button class="seg-btn active" data-option="relay">
+              <span class="seg-icon">🏢</span>
+              <span>1. Central Relay</span>
+            </button>
+            <button class="seg-btn" data-option="mesh">
+              <span class="seg-icon">🌐</span>
+              <span>2. Open Mesh</span>
+            </button>
+            <button class="seg-btn" data-option="direct">
+              <span class="seg-icon">🔒</span>
+              <span>3. Direct P2P</span>
+            </button>
+          </div>
         </div>
 
-        <!-- Output Column -->
-        <div class="playground-col output-col">
-          <div class="col-head">
-            <div class="lang-toggle-group">
-              <span>Translation &amp; Telemetry</span>
-              <div class="lang-pill-buttons">
-                <button class="lang-pill active" id="langBtnEn" onclick="window.setLanguage('en')">English</button>
-                <button class="lang-pill" id="langBtnZh" onclick="window.setLanguage('zh')">中文 (DeepSeek/Qwen)</button>
+        <!-- Studio Body Grid -->
+        <div class="studio-body-grid">
+          <!-- Left Column: Parameters -->
+          <div class="studio-params-col">
+            <h4 class="col-heading">Session Parameters</h4>
+
+            <div class="form-group">
+              <label for="inputMyBranch" class="form-label">
+                <span>My Active Branch</span>
+                <span class="label-hint">Where you are working</span>
+              </label>
+              <div class="cal-input-wrap">
+                <span class="cal-input-prefix">git:</span>
+                <input type="text" id="inputMyBranch" value="feature-auth" placeholder="e.g. main, feature-auth" />
               </div>
             </div>
-            <span class="wire-meter" id="wireSizeMeter">34 Wire Bytes</span>
+
+            <div class="form-group">
+              <label for="inputPeerBranch" class="form-label">
+                <span>Friend's Target Branch</span>
+                <span class="label-hint">Where their agent is working</span>
+              </label>
+              <div class="cal-input-wrap">
+                <span class="cal-input-prefix">git:</span>
+                <input type="text" id="inputPeerBranch" value="feature-ui" placeholder="e.g. feature-ui, develop" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="selectSubnetLock" class="form-label">
+                <span>Subnet / Network Boundary</span>
+                <span class="label-hint">Prevent packet leakage</span>
+              </label>
+              <select id="selectSubnetLock" class="cal-select">
+                <option value="any">None (Public / Any Network)</option>
+                <option value="192.168.0.0/16" selected>Local LAN (192.168.0.0/16)</option>
+                <option value="127.0.0.1">Local Machine Only (127.0.0.1)</option>
+                <option value="10.0.0.0/8">Private Cloud VPN (10.0.0.0/8)</option>
+                <option value="custom">Custom CIDR Range...</option>
+              </select>
+              <input type="text" id="inputCustomSubnet" class="cal-input-custom-subnet hidden" placeholder="Enter CIDR e.g. 172.16.0.0/12" />
+            </div>
+
+            <div class="studio-mode-explainer" id="modeExplainerBox">
+              <div class="explainer-icon" id="explainerIcon">🏢</div>
+              <div class="explainer-content">
+                <h5 id="explainerTitle">Option 1: Central Hosted Relay (Zero-Config)</h5>
+                <p id="explainerText">
+                  Connects both agents via the hosted website hub. 100% reliable through NATs, firewalls, and separate Wi-Fi networks. Works instantly.
+                </p>
+              </div>
+            </div>
           </div>
-          <div class="translation-output-box" id="humanTranslationOutput">
-            I am editing "src/auth.ts", refactoring ("jwt validation"). (Holding lock for 180s). Hang on for me to finish before touching it.
+
+          <!-- Right Column: Generated Invite & Copyable Artifacts -->
+          <div class="studio-output-col">
+            <div class="output-header-row">
+              <span class="col-heading">Pairing Code &amp; Prompts</span>
+              <span class="cal-tag-code" id="sessionCodeDisplay">XT-8A4F-AUTH</span>
+            </div>
+
+            <!-- Box 1: What to tell your friend's agent in chat -->
+            <div class="cal-action-box highlight-box">
+              <div class="box-meta">
+                <span class="box-step-num">A</span>
+                <span class="box-title">What to give your friend (Prompt for their AI Agent):</span>
+                <button class="cal-btn-copy" id="btnCopyPrompt" onclick="window.copyGeneratedPrompt()">Copy Prompt</button>
+              </div>
+              <div class="prompt-snippet-box">
+                <code id="agentPromptSnippet">Join CrossTalk session XT-8A4F-AUTH on branch feature-ui</code>
+              </div>
+              <p class="box-note">
+                Your friend simply pastes this into their IDE chat with Claude, Cursor, or Antigravity. Their agent calls <code>crosstalk_join_peer</code> automatically!
+              </p>
+            </div>
+
+            <!-- Box 2: Terminal Command -->
+            <div class="cal-action-box">
+              <div class="box-meta">
+                <span class="box-step-num">B</span>
+                <span class="box-title">What your friend runs in Terminal:</span>
+                <button class="cal-btn-copy" id="btnCopyCli" onclick="window.copyGeneratedCli()">Copy Command</button>
+              </div>
+              <div class="code-snippet-box">
+                <span class="cli-prefix">$</span>
+                <code id="agentCliSnippet">crosstalk join XT-8A4F-AUTH --branch feature-ui</code>
+              </div>
+            </div>
+
+            <!-- Box 3: Web Direct Link -->
+            <div class="cal-action-box">
+              <div class="box-meta">
+                <span class="box-step-num">C</span>
+                <span class="box-title">Direct Web Join Link:</span>
+                <button class="cal-btn-copy" id="btnCopyWeb" onclick="window.copyGeneratedWebLink()">Copy Link</button>
+              </div>
+              <div class="code-snippet-box">
+                <code id="agentWebSnippet">http://localhost:4488/?room=XT-8A4F-AUTH&amp;branch=feature-auth</code>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Recent Mesh Context Stream (Bounded 50-100 Ring Buffer) -->
-  <section class="portal-section" id="mesh-stream-section">
-    <div class="section-header">
-      <div class="section-tag">CONTEXT SYNCHRONIZATION · RING BUFFER</div>
-      <h2>Recent Mesh Context (Last 50–100 Messages)</h2>
-      <p>Only the most recent messages are retained to guarantee ultra-low memory usage while giving newly connected agents instant operational context.</p>
-    </div>
+    <!-- Metrics Strip -->
+    <section class="cal-metrics-ribbon">
+      <div class="metric-cell">
+        <span class="metric-num" id="metricTotalMessages">12,490</span>
+        <span class="metric-name">Messages Routed</span>
+      </div>
+      <div class="metric-cell">
+        <span class="metric-num" id="metricActivePeers">4</span>
+        <span class="metric-name">Active Nodes</span>
+      </div>
+      <div class="metric-cell">
+        <span class="metric-num" id="metricActiveLocks">0</span>
+        <span class="metric-name">File Locks Active</span>
+      </div>
+      <div class="metric-cell">
+        <span class="metric-num" id="metricBufferLimit">100 / 100</span>
+        <span class="metric-name" id="metricStorageBadge">Bounded Ring (&lt;25KB)</span>
+      </div>
+    </section>
 
-    <div class="recent-feed-card">
-      <div class="feed-header-bar">
-        <div class="feed-status-left">
-          <span class="pulse-dot"></span>
-          <span>Live Mesh Stream</span>
-          <span class="feed-count-badge" id="feedCountBadge">Loading...</span>
+    <!-- XDialect Shorthand Playground -->
+    <section class="cal-section" id="xdialect-section">
+      <div class="section-intro">
+        <span class="section-kicker">LOSSLESS COMPRESSION &amp; BILINGUAL TRANSLATION</span>
+        <h2 class="section-title">XDialect Shorthand Playground</h2>
+        <p class="section-desc">
+          High-density tokens enable agents to coordinate at wire speeds while humans read clear English or Chinese.
+        </p>
+      </div>
+
+      <div class="cal-card playground-card">
+        <div class="playground-layout">
+          <div class="play-pane input-pane">
+            <div class="pane-bar">
+              <span class="pane-title">Input (XDialect, English, or 中文)</span>
+              <div class="preset-pill-group">
+                <button class="cal-pill-btn" onclick="window.setPlayground('!LCK @src/auth.ts #REF &quot;jwt validation&quot; ~180 &amp;WAIT')">Lock</button>
+                <button class="cal-pill-btn" onclick="window.setPlayground('!REL @src/auth.ts &amp;DONE &amp;PROCEED')">Release</button>
+                <button class="cal-pill-btn" onclick="window.setPlayground('正在修改 src/api.py，修复bug，等我完成')">🇨🇳 中文</button>
+                <button class="cal-pill-btn" onclick="window.setPlayground('!WARN @src/db.ts #MIG &amp;WAIT')">Alert</button>
+              </div>
+            </div>
+            <textarea id="dialectInput" rows="4">!LCK @src/auth.ts #REF "jwt validation" ~180 &WAIT</textarea>
+          </div>
+
+          <div class="play-pane output-pane">
+            <div class="pane-bar">
+              <div class="lang-switch-wrap">
+                <span class="pane-title">Translation &amp; Frame</span>
+                <div class="cal-mini-seg">
+                  <button class="mini-seg-btn active" id="langBtnEn" onclick="window.setLanguage('en')">EN</button>
+                  <button class="mini-seg-btn" id="langBtnZh" onclick="window.setLanguage('zh')">中文 (DeepSeek/Qwen)</button>
+                </div>
+              </div>
+              <span class="cal-tag-bytes" id="wireSizeMeter">34 Wire Bytes</span>
+            </div>
+            <div class="translation-view" id="humanTranslationOutput">
+              I am editing "src/auth.ts", refactoring ("jwt validation"). (Holding lock for 180s). Hang on for me to finish before touching it.
+            </div>
+          </div>
         </div>
-        <button class="btn-refresh-feed" id="btnRefreshFeed" onclick="window.fetchRecentHistory()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-          <span>Refresh</span>
-        </button>
       </div>
-      <div class="recent-feed-list" id="recentFeedList">
-        <div class="feed-empty-item">Connecting to live mesh stream...</div>
-      </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Device Requirements Matrix -->
-  <section class="portal-section" id="device-requirements">
-    <div class="section-header">
-      <div class="section-tag">HARDWARE PROFILES</div>
-      <h2>Device Requirements &amp; Memory Footprint</h2>
-      <p>Engineered to run from bare-metal 8-bit microcontrollers up to cloud clusters.</p>
-    </div>
-
-    <div class="device-grid">
-      <!-- Card 1: Microcontrollers -->
-      <div class="device-card highlight-card">
-        <div class="device-badge">RAM &lt; 150 BYTES</div>
-        <div class="device-icon">📟</div>
-        <h3>Microcontrollers</h3>
-        <p class="device-sub">Arduino Uno, ATmega, ESP32, STM32</p>
-        <ul class="device-specs">
-          <li><strong>Memory:</strong> &lt; 150 bytes RAM</li>
-          <li><strong>Dynamic Malloc:</strong> 0 bytes (Zero heap allocation)</li>
-          <li><strong>Transports:</strong> Bluetooth Serial, Hardware UART</li>
-          <li><strong>Library:</strong> <code>crosstalk_micro.h</code> (C/C++ Header)</li>
-        </ul>
+    <!-- Recent Context Stream (Ring Buffer) -->
+    <section class="cal-section" id="context-stream">
+      <div class="section-intro">
+        <span class="section-kicker">INSTANT COLD-START RECOVERY</span>
+        <h2 class="section-title">Recent Mesh Stream (Last 50–100 Messages)</h2>
+        <p class="section-desc">
+          Only recent operational events are buffered. Newly spawned agents retrieve immediate context without heavy databases.
+        </p>
       </div>
 
-      <!-- Card 2: Single-Board Computers -->
-      <div class="device-card">
-        <div class="device-badge">RAM &lt; 10 KB</div>
-        <div class="device-icon">🍓</div>
-        <h3>Single-Board IoT</h3>
-        <p class="device-sub">Raspberry Pi Pico W, ESP8266, BBC micro:bit</p>
-        <ul class="device-specs">
-          <li><strong>Memory:</strong> &lt; 10 KB RAM</li>
-          <li><strong>Runtimes:</strong> MicroPython, CircuitPython</li>
-          <li><strong>Transports:</strong> Wi-Fi Sockets, UART, BLE</li>
-          <li><strong>Library:</strong> <code>crosstalk_micro.py</code></li>
-        </ul>
-      </div>
-
-      <!-- Card 3: Developer Workstations -->
-      <div class="device-card">
-        <div class="device-badge">WORKSTATION</div>
-        <div class="device-icon">💻</div>
-        <h3>IDEs &amp; Terminals</h3>
-        <p class="device-sub">Antigravity, Cursor, Claude Code, Terminal CLI</p>
-        <ul class="device-specs">
-          <li><strong>Memory:</strong> &lt; 15 MB</li>
-          <li><strong>Transports:</strong> WebSocket, Unix Domain Socket</li>
-          <li><strong>Features:</strong> Automated PreToolUse file guard</li>
-          <li><strong>Integration:</strong> Native MCP &amp; Lifecycle Hooks</li>
-        </ul>
-      </div>
-
-      <!-- Card 4: Cloud Hubs -->
-      <div class="device-card">
-        <div class="device-badge">CLOUD HUB</div>
-        <div class="device-icon">☁️</div>
-        <h3>Cloud &amp; Docker</h3>
-        <p class="device-sub">Mesh Hub, Team Workspaces, Multi-Tenant</p>
-        <ul class="device-specs">
-          <li><strong>Memory:</strong> Lightweight Node.js server</li>
-          <li><strong>Transports:</strong> Secure WSS, HTTPS REST, IPC</li>
-          <li><strong>Dashboard:</strong> Real-time Waterfall Spectrogram</li>
-          <li><strong>Scale:</strong> Thousands of concurrent agents</li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <!-- How to Use Guide -->
-  <section class="portal-section" id="how-to-use">
-    <div class="section-header">
-      <div class="section-tag">INTEGRATION GUIDE</div>
-      <h2>How to Use CrossTalk Across Environments</h2>
-      <p>Connect your agents in seconds using CLI, SDKs, or hardware headers.</p>
-    </div>
-
-    <div class="guide-tabs-wrap">
-      <div class="tab-buttons">
-        <button class="guide-tab-btn active" data-tab="tab-cli">Terminal / CLI</button>
-        <button class="guide-tab-btn" data-tab="tab-airgap">📦 Single-File / Offline</button>
-        <button class="guide-tab-btn" data-tab="tab-node">Node.js / TypeScript</button>
-        <button class="guide-tab-btn" data-tab="tab-python">Python SDK</button>
-        <button class="guide-tab-btn" data-tab="tab-c">Embedded C / Arduino</button>
-        <button class="guide-tab-btn" data-tab="tab-mpy">MicroPython</button>
-        <button class="guide-tab-btn" data-tab="tab-mcp">IDE MCP Config</button>
-      </div>
-
-      <!-- Tab Content 1: CLI -->
-      <div class="tab-pane active" id="tab-cli">
-        <div class="code-header">
-          <span>Terminal Single-Line Commands</span>
-          <button class="btn-copy-code" onclick="window.copyTabCode('tab-cli-code')">Copy</button>
+      <div class="cal-card stream-card">
+        <div class="stream-card-header">
+          <div class="stream-status">
+            <span class="pulse-indicator"></span>
+            <span>Live Mesh Context</span>
+            <span class="cal-badge-neutral" id="feedCountBadge">10 in Ring</span>
+          </div>
+          <button class="cal-btn-sm cal-btn-secondary" id="btnRefreshFeed" onclick="window.fetchRecentHistory()">
+            Refresh
+          </button>
         </div>
-        <pre><code id="tab-cli-code"># 1. Join a channel in one line (auto-spawns socket hub if not running locally):
+        <div class="recent-feed-list" id="recentFeedList">
+          <div class="feed-empty-item">Connecting to live mesh stream...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hardware & Device Matrix -->
+    <section class="cal-section" id="hardware-matrix">
+      <div class="section-intro">
+        <span class="section-kicker">RESOURCE PROFILES</span>
+        <h2 class="section-title">Hardware Profiles: Microcontrollers to Cloud</h2>
+        <p class="section-desc">Zero dynamic allocations on embedded devices; sub-millisecond dispatch on developer workstations.</p>
+      </div>
+
+      <div class="cal-bento-grid">
+        <div class="bento-card">
+          <div class="bento-badge">&lt; 150 BYTES RAM</div>
+          <div class="bento-icon">📟</div>
+          <h3 class="bento-title">Microcontrollers</h3>
+          <p class="bento-sub">Arduino Uno, ATmega328P, ESP32, STM32</p>
+          <ul class="bento-list">
+            <li>Zero dynamic heap allocation (static buffer)</li>
+            <li>Runs over Bluetooth Serial &amp; Hardware UART</li>
+            <li>C/C++ header: <code>crosstalk_micro.h</code></li>
+          </ul>
+        </div>
+
+        <div class="bento-card">
+          <div class="bento-badge">&lt; 10 KB RAM</div>
+          <div class="bento-icon">🍓</div>
+          <h3 class="bento-title">Single-Board IoT</h3>
+          <p class="bento-sub">Raspberry Pi Pico W, ESP8266, micro:bit</p>
+          <ul class="bento-list">
+            <li>MicroPython &amp; CircuitPython runtimes</li>
+            <li>Wi-Fi sockets, BLE, and UART</li>
+            <li>Module: <code>crosstalk_micro.py</code></li>
+          </ul>
+        </div>
+
+        <div class="bento-card featured-bento">
+          <div class="bento-badge">ZERO OVERHEAD</div>
+          <div class="bento-icon">💻</div>
+          <h3 class="bento-title">IDEs &amp; Terminals</h3>
+          <p class="bento-sub">Antigravity, Cursor, Claude Code, Terminal Bots</p>
+          <ul class="bento-list">
+            <li>Subnet socket locking prevents leakage</li>
+            <li>Cooperative file locking before PreToolUse</li>
+            <li>Native MCP server &amp; CLI: <code>crosstalk</code></li>
+          </ul>
+        </div>
+
+        <div class="bento-card">
+          <div class="bento-badge">SCALE</div>
+          <div class="bento-icon">☁️</div>
+          <h3 class="bento-title">Cloud Hubs</h3>
+          <p class="bento-sub">Team Workspaces, Docker, Edge Clusters</p>
+          <ul class="bento-list">
+            <li>Handles 100,000s of socket messages / sec</li>
+            <li>Secure WSS, REST endpoints, and IPC</li>
+            <li>Real-time telemetry waterfall dashboard</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Integration & SDK Guide -->
+    <section class="cal-section" id="integration-guide">
+      <div class="section-intro">
+        <span class="section-kicker">DEVELOPER DOCUMENTATION</span>
+        <h2 class="section-title">How to Use CrossTalk</h2>
+        <p class="section-desc">Get started in seconds with terminal commands, SDKs, or air-gapped single-file packages.</p>
+      </div>
+
+      <div class="cal-card guide-card">
+        <div class="guide-tabs-bar">
+          <button class="guide-tab-btn active" data-tab="tab-cli">Terminal CLI</button>
+          <button class="guide-tab-btn" data-tab="tab-airgap">📦 Offline / Airgap</button>
+          <button class="guide-tab-btn" data-tab="tab-node">Node.js / TS</button>
+          <button class="guide-tab-btn" data-tab="tab-python">Python</button>
+          <button class="guide-tab-btn" data-tab="tab-c">Embedded C</button>
+          <button class="guide-tab-btn" data-tab="tab-mcp">MCP Config</button>
+        </div>
+
+        <!-- CLI Tab -->
+        <div class="tab-pane active" id="tab-cli">
+          <div class="code-head">
+            <span>Terminal Single-Line Commands</span>
+            <button class="cal-btn-copy" onclick="window.copyTabCode('tab-cli-code')">Copy</button>
+          </div>
+          <pre><code id="tab-cli-code"># 1. Join a channel across branches (auto-spawns hub if needed):
 crosstalk up feature-auth --name "DevBot"
 
-# 2. View all active agents and locked files:
-crosstalk who
+# 2. Generate a pairing invite with 3 options:
+crosstalk invite --branch feature-auth --subnet 192.168.1.0/24
 
-# 3. Emit an XDialect shorthand message:
-crosstalk short '!LCK @src/auth.ts #FEAT "oauth handler" &WAIT'
+# 3. Join a friend's session from another branch:
+crosstalk join XT-8A4F-AUTH --branch feature-ui
 
-# 4. Stream real-time events in the terminal:
-crosstalk tail</code></pre>
-      </div>
+# 4. Check active agents and locked files:
+crosstalk who</code></pre>
+        </div>
 
-      <!-- Tab Content: Single-File Air-Gapped Install -->
-      <div class="tab-pane" id="tab-airgap">
-        <div class="airgap-header-card">
-          <div class="airgap-badge">ZERO INTERNET · ZERO DEPENDENCIES · SINGLE FILE</div>
-          <h4>Offline Single-File Installation</h4>
-          <p>Copy a single file via USB stick, local network, or air-gapped terminal to install and run immediately without internet access:</p>
-          <div class="airgap-download-row">
-            <a href="/crosstalk-airgap.sh" download="crosstalk-airgap.sh" class="btn-action-primary">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              <span>Download crosstalk-airgap.sh (470 KB)</span>
-            </a>
-            <a href="https://github.com/ajokhai/cross-talk/raw/main/dist/crosstalk.standalone.mjs" download class="btn-action-secondary">
-              <span>Node Standalone Bundle (.mjs)</span>
-            </a>
-            <a href="https://github.com/ajokhai/cross-talk/raw/main/sdk/python/crosstalk.py" download class="btn-action-secondary">
-              <span>Python Standalone Client (.py)</span>
-            </a>
+        <!-- Airgap Tab -->
+        <div class="tab-pane" id="tab-airgap">
+          <div class="airgap-callout">
+            <div class="callout-title">Zero Internet · Zero Dependencies · Single File</div>
+            <p>Copy a single file over USB or air-gapped LAN. Self-extracts and runs immediately.</p>
+            <div class="airgap-actions">
+              <a href="/crosstalk-airgap.sh" download="crosstalk-airgap.sh" class="cal-btn cal-btn-primary">
+                Download crosstalk-airgap.sh (497 KB)
+              </a>
+              <a href="https://github.com/ajokhai/cross-talk/raw/main/dist/crosstalk.standalone.mjs" download class="cal-btn cal-btn-secondary">
+                Node Standalone (.mjs)
+              </a>
+              <a href="https://github.com/ajokhai/cross-talk/raw/main/sdk/python/crosstalk.py" download class="cal-btn cal-btn-secondary">
+                Python Client (.py)
+              </a>
+            </div>
           </div>
-        </div>
-        <div class="code-header">
-          <span>Run or Install on Any Offline Device</span>
-          <button class="btn-copy-code" onclick="window.copyTabCode('tab-airgap-code')">Copy</button>
-        </div>
-        <pre><code id="tab-airgap-code"># 1. Install permanently to system PATH (works with Node or Python 3):
-sh crosstalk-airgap.sh install
-
-# 2. Or run any command directly from the single file without installing:
+          <div class="code-head">
+            <span>Run on Any Air-Gapped Machine</span>
+            <button class="cal-btn-copy" onclick="window.copyTabCode('tab-airgap-code')">Copy</button>
+          </div>
+          <pre><code id="tab-airgap-code"># Run directly without installing:
 sh crosstalk-airgap.sh who
-sh crosstalk-airgap.sh up my-channel
-sh crosstalk-airgap.sh serve
+sh crosstalk-airgap.sh up feature-auth
+sh crosstalk-airgap.sh serve -s 192.168.1.0/24
 
-# 3. Node standalone bundle (self-installing):
-node crosstalk.standalone.mjs install
-
-# 4. Pure Python stdlib standalone client (zero pip dependencies):
-python3 crosstalk.py who</code></pre>
-      </div>
-
-      <!-- Tab Content 2: Node.js -->
-      <div class="tab-pane" id="tab-node">
-        <div class="code-header">
-          <span>TypeScript / JavaScript SDK</span>
-          <button class="btn-copy-code" onclick="window.copyTabCode('tab-node-code')">Copy</button>
+# Or install permanently into PATH:
+sh crosstalk-airgap.sh install</code></pre>
         </div>
-        <pre><code id="tab-node-code">import { CrossTalk } from 'cross-talk';
 
-// Connect or auto-spawn the local socket hub in a single line:
-const agent = await CrossTalk.join({ channel: 'feature-auth', name: 'Worker-1' });
+        <!-- Node Tab -->
+        <div class="tab-pane" id="tab-node">
+          <div class="code-head">
+            <span>TypeScript / Node.js SDK</span>
+            <button class="cal-btn-copy" onclick="window.copyTabCode('tab-node-code')">Copy</button>
+          </div>
+          <pre><code id="tab-node-code">import { CrossTalk } from 'cross-talk';
 
-// Claim file lock before editing to prevent peer collisions:
+// Connect with branch context
+const agent = await CrossTalk.join({ channel: 'feature-auth', name: 'Worker-1', branch: 'feature-auth' });
+
+// Claim file lock before editing
 agent.sendShorthand('!LCK @src/auth.ts #FEAT "oauth handler" &WAIT');
 
-// Listen for peer release notifications
-agent.on('lock_released', (data) => {
-  console.log(`File ${data.file} unlocked by ${data.releasedBy}! Safe to edit.`);
-});</code></pre>
-      </div>
-
-      <!-- Tab Content 3: Python -->
-      <div class="tab-pane" id="tab-python">
-        <div class="code-header">
-          <span>Python SDK (Autonomous Bots &amp; LangChain)</span>
-          <button class="btn-copy-code" onclick="window.copyTabCode('tab-python-code')">Copy</button>
+// Release lock upon completion
+agent.sendShorthand('!REL @src/auth.ts &DONE &PROCEED');</code></pre>
         </div>
-        <pre><code id="tab-python-code">from sdk.python.crosstalk import CrossTalkClient
 
-client = CrossTalkClient(name="Python-Worker", role="backend", url="ws://localhost:4488")
+        <!-- Python Tab -->
+        <div class="tab-pane" id="tab-python">
+          <div class="code-head">
+            <span>Python SDK (Zero Third-Party Dependencies)</span>
+            <button class="cal-btn-copy" onclick="window.copyTabCode('tab-python-code')">Copy</button>
+          </div>
+          <pre><code id="tab-python-code">from sdk.python.crosstalk import CrossTalkClient
+
+client = CrossTalkClient(name="PyWorker", role="backend", url="ws://localhost:4488")
 client.connect()
 
 # Claim file using XDialect
@@ -411,52 +491,34 @@ client.send_shorthand('!LCK @app.py #FIX "crash bug" &WAIT')
 
 # Release file lock when work finishes
 client.send_shorthand('!REL @app.py &DONE &PROCEED')</code></pre>
-      </div>
-
-      <!-- Tab Content 4: Embedded C / Arduino -->
-      <div class="tab-pane" id="tab-c">
-        <div class="code-header">
-          <span>Arduino / ESP32 Embedded C/C++ Header (&lt; 150 Bytes RAM)</span>
-          <button class="btn-copy-code" onclick="window.copyTabCode('tab-c-code')">Copy</button>
         </div>
-        <pre><code id="tab-c-code">#include "crosstalk_micro.h"
 
-// In Arduino setup():
+        <!-- C Tab -->
+        <div class="tab-pane" id="tab-c">
+          <div class="code-head">
+            <span>Embedded C / Arduino Header (&lt; 150 Bytes RAM)</span>
+            <button class="cal-btn-copy" onclick="window.copyTabCode('tab-c-code')">Copy</button>
+          </div>
+          <pre><code id="tab-c-code">#include "crosstalk_micro.h"
+
 void setup() {
     SerialBT.begin("CrossTalk-ESP32");
-    
     // Send 34-byte lock claim over Bluetooth Serial or UART:
     CrossTalkMicro::claimLock(SerialBT, "src/sensor.h", XT_INTENT_FEAT, "IMU calibration", 60);
 }
 
-// In loop():
 void loop() {
-    // Zero dynamic memory allocations — 100% static buffer!
+    // 100% static buffer - zero heap allocations!
 }</code></pre>
-      </div>
-
-      <!-- Tab Content 5: MicroPython -->
-      <div class="tab-pane" id="tab-mpy">
-        <div class="code-header">
-          <span>MicroPython (Raspberry Pi Pico W / ESP32)</span>
-          <button class="btn-copy-code" onclick="window.copyTabCode('tab-mpy-code')">Copy</button>
         </div>
-        <pre><code id="tab-mpy-code">from crosstalk_micro import CrossTalkMicro
 
-# Generate 34-byte compact packet
-pkt = CrossTalkMicro.pack_claim("src/firmware.c", "Motor tuning", 60)
-
-# Write to UART or Bluetooth serial stream
-uart.write(pkt)</code></pre>
-      </div>
-
-      <!-- Tab Content 6: MCP Config -->
-      <div class="tab-pane" id="tab-mcp">
-        <div class="code-header">
-          <span>.agents/mcp_config.json (Antigravity, Cursor, Claude Code)</span>
-          <button class="btn-copy-code" onclick="window.copyTabCode('tab-mcp-code')">Copy</button>
-        </div>
-        <pre><code id="tab-mcp-code">{
+        <!-- MCP Tab -->
+        <div class="tab-pane" id="tab-mcp">
+          <div class="code-head">
+            <span>.agents/mcp_config.json (Antigravity, Cursor, Claude Code)</span>
+            <button class="cal-btn-copy" onclick="window.copyTabCode('tab-mcp-code')">Copy</button>
+          </div>
+          <pre><code id="tab-mcp-code">{
   "mcpServers": {
     "crosstalk": {
       "command": "node",
@@ -468,48 +530,43 @@ uart.write(pkt)</code></pre>
     }
   }
 }</code></pre>
-      </div>
-    </div>
-  </section>
-
-  <!-- GitHub Reference & Genesis -->
-  <section class="portal-section" id="github-reference">
-    <div class="genesis-card">
-      <div class="genesis-content">
-        <div class="genesis-tag">GITHUB REFERENCE &amp; HACKATHON ROOTS</div>
-        <h3>Inspired by PennyroyalTea/gibberlink</h3>
-        <p>
-          CrossTalk draws inspiration from the viral <strong>Gibberlink</strong> project created by Anton Pidkuiko &amp; Boris Starkov at the ElevenLabs hackathon (<a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer">github.com/PennyroyalTea/gibberlink</a>).
-        </p>
-        <p>
-          While Gibberlink demonstrated AI agents switching to acoustic sound modems over telephone voice calls, <strong>CrossTalk</strong> evolves this concept for production developer environments:
-          bridging high-speed binary bitstreams, cooperative file locks, and zero-collision multi-agent coordination.
-        </p>
-        <div class="genesis-buttons">
-          <a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer" class="btn-github-pill">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
-            </svg>
-            <span>PennyroyalTea/gibberlink</span>
-          </a>
-          <a href="cockpit.html" class="btn-action-primary">
-            <span>Explore Live Cockpit</span>
-          </a>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Footer -->
-  <footer class="portal-footer">
-    <div class="footer-container">
+    <!-- Cal.com Style Minimalist Genesis Footer Card -->
+    <section class="cal-section" id="genesis-section">
+      <div class="cal-card genesis-card">
+        <div class="genesis-content">
+          <span class="section-kicker">ORIGINS &amp; GITHUB REFERENCE</span>
+          <h3 class="genesis-title">Inspired by PennyroyalTea/gibberlink</h3>
+          <p class="genesis-text">
+            CrossTalk draws inspiration from Anton Pidkuiko &amp; Boris Starkov’s viral <strong>Gibberlink</strong> (<a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer">github.com/PennyroyalTea/gibberlink</a>) at the ElevenLabs Hackathon. CrossTalk evolves this concept from acoustic audio modems into high-speed binary bitstreams, cooperative file locks, and zero-collision multi-agent coordination.
+          </p>
+          <div class="genesis-actions">
+            <a href="https://github.com/PennyroyalTea/gibberlink" target="_blank" rel="noopener noreferrer" class="cal-btn cal-btn-secondary">
+              GitHub: PennyroyalTea/gibberlink
+            </a>
+            <a href="cockpit.html" class="cal-btn cal-btn-primary">
+              Launch Live Cockpit
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Cal.com Minimalist Footer -->
+  <footer class="cal-footer">
+    <div class="footer-wrap">
       <div class="footer-left">
-        <strong>CrossTalk Mesh Network</strong> · Open Protocol for Cooperative AI Agents
+        <span class="footer-brand">CrossTalk</span>
+        <span class="footer-sub">Universal AI Agent Mesh Network &amp; XDialect Protocol</span>
       </div>
       <div class="footer-right">
         <span>Dialect v1.0.0</span>
         <span>MIT License</span>
-        <a href="cockpit.html">Live Cockpit</a>
+        <a href="cockpit.html">Cockpit</a>
       </div>
     </div>
   </footer>

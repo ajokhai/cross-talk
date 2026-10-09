@@ -15,6 +15,8 @@ export interface AgentInfo {
     lastSeen: number;
     gibberlinkCapable?: boolean;
     dialectVersion?: string;
+    branch?: string;
+    subnet?: string;
 }
 export interface FileLock {
     file: string;
@@ -24,6 +26,7 @@ export interface FileLock {
     acquiredAt: number;
     expiresAt: number;
     channel: string;
+    branch?: string;
 }
 export interface MessageEvent {
     id: string;
@@ -34,6 +37,9 @@ export interface MessageEvent {
     content: string;
     timestamp: number;
     metadata?: Record<string, any>;
+    isAck?: boolean;
+    replyExpected?: boolean;
+    branch?: string;
     gibberlinkSignal?: GibberlinkSignalPacket;
     shorthand?: {
         raw: string;
@@ -55,8 +61,10 @@ export type ClientPacket = {
         currentTask?: string;
         gibberlinkCapable?: boolean;
         dialectVersion?: string;
+        branch?: string;
     };
     channel?: string;
+    sessionKey?: string;
 } | {
     type: 'heartbeat';
     status?: AgentStatus;
@@ -73,7 +81,12 @@ export type ClientPacket = {
     type: 'direct_message';
     to: string;
     content: string;
+    isAck?: boolean;
+    replyExpected?: boolean;
     metadata?: Record<string, any>;
+} | {
+    type: 'disconnect';
+    reason?: string;
 } | {
     type: 'gibberlink_signal';
     signal: GibberlinkSignalPacket;
@@ -122,6 +135,11 @@ export type ServerPacket = {
 } | {
     type: 'direct_message';
     message: MessageEvent;
+} | {
+    type: 'direct_message_sent';
+    messageId: string;
+    to: string;
+    timestamp: number;
 } | {
     type: 'gibberlink_signal';
     message: MessageEvent;

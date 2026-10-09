@@ -5,6 +5,7 @@ import {
   FileLock,
   MessageEvent,
   ServerPacket,
+  ClientPacket,
   AgentEnvironment,
   AgentStatus
 } from '../server/types.js';
@@ -12,6 +13,15 @@ import { GibberlinkEngine, GibberlinkSignalPacket } from '../server/gibberlink.j
 import { BinaryCodec, BinaryFrame } from '../server/binary.js';
 import { DIALECT_V1, DialectDictionary } from '../dialect/dictionary.js';
 import { DialectEngine, ParsedDialectMessage } from '../dialect/engine.js';
+import { execSync } from 'node:child_process';
+
+function detectGitBranch(): string {
+  try {
+    return execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'main';
+  } catch {
+    return 'main';
+  }
+}
 
 export interface CrossTalkClientOptions {
   url?: string;
@@ -24,6 +34,8 @@ export interface CrossTalkClientOptions {
   autoHeartbeat?: boolean;
   gibberlinkCapable?: boolean;
   dialectVersion?: string;
+  branch?: string;
+  sessionKey?: string;
 }
 
 export class CrossTalkClient extends EventEmitter {
@@ -36,6 +48,7 @@ export class CrossTalkClient extends EventEmitter {
   private pendingLockResolvers: Map<string, (result: any) => void> = new Map();
   private pendingStateResolver: ((state: any) => void) | null = null;
   private pendingInboxResolver: ((messages: MessageEvent[]) => void) | null = null;
+  private recentMessages: Array<{ content: string; time: number }> = [];
 
   constructor(options: CrossTalkClientOptions) {
     super();
@@ -49,7 +62,9 @@ export class CrossTalkClient extends EventEmitter {
       currentTask: options.currentTask || 'Idle',
       autoHeartbeat: options.autoHeartbeat !== false,
       gibberlinkCapable: options.gibberlinkCapable !== false,
-      dialectVersion: options.dialectVersion || DIALECT_V1.version
+      dialectVersion: options.dialectVersion || DIALECT_V1.version,
+      branch: options.branch || detectGitBranch(),
+      sessionKey: options.sessionKey || ''
     };
   }
 
@@ -75,6 +90,7 @@ export class CrossTalkClient extends EventEmitter {
         this.sendPacket({
           type: 'register',
           channel: this.options.channel,
+          sessionKey: this.options.sessionKey,
           agent: {
             name: this.options.name,
             role: this.options.role,
@@ -82,7 +98,8 @@ export class CrossTalkClient extends EventEmitter {
             workspace: this.options.workspace,
             currentTask: this.options.currentTask,
             gibberlinkCapable: this.options.gibberlinkCapable,
-            dialectVersion: this.options.dialectVersion
+            dialectVersion: this.options.dialectVersion,
+            branch: this.options.branch
           }
         });
       });
@@ -165,7 +182,15 @@ export class CrossTalkClient extends EventEmitter {
         break;
 
       case 'direct_message':
+        // Filter out self-echoes: never trigger direct_message on our own sent messages
+        if (packet.message?.from?.id && packet.message.from.id === this.myAgentId) {
+          return;
+        }
         this.emit('direct_message', packet.message);
+        break;
+
+      case 'direct_message_sent':
+        this.emit('direct_message_sent', packet);
         break;
 
       case 'gibberlink_signal':
@@ -269,15 +294,6 @@ export class CrossTalkClient extends EventEmitter {
     return DialectEngine.fromHuman(english);
   }
 
-  public sendDirectMessage(toAgentId: string, content: string, metadata?: Record<string, any>) {
-    this.sendPacket({
-      type: 'direct_message',
-      to: toAgentId,
-      content,
-      metadata
-    });
-  }
-
   public sendGibberlinkSignal(
     payload: string | object,
     mode: 'audible_fast' | 'audible_standard' | 'ultrasonic' = 'audible_fast',
@@ -369,12 +385,60 @@ export class CrossTalkClient extends EventEmitter {
     });
   }
 
-  public disconnect() {
-    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+  public shouldSuppressAutoReply(msg: MessageEvent): boolean {
+    if (msg.isAck || msg.replyExpected === false) return true;
+    const content = (msg.content || '').trim().toLowerCase();
+    if (content.startsWith('ack:') || content.startsWith('acknowledged:') || content.startsWith('已收到')) {
+      return true;
+    }
+    const now = Date.now();
+    this.recentMessages = this.recentMessages.filter(m => now - m.time < 3500);
+    const count = this.recentMessages.filter(m => m.content === content).length;
+    this.recentMessages.push({ content, time: now });
+    if (count >= 2) {
+      console.warn(`[CrossTalk Client] 🔁 Circuit breaker: suppressed duplicate ping-pong reply for: "${content.slice(0, 30)}..."`);
+      return true;
+    }
+    return false;
+  }
+
+  public sendDirectMessage(
+    toAgentId: string,
+    content: string,
+    options?: { isAck?: boolean; replyExpected?: boolean; metadata?: Record<string, any> } | Record<string, any>
+  ) {
+    const isOptionsObj = options && ('isAck' in options || 'replyExpected' in options || 'metadata' in options);
+    const isAck = isOptionsObj ? (options as any).isAck : false;
+    const replyExpected = isOptionsObj ? ((options as any).replyExpected ?? !isAck) : true;
+    const metadata = isOptionsObj ? (options as any).metadata : (options as Record<string, any>);
+
+    this.sendPacket({
+      type: 'direct_message',
+      to: toAgentId,
+      content,
+      isAck,
+      replyExpected,
+      metadata
+    });
+  }
+
+  public async disconnect(reason: string = 'client_exit'): Promise<void> {
+    if (this.ws && this.isConnected) {
+      try {
+        this.sendPacket({ type: 'disconnect', reason });
+      } catch {}
+    }
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close(1000, reason);
+      } catch {}
       this.ws = null;
     }
+    this.isConnected = false;
   }
 
   private sendPacket(packet: any) {

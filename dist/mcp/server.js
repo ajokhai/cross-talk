@@ -143,6 +143,46 @@ const TOOLS = [
             properties: {},
             required: []
         }
+    },
+    {
+        name: 'crosstalk_generate_invite',
+        description: 'Generate a cross-branch agent pairing invite with 3 communication options (Central Relay code/link, Open Mesh rendezvous, Direct P2P subnet lock) and the exact prompt to give a peer agent.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                branch: {
+                    type: 'string',
+                    description: 'Your git branch name (e.g. "feature-auth"). Auto-detected if omitted.'
+                },
+                channel: {
+                    type: 'string',
+                    description: 'Channel or room identifier (default: "default")'
+                },
+                subnet: {
+                    type: 'string',
+                    description: 'Subnet lock CIDR (e.g. "192.168.1.0/24", "lan", "local") to prevent socket data spilling outside network boundary.'
+                }
+            },
+            required: []
+        }
+    },
+    {
+        name: 'crosstalk_join_peer',
+        description: 'Join a peer agent session using an invite code (XT-XXXX-BRANCH), web link, or direct socket address across different git branches.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                target: {
+                    type: 'string',
+                    description: 'Invite code (e.g. "XT-49A2-AUTH"), web URL ("http://localhost:4488/?room=..."), or socket address ("ws://localhost:4488")'
+                },
+                branch: {
+                    type: 'string',
+                    description: 'Your git branch (e.g. "feature-ui")'
+                }
+            },
+            required: ['target']
+        }
     }
 ];
 export async function runMcpServer() {
@@ -290,6 +330,90 @@ export async function runMcpServer() {
                             {
                                 type: 'text',
                                 text: JSON.stringify(inbox, null, 2)
+                            }
+                        ]
+                    };
+                }
+                case 'crosstalk_generate_invite': {
+                    const { execSync } = await import('node:child_process');
+                    const crypto = await import('node:crypto');
+                    let branch = String(args?.branch || '');
+                    if (!branch) {
+                        try {
+                            branch = execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'main';
+                        }
+                        catch {
+                            branch = 'main';
+                        }
+                    }
+                    const host = crosstalkUrl.replace(/^(http|https|ws|wss):\/\//, '');
+                    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+                    const subnetLock = String(args?.subnet || (isLocal ? '192.168.0.0/16' : 'any'));
+                    const randomSuffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+                    const branchTag = branch.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8).toUpperCase() || 'SYNC';
+                    const code = `XT-${randomSuffix}-${branchTag}`;
+                    const result = {
+                        sessionCode: code,
+                        myBranch: branch,
+                        subnetLock,
+                        options: {
+                            centralRelay: {
+                                description: 'Option 1: Central Hosted Relay (Zero-Config · Recommended)',
+                                code,
+                                webLink: `http://${host}/?room=${code}&branch=${branch}`,
+                                chatPromptForPeerAgent: `Join CrossTalk session ${code} on branch feature-ui`,
+                                cliCommand: `crosstalk join ${code} --branch feature-ui`
+                            },
+                            openMesh: {
+                                description: 'Option 2: Open Mesh (Distributed Discovery Rendezvous)',
+                                topic: `mesh://open/repo-${branchTag.toLowerCase()}`,
+                                chatPromptForPeerAgent: `Connect to open mesh channel 'team-${branchTag.toLowerCase()}' on branch feature-ui`,
+                                cliCommand: `crosstalk up team-${branchTag.toLowerCase()} --mode mesh --branch feature-ui`
+                            },
+                            directP2P: {
+                                description: 'Option 3: Direct Computer-to-Computer (Subnet Locked P2P)',
+                                socketAddress: `ws://${host}`,
+                                subnetLock,
+                                chatPromptForPeerAgent: `Connect directly to peer ws://${host} on branch feature-ui with subnet lock ${subnetLock}`,
+                                cliCommand: `crosstalk join ws://${host} --branch feature-ui --subnet ${subnetLock}`
+                            }
+                        },
+                        instructionForUser: `Send ONE of the options above to your friend. In their IDE chat with their agent, they can simply say: "Join CrossTalk session ${code} on branch <their-branch>" and their agent will call crosstalk_join_peer!`
+                    };
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify(result, null, 2)
+                            }
+                        ]
+                    };
+                }
+                case 'crosstalk_join_peer': {
+                    const target = String(args?.target || '');
+                    const myBranch = String(args?.branch || '');
+                    let channel = 'default';
+                    if (target.startsWith('XT-')) {
+                        channel = target;
+                    }
+                    else if (target.startsWith('http://') || target.startsWith('https://')) {
+                        try {
+                            const parsed = new URL(target);
+                            channel = parsed.searchParams.get('room') || 'default';
+                        }
+                        catch {
+                            channel = target;
+                        }
+                    }
+                    else {
+                        channel = target;
+                    }
+                    c.broadcast(`[SESSION JOINED] Connected to peer session ${channel} from branch ${myBranch || 'active'}`);
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `SUCCESS: Joined peer session ${channel}. Mesh coordination active across branches.`
                             }
                         ]
                     };

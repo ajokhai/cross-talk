@@ -14,11 +14,14 @@ import { GibberlinkEngine, GibberlinkSignalPacket } from './gibberlink.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import { IMeshStorage, InMemoryStorage } from './storage.js';
+import { SubnetGuard } from './subnet.js';
+import http from 'node:http';
 
 interface ConnectedClient {
   ws: WebSocket;
   agent: AgentInfo;
   channel: string;
+  ip?: string;
 }
 
 export class MeshHub {
@@ -31,12 +34,22 @@ export class MeshHub {
   private maxInboxPerAgent = 50;
   private totalMessagesRouted: number = 0;
   private startTime: number = Date.now();
+  private allowedSubnets: string[] = [];
 
-  constructor(storage?: IMeshStorage) {
+  constructor(storage?: IMeshStorage, allowedSubnets?: string[]) {
     this.storage = storage || new InMemoryStorage(this.maxHistoryPerChannel);
+    this.allowedSubnets = allowedSubnets || [];
     this.storage.getTotalMessageCount().then(cnt => {
       if (cnt > 0) this.totalMessagesRouted = cnt;
     }).catch(() => {});
+  }
+
+  public setAllowedSubnets(subnets: string[]) {
+    this.allowedSubnets = subnets;
+  }
+
+  public getAllowedSubnets(): string[] {
+    return this.allowedSubnets;
   }
 
   public async initStorage(channel = 'default') {
@@ -60,14 +73,21 @@ export class MeshHub {
     return this.lockManager;
   }
 
-  public handleConnection(ws: WebSocket) {
+  public handleConnection(ws: WebSocket, req?: http.IncomingMessage) {
     let currentAgentId: string | null = null;
+    const clientIp = req?.socket?.remoteAddress || (req?.headers['x-forwarded-for'] as string)?.split(',')[0] || '127.0.0.1';
+
+    if (!SubnetGuard.isAllowed(clientIp, this.allowedSubnets)) {
+      console.warn(`[MeshHub] ⛔ Connection rejected from ${clientIp}: outside authorized subnet policy.`);
+      ws.close(4003, 'Subnet policy violation');
+      return;
+    }
 
     ws.on('message', (raw: Buffer | string) => {
       try {
         const text = typeof raw === 'string' ? raw : raw.toString('utf8');
         const packet = JSON.parse(text) as ClientPacket;
-        this.processPacket(ws, packet, (id) => {
+        this.processPacket(ws, packet, clientIp, (id) => {
           currentAgentId = id;
         });
       } catch (err: any) {
@@ -92,6 +112,7 @@ export class MeshHub {
   private processPacket(
     ws: WebSocket,
     packet: ClientPacket,
+    clientIp: string,
     setAgentId: (id: string) => void
   ) {
     switch (packet.type) {
@@ -113,7 +134,9 @@ export class MeshHub {
           connectedAt: Date.now(),
           lastSeen: Date.now(),
           gibberlinkCapable: rawAgent.gibberlinkCapable ?? true,
-          dialectVersion: rawAgent.dialectVersion || DIALECT_V1.version
+          dialectVersion: rawAgent.dialectVersion || DIALECT_V1.version,
+          branch: rawAgent.branch || 'main',
+          subnet: clientIp
         };
 
         const existing = this.clients.get(id);
@@ -292,6 +315,9 @@ export class MeshHub {
           to: packet.to,
           content: packet.content,
           timestamp: Date.now(),
+          isAck: packet.isAck,
+          replyExpected: packet.replyExpected,
+          branch: client.agent.branch,
           metadata: packet.metadata
         };
 
@@ -304,12 +330,24 @@ export class MeshHub {
           });
         }
 
+        // Sender confirmation: Send direct_message_sent to prevent infinite self-echo feedback loops
         this.send(ws, {
-          type: 'direct_message',
-          message: msg
+          type: 'direct_message_sent',
+          messageId: msg.id,
+          to: packet.to,
+          timestamp: Date.now()
         });
 
         console.log(`[MeshHub] DM [${client.agent.name} -> ${targetClient?.agent.name || packet.to}]: ${packet.content}`);
+        break;
+      }
+
+      case 'disconnect': {
+        const client = this.getClientByWs(ws);
+        if (client) {
+          console.log(`[MeshHub] Agent ${client.agent.name} initiated graceful disconnect: ${packet.reason || 'client_shutdown'}`);
+          this.handleDisconnect(client.agent.id);
+        }
         break;
       }
 
@@ -673,5 +711,56 @@ export class MeshHub {
       message: msg
     });
     return msg;
+  }
+
+  public createInvite(options: {
+    channel?: string;
+    branch?: string;
+    allowedSubnet?: string;
+    host?: string;
+  } = {}) {
+    const channel = options.channel || 'default';
+    const branch = options.branch || 'main';
+    const host = options.host || 'localhost:4488';
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    const cleanHost = host.replace(/^(http|https|ws|wss):\/\//, '');
+    const wsScheme = host.startsWith('https') ? 'wss' : 'ws';
+    const httpScheme = host.startsWith('https') ? 'https' : 'http';
+
+    const randomSuffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const branchTag = branch.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8).toUpperCase() || 'SYNC';
+    const code = `XT-${randomSuffix}-${branchTag}`;
+
+    const subnetLock = options.allowedSubnet || (isLocal ? '192.168.0.0/16' : 'any');
+
+    return {
+      code,
+      channel,
+      branch,
+      subnetLock,
+      options: {
+        centralRelay: {
+          name: 'Central Hosted Bridge (Key / Code / Link)',
+          code,
+          joinLink: `${httpScheme}://${cleanHost}/?room=${code}&branch=${branch}`,
+          wsUrl: `${wsScheme}://${cleanHost}`,
+          agentPrompt: `Join CrossTalk session ${code} on branch ${branch}`,
+          cliCommand: `crosstalk join ${code} --branch ${branch}`
+        },
+        openMesh: {
+          name: 'Open Mesh (Discovery Topic Rendezvous)',
+          topic: `mesh://open/repo-${branchTag.toLowerCase()}`,
+          agentPrompt: `Connect to open mesh channel 'team-${branchTag.toLowerCase()}' on branch ${branch}`,
+          cliCommand: `crosstalk up team-${branchTag.toLowerCase()} --mode mesh --branch ${branch}`
+        },
+        directP2P: {
+          name: 'Direct Computer-to-Computer (Subnet Locked)',
+          address: `${wsScheme}://${cleanHost}`,
+          subnetLock,
+          agentPrompt: `Connect directly to peer ${wsScheme}://${cleanHost} on branch ${branch} with subnet lock ${subnetLock}`,
+          cliCommand: `crosstalk join ${wsScheme}://${cleanHost} --branch ${branch} --subnet ${subnetLock}`
+        }
+      }
+    };
   }
 }

@@ -7691,6 +7691,109 @@ var init_storage = __esm({
   }
 });
 
+// src/server/subnet.ts
+var SubnetGuard;
+var init_subnet = __esm({
+  "src/server/subnet.ts"() {
+    "use strict";
+    SubnetGuard = class {
+      /**
+       * Normalizes an IP string (unwraps IPv6 mapped IPv4 like ::ffff:192.168.1.10)
+       */
+      static normalizeIp(rawIp) {
+        if (!rawIp) return "127.0.0.1";
+        let ip = rawIp.trim();
+        if (ip.startsWith("::ffff:")) {
+          ip = ip.substring(7);
+        }
+        if (ip === "::1") {
+          return "127.0.0.1";
+        }
+        return ip;
+      }
+      /**
+       * Converts IPv4 string to 32-bit unsigned integer
+       */
+      static ipv4ToInt(ip) {
+        const parts = ip.split(".");
+        if (parts.length !== 4) return null;
+        let n = 0;
+        for (let i = 0; i < 4; i++) {
+          const byte = parseInt(parts[i], 10);
+          if (isNaN(byte) || byte < 0 || byte > 255) return null;
+          n = (n << 8) + byte;
+        }
+        return n >>> 0;
+      }
+      /**
+       * Checks if an IPv4 address is inside an IPv4 CIDR block (e.g. 192.168.1.0/24)
+       */
+      static matchesCidr(ip, cidr) {
+        const cleanIp = this.normalizeIp(ip);
+        const ipInt = this.ipv4ToInt(cleanIp);
+        if (ipInt === null) {
+          if (ip === "::1" && (cidr === "127.0.0.1/32" || cidr === "localhost" || cidr === "local")) {
+            return true;
+          }
+          return false;
+        }
+        const [base, prefixStr] = cidr.split("/");
+        const prefix = prefixStr !== void 0 ? parseInt(prefixStr, 10) : 32;
+        if (isNaN(prefix) || prefix < 0 || prefix > 32) return false;
+        const baseInt = this.ipv4ToInt(base);
+        if (baseInt === null) return false;
+        if (prefix === 0) return true;
+        const mask = ~0 << 32 - prefix >>> 0;
+        return (ipInt & mask) === (baseInt & mask);
+      }
+      /**
+       * Checks if an IP is within private RFC1918 LAN space (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8)
+       */
+      static isPrivateOrLocal(ip) {
+        const clean = this.normalizeIp(ip);
+        return this.matchesCidr(clean, "127.0.0.0/8") || this.matchesCidr(clean, "10.0.0.0/8") || this.matchesCidr(clean, "172.16.0.0/12") || this.matchesCidr(clean, "192.168.0.0/16") || clean === "127.0.0.1" || clean === "localhost";
+      }
+      /**
+       * Validates whether a client IP is allowed by a list of allowed subnets / rules
+       * Supported rule presets:
+       *  - 'any' | '*' | 'global' -> allow any IP
+       *  - 'local' | 'localhost'  -> allow 127.0.0.0/8 only
+       *  - 'lan' | 'private'      -> allow RFC1918 LAN ranges
+       *  - CIDR like '192.168.1.0/24' or '10.50.0.0/16'
+       *  - Single IP like '192.168.1.45'
+       */
+      static isAllowed(clientIp, allowedRules) {
+        if (!allowedRules || allowedRules.length === 0) {
+          return true;
+        }
+        const cleanIp = this.normalizeIp(clientIp);
+        for (const rule of allowedRules) {
+          const r = rule.trim().toLowerCase();
+          if (!r) continue;
+          if (r === "*" || r === "any" || r === "global") {
+            return true;
+          }
+          if (r === "local" || r === "localhost") {
+            if (cleanIp === "127.0.0.1" || this.matchesCidr(cleanIp, "127.0.0.0/8")) {
+              return true;
+            }
+          }
+          if (r === "lan" || r === "private") {
+            if (this.isPrivateOrLocal(cleanIp)) {
+              return true;
+            }
+          }
+          const cidr = r.includes("/") ? r : `${r}/32`;
+          if (this.matchesCidr(cleanIp, cidr)) {
+            return true;
+          }
+        }
+        return false;
+      }
+    };
+  }
+});
+
 // src/server/hub.ts
 import crypto from "node:crypto";
 var MeshHub;
@@ -7703,6 +7806,7 @@ var init_hub = __esm({
     init_dictionary();
     init_engine();
     init_storage();
+    init_subnet();
     MeshHub = class {
       clients = /* @__PURE__ */ new Map();
       // agentId -> ConnectedClient
@@ -7716,12 +7820,20 @@ var init_hub = __esm({
       maxInboxPerAgent = 50;
       totalMessagesRouted = 0;
       startTime = Date.now();
-      constructor(storage) {
+      allowedSubnets = [];
+      constructor(storage, allowedSubnets) {
         this.storage = storage || new InMemoryStorage(this.maxHistoryPerChannel);
+        this.allowedSubnets = allowedSubnets || [];
         this.storage.getTotalMessageCount().then((cnt) => {
           if (cnt > 0) this.totalMessagesRouted = cnt;
         }).catch(() => {
         });
+      }
+      setAllowedSubnets(subnets) {
+        this.allowedSubnets = subnets;
+      }
+      getAllowedSubnets() {
+        return this.allowedSubnets;
       }
       async initStorage(channel = "default") {
         try {
@@ -7742,13 +7854,19 @@ var init_hub = __esm({
       getLockManager() {
         return this.lockManager;
       }
-      handleConnection(ws) {
+      handleConnection(ws, req) {
         let currentAgentId = null;
+        const clientIp = req?.socket?.remoteAddress || req?.headers["x-forwarded-for"]?.split(",")[0] || "127.0.0.1";
+        if (!SubnetGuard.isAllowed(clientIp, this.allowedSubnets)) {
+          console.warn(`[MeshHub] \u26D4 Connection rejected from ${clientIp}: outside authorized subnet policy.`);
+          ws.close(4003, "Subnet policy violation");
+          return;
+        }
         ws.on("message", (raw) => {
           try {
             const text = typeof raw === "string" ? raw : raw.toString("utf8");
             const packet = JSON.parse(text);
-            this.processPacket(ws, packet, (id) => {
+            this.processPacket(ws, packet, clientIp, (id) => {
               currentAgentId = id;
             });
           } catch (err) {
@@ -7767,7 +7885,7 @@ var init_hub = __esm({
           console.error(`[MeshHub] Socket error for agent ${currentAgentId || "unknown"}:`, err);
         });
       }
-      processPacket(ws, packet, setAgentId) {
+      processPacket(ws, packet, clientIp, setAgentId) {
         switch (packet.type) {
           case "register": {
             const channel = packet.channel || "default";
@@ -7786,7 +7904,9 @@ var init_hub = __esm({
               connectedAt: Date.now(),
               lastSeen: Date.now(),
               gibberlinkCapable: rawAgent.gibberlinkCapable ?? true,
-              dialectVersion: rawAgent.dialectVersion || DIALECT_V1.version
+              dialectVersion: rawAgent.dialectVersion || DIALECT_V1.version,
+              branch: rawAgent.branch || "main",
+              subnet: clientIp
             };
             const existing = this.clients.get(id);
             if (existing && existing.ws !== ws) {
@@ -7942,6 +8062,9 @@ var init_hub = __esm({
               to: packet.to,
               content: packet.content,
               timestamp: Date.now(),
+              isAck: packet.isAck,
+              replyExpected: packet.replyExpected,
+              branch: client.agent.branch,
               metadata: packet.metadata
             };
             this.addToInbox(packet.to, msg);
@@ -7952,10 +8075,20 @@ var init_hub = __esm({
               });
             }
             this.send(ws, {
-              type: "direct_message",
-              message: msg
+              type: "direct_message_sent",
+              messageId: msg.id,
+              to: packet.to,
+              timestamp: Date.now()
             });
             console.log(`[MeshHub] DM [${client.agent.name} -> ${targetClient?.agent.name || packet.to}]: ${packet.content}`);
+            break;
+          }
+          case "disconnect": {
+            const client = this.getClientByWs(ws);
+            if (client) {
+              console.log(`[MeshHub] Agent ${client.agent.name} initiated graceful disconnect: ${packet.reason || "client_shutdown"}`);
+              this.handleDisconnect(client.agent.id);
+            }
             break;
           }
           case "gibberlink_signal": {
@@ -8281,6 +8414,48 @@ var init_hub = __esm({
         });
         return msg;
       }
+      createInvite(options = {}) {
+        const channel = options.channel || "default";
+        const branch = options.branch || "main";
+        const host = options.host || "localhost:4488";
+        const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
+        const cleanHost = host.replace(/^(http|https|ws|wss):\/\//, "");
+        const wsScheme = host.startsWith("https") ? "wss" : "ws";
+        const httpScheme = host.startsWith("https") ? "https" : "http";
+        const randomSuffix = crypto.randomBytes(2).toString("hex").toUpperCase();
+        const branchTag = branch.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 8).toUpperCase() || "SYNC";
+        const code = `XT-${randomSuffix}-${branchTag}`;
+        const subnetLock = options.allowedSubnet || (isLocal ? "192.168.0.0/16" : "any");
+        return {
+          code,
+          channel,
+          branch,
+          subnetLock,
+          options: {
+            centralRelay: {
+              name: "Central Hosted Bridge (Key / Code / Link)",
+              code,
+              joinLink: `${httpScheme}://${cleanHost}/?room=${code}&branch=${branch}`,
+              wsUrl: `${wsScheme}://${cleanHost}`,
+              agentPrompt: `Join CrossTalk session ${code} on branch ${branch}`,
+              cliCommand: `crosstalk join ${code} --branch ${branch}`
+            },
+            openMesh: {
+              name: "Open Mesh (Discovery Topic Rendezvous)",
+              topic: `mesh://open/repo-${branchTag.toLowerCase()}`,
+              agentPrompt: `Connect to open mesh channel 'team-${branchTag.toLowerCase()}' on branch ${branch}`,
+              cliCommand: `crosstalk up team-${branchTag.toLowerCase()} --mode mesh --branch ${branch}`
+            },
+            directP2P: {
+              name: "Direct Computer-to-Computer (Subnet Locked)",
+              address: `${wsScheme}://${cleanHost}`,
+              subnetLock,
+              agentPrompt: `Connect directly to peer ${wsScheme}://${cleanHost} on branch ${branch} with subnet lock ${subnetLock}`,
+              cliCommand: `crosstalk join ${wsScheme}://${cleanHost} --branch ${branch} --subnet ${subnetLock}`
+            }
+          }
+        };
+      }
     };
   }
 });
@@ -8410,9 +8585,9 @@ import http from "node:http";
 import fs from "node:fs";
 import path2 from "node:path";
 import { fileURLToPath } from "node:url";
-async function startServer(port = 4488, host = "0.0.0.0", customStorage) {
+async function startServer(port = 4488, host = "0.0.0.0", customStorage, allowedSubnets) {
   const storage = customStorage || await createMeshStorage();
-  const hub = new MeshHub(storage);
+  const hub = new MeshHub(storage, allowedSubnets);
   await hub.initStorage("default");
   const webDir = path2.join(__dirname, "web");
   const server = http.createServer((req, res) => {
@@ -8459,6 +8634,16 @@ async function startServer(port = 4488, host = "0.0.0.0", customStorage) {
       const messages = hub.getRecentMessages(channel).slice(-limit);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ channel, count: messages.length, limit, messages }, null, 2));
+      return;
+    }
+    if (pathname === "/api/invite") {
+      const channel = url.searchParams.get("channel") || "default";
+      const branch = url.searchParams.get("branch") || "main";
+      const allowedSubnet = url.searchParams.get("subnet") || void 0;
+      const host2 = req.headers.host || `localhost:${port}`;
+      const invite = hub.createInvite({ channel, branch, allowedSubnet, host: host2 });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(invite, null, 2));
       return;
     }
     if (pathname === "/api/broadcast" && req.method === "POST") {
@@ -8524,8 +8709,8 @@ async function startServer(port = 4488, host = "0.0.0.0", customStorage) {
     res.end("Not Found");
   });
   const wss = new import_websocket_server.default({ server });
-  wss.on("connection", (ws) => {
-    hub.handleConnection(ws);
+  wss.on("connection", (ws, req) => {
+    hub.handleConnection(ws, req);
   });
   server.listen(port, host, () => {
     console.log(`
@@ -8632,6 +8817,14 @@ var BinaryCodec = class {
 // src/client/sdk.ts
 init_dictionary();
 init_engine();
+import { execSync } from "node:child_process";
+function detectGitBranch() {
+  try {
+    return execSync("git rev-parse --abbrev-ref HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || "main";
+  } catch {
+    return "main";
+  }
+}
 var CrossTalkClient = class extends EventEmitter {
   ws = null;
   options;
@@ -8642,6 +8835,7 @@ var CrossTalkClient = class extends EventEmitter {
   pendingLockResolvers = /* @__PURE__ */ new Map();
   pendingStateResolver = null;
   pendingInboxResolver = null;
+  recentMessages = [];
   constructor(options) {
     super();
     this.options = {
@@ -8654,7 +8848,9 @@ var CrossTalkClient = class extends EventEmitter {
       currentTask: options.currentTask || "Idle",
       autoHeartbeat: options.autoHeartbeat !== false,
       gibberlinkCapable: options.gibberlinkCapable !== false,
-      dialectVersion: options.dialectVersion || DIALECT_V1.version
+      dialectVersion: options.dialectVersion || DIALECT_V1.version,
+      branch: options.branch || detectGitBranch(),
+      sessionKey: options.sessionKey || ""
     };
   }
   get agentId() {
@@ -8670,6 +8866,7 @@ var CrossTalkClient = class extends EventEmitter {
         this.sendPacket({
           type: "register",
           channel: this.options.channel,
+          sessionKey: this.options.sessionKey,
           agent: {
             name: this.options.name,
             role: this.options.role,
@@ -8677,7 +8874,8 @@ var CrossTalkClient = class extends EventEmitter {
             workspace: this.options.workspace,
             currentTask: this.options.currentTask,
             gibberlinkCapable: this.options.gibberlinkCapable,
-            dialectVersion: this.options.dialectVersion
+            dialectVersion: this.options.dialectVersion,
+            branch: this.options.branch
           }
         });
       });
@@ -8748,7 +8946,13 @@ var CrossTalkClient = class extends EventEmitter {
         this.emit("broadcast", packet.message);
         break;
       case "direct_message":
+        if (packet.message?.from?.id && packet.message.from.id === this.myAgentId) {
+          return;
+        }
         this.emit("direct_message", packet.message);
+        break;
+      case "direct_message_sent":
+        this.emit("direct_message_sent", packet);
         break;
       case "gibberlink_signal":
         const decoded = GibberlinkEngine.decode(packet.signal);
@@ -8837,14 +9041,6 @@ var CrossTalkClient = class extends EventEmitter {
   humanToShorthand(english) {
     return DialectEngine.fromHuman(english);
   }
-  sendDirectMessage(toAgentId, content, metadata) {
-    this.sendPacket({
-      type: "direct_message",
-      to: toAgentId,
-      content,
-      metadata
-    });
-  }
   sendGibberlinkSignal(payload, mode = "audible_fast", to) {
     const signal = GibberlinkEngine.encode(payload, mode);
     this.sendPacket({
@@ -8919,12 +9115,55 @@ var CrossTalkClient = class extends EventEmitter {
       }, 3e3);
     });
   }
-  disconnect() {
-    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+  shouldSuppressAutoReply(msg) {
+    if (msg.isAck || msg.replyExpected === false) return true;
+    const content = (msg.content || "").trim().toLowerCase();
+    if (content.startsWith("ack:") || content.startsWith("acknowledged:") || content.startsWith("\u5DF2\u6536\u5230")) {
+      return true;
+    }
+    const now = Date.now();
+    this.recentMessages = this.recentMessages.filter((m) => now - m.time < 3500);
+    const count = this.recentMessages.filter((m) => m.content === content).length;
+    this.recentMessages.push({ content, time: now });
+    if (count >= 2) {
+      console.warn(`[CrossTalk Client] \u{1F501} Circuit breaker: suppressed duplicate ping-pong reply for: "${content.slice(0, 30)}..."`);
+      return true;
+    }
+    return false;
+  }
+  sendDirectMessage(toAgentId, content, options) {
+    const isOptionsObj = options && ("isAck" in options || "replyExpected" in options || "metadata" in options);
+    const isAck = isOptionsObj ? options.isAck : false;
+    const replyExpected = isOptionsObj ? options.replyExpected ?? !isAck : true;
+    const metadata = isOptionsObj ? options.metadata : options;
+    this.sendPacket({
+      type: "direct_message",
+      to: toAgentId,
+      content,
+      isAck,
+      replyExpected,
+      metadata
+    });
+  }
+  async disconnect(reason = "client_exit") {
+    if (this.ws && this.isConnected) {
+      try {
+        this.sendPacket({ type: "disconnect", reason });
+      } catch {
+      }
+    }
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close(1e3, reason);
+      } catch {
+      }
       this.ws = null;
     }
+    this.isConnected = false;
   }
   sendPacket(packet) {
     if (this.ws && this.ws.readyState === import_websocket.default.OPEN) {
@@ -8941,11 +9180,12 @@ init_colorette();
 import readline from "node:readline";
 var program2 = new Command();
 program2.name("crosstalk").description("Real-time WebSocket mesh network for AI agent inter-communication, Gibberlink signals & XDialect").version("1.0.0");
-program2.command("serve").description("Start the CrossTalk mesh hub server and web dashboard").option("-p, --port <number>", "Port to listen on", "4488").option("-h, --host <host>", "Host address to bind (0.0.0.0 for LAN/Wi-Fi)", "0.0.0.0").action((options) => {
+program2.command("serve").description("Start the CrossTalk mesh hub server and web dashboard").option("-p, --port <number>", "Port to listen on", "4488").option("-h, --host <host>", "Host address to bind (0.0.0.0 for LAN/Wi-Fi)", "0.0.0.0").option("-s, --subnet <cidr>", "Lock sockets to specific subnet (e.g. 192.168.1.0/24, lan, local)").action((options) => {
   const port = parseInt(options.port, 10);
-  startServer(port, options.host);
+  const subnets = options.subnet ? [options.subnet] : void 0;
+  startServer(port, options.host, void 0, subnets);
 });
-program2.command("up [channel]").alias("join").description("Join a socket mesh channel in a single line (auto-spawns local socket if not yet running)").option("-n, --name <name>", "Agent display name", `Agent-${Math.floor(Math.random() * 9e3 + 1e3)}`).option("-r, --role <role>", "Agent role", "developer").option("-u, --url <url>", "Server WebSocket URL", "ws://localhost:4488").option("-p, --port <number>", "Port to bind if auto-spawning", "4488").action(async (channel = "default", options) => {
+program2.command("up [channel]").description("Join a socket mesh channel in a single line (auto-spawns local socket if not yet running)").option("-n, --name <name>", "Agent display name", `Agent-${Math.floor(Math.random() * 9e3 + 1e3)}`).option("-r, --role <role>", "Agent role", "developer").option("-b, --branch <branch>", "Git branch name (auto-detected from git if omitted)").option("-u, --url <url>", "Server WebSocket URL", "ws://localhost:4488").option("-s, --subnet <cidr>", "Subnet lock CIDR (e.g. 192.168.1.0/24, lan, local)").option("-p, --port <number>", "Port to bind if auto-spawning", "4488").action(async (channel = "default", options) => {
   const port = parseInt(options.port, 10);
   console.log(bold(cyan(`
 \u26A1 Connecting to CrossTalk socket on #${channel}...`)));
@@ -8957,12 +9197,14 @@ program2.command("up [channel]").alias("join").description("Join a socket mesh c
       name: options.name,
       role: options.role,
       environment: "terminal",
+      branch: options.branch,
       currentTask: "Interactive session"
     });
     await client.connect();
   } catch {
     console.log(yellow(`[CrossTalk] No socket hub detected at ${options.url}. Auto-spawning local socket mesh...`));
-    startServer(port, "0.0.0.0");
+    const subnets = options.subnet ? [options.subnet] : void 0;
+    startServer(port, "0.0.0.0", void 0, subnets);
     await new Promise((r) => setTimeout(r, 400));
     client = new CrossTalkClient({
       url: options.url,
@@ -8970,6 +9212,7 @@ program2.command("up [channel]").alias("join").description("Join a socket mesh c
       name: options.name,
       role: options.role,
       environment: "terminal",
+      branch: options.branch,
       currentTask: "Interactive session"
     });
     await client.connect();
@@ -9054,6 +9297,147 @@ program2.command("up [channel]").alias("join").description("Join a socket mesh c
     }
     rl.prompt();
   });
+  const keepalive = setInterval(() => {
+  }, 15e3);
+  const shutdown = async () => {
+    clearInterval(keepalive);
+    console.log(yellow("\n[CrossTalk] Disconnecting gracefully..."));
+    await client.disconnect("user_exit");
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+});
+program2.command("invite").alias("pair").alias("share").description("Generate cross-branch agent pairing invite with 3 communication options").option("-c, --channel <channel>", "Channel name", "default").option("-b, --branch <branch>", "My git branch name (auto-detected if omitted)").option("-s, --subnet <cidr>", "Subnet boundary lock (e.g. 192.168.1.0/24, lan, local)").option("-u, --url <url>", "Hub URL or host address", "localhost:4488").action(async (options) => {
+  const { execSync: execSync2 } = await import("node:child_process");
+  let branch = options.branch;
+  if (!branch) {
+    try {
+      branch = execSync2("git rev-parse --abbrev-ref HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || "main";
+    } catch {
+      branch = "main";
+    }
+  }
+  const host = options.url.replace(/^(http|https|ws|wss):\/\//, "");
+  const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
+  const subnetLock = options.subnet || (isLocal ? "192.168.0.0/16" : "any");
+  const crypto2 = await import("node:crypto");
+  const randomSuffix = crypto2.randomBytes(2).toString("hex").toUpperCase();
+  const branchTag = branch.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 8).toUpperCase() || "SYNC";
+  const code = `XT-${randomSuffix}-${branchTag}`;
+  console.log(bold(cyan(`
+\u26A1 CrossTalk Agent Pairing & Cross-Branch Bridge`)));
+  console.log(`${gray("My Active Branch:")} ${bold(green(branch))}
+`);
+  console.log(`Give your friend (or their agent) ${bold("ONE")} of these 3 options to connect:
+`);
+  console.log(bold(cyan(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`)));
+  console.log(bold(`Option 1: Central Hosted Relay (Zero-Config \xB7 Recommended)`));
+  console.log(bold(cyan(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`)));
+  console.log(`  \u{1F511} Session Code:  ${bold(yellow(code))}`);
+  console.log(`  \u{1F517} Web Join Link: ${cyan(`http://${host}/?room=${code}&branch=${branch}`)}
+`);
+  console.log(`  \u{1F4AC} ${bold("What to tell your friend's agent in chat:")}`);
+  console.log(`     ${green(`"Join CrossTalk session ${code} on branch feature-ui"`)}
+`);
+  console.log(`  \u{1F4BB} ${bold("What your friend runs in terminal:")}`);
+  console.log(`     ${cyan(`crosstalk join ${code} --branch feature-ui`)}
+`);
+  console.log(bold(cyan(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`)));
+  console.log(bold(`Option 2: Open Mesh (Distributed Discovery Rendezvous)`));
+  console.log(bold(cyan(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`)));
+  console.log(`  \u{1F310} Topic:         ${yellow(`mesh://open/repo-${branchTag.toLowerCase()}`)}
+`);
+  console.log(`  \u{1F4AC} ${bold("What to tell your friend's agent in chat:")}`);
+  console.log(`     ${green(`"Connect to open mesh channel 'team-${branchTag.toLowerCase()}' on branch feature-ui"`)}
+`);
+  console.log(`  \u{1F4BB} ${bold("What your friend runs in terminal:")}`);
+  console.log(`     ${cyan(`crosstalk up team-${branchTag.toLowerCase()} --mode mesh --branch feature-ui`)}
+`);
+  console.log(bold(cyan(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`)));
+  console.log(bold(`Option 3: Direct Computer-to-Computer (Subnet Locked P2P)`));
+  console.log(bold(cyan(`\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`)));
+  console.log(`  \u{1F4E1} Direct Socket: ${cyan(`ws://${host}`)}`);
+  console.log(`  \u{1F512} Subnet Lock:   ${yellow(subnetLock)} ${gray("(Strict boundary: external packets rejected)")}
+`);
+  console.log(`  \u{1F4AC} ${bold("What to tell your friend's agent in chat:")}`);
+  console.log(`     ${green(`"Connect directly to peer ws://${host} on branch feature-ui with subnet lock ${subnetLock}"`)}
+`);
+  console.log(`  \u{1F4BB} ${bold("What your friend runs in terminal:")}`);
+  console.log(`     ${cyan(`crosstalk join ws://${host} --branch feature-ui --subnet ${subnetLock}`)}
+`);
+});
+program2.command("join <target>").description("Join a CrossTalk session using an invite code (XT-XXXX), URL, or direct address").option("-n, --name <name>", "Agent display name", `Agent-${Math.floor(Math.random() * 9e3 + 1e3)}`).option("-r, --role <role>", "Agent role", "developer").option("-b, --branch <branch>", "My git branch name (auto-detected if omitted)").option("-s, --subnet <cidr>", "Subnet lock CIDR", "any").action(async (target, options) => {
+  let url = "ws://localhost:4488";
+  let channel = "default";
+  if (target.startsWith("XT-")) {
+    channel = target;
+    console.log(bold(cyan(`
+\u26A1 Joining session via Invite Code ${bold(yellow(target))}...`)));
+  } else if (target.startsWith("ws://") || target.startsWith("wss://")) {
+    url = target;
+    console.log(bold(cyan(`
+\u26A1 Connecting directly to peer socket at ${cyan(url)}...`)));
+  } else if (target.startsWith("http://") || target.startsWith("https://")) {
+    try {
+      const parsed = new URL(target);
+      url = (parsed.protocol === "https:" ? "wss://" : "ws://") + parsed.host;
+      channel = parsed.searchParams.get("room") || "default";
+      console.log(bold(cyan(`
+\u26A1 Joining session via URL ${cyan(target)}...`)));
+    } catch {
+      channel = target;
+    }
+  } else {
+    channel = target;
+  }
+  const client = new CrossTalkClient({
+    url,
+    channel,
+    name: options.name,
+    role: options.role,
+    branch: options.branch,
+    environment: "terminal",
+    currentTask: `Active in session #${channel}`
+  });
+  try {
+    await client.connect();
+    console.log(bold(green(`\u2714 Successfully linked to CrossTalk session [${channel}] on branch [${client["options"]?.branch || "main"}]!`)));
+    console.log(gray("Cooperative file locks and peer notifications active.\n"));
+    client.on("broadcast", (msg) => {
+      if (!client.shouldSuppressAutoReply(msg) && msg.from?.id !== client.agentId) {
+        const senderBranch = msg.branch ? ` (${msg.branch})` : "";
+        console.log(`\u{1F4E2} ${bold(cyan((msg.from?.name || "Peer") + senderBranch))}: ${msg.content}`);
+      }
+    });
+    client.on("direct_message", (msg) => {
+      if (!client.shouldSuppressAutoReply(msg) && msg.from?.id !== client.agentId) {
+        const senderBranch = msg.branch ? ` (${msg.branch})` : "";
+        console.log(`\u{1F512} ${bold(magenta(`DM from ${(msg.from?.name || "Peer") + senderBranch}`))}: ${msg.content}`);
+      }
+    });
+    client.on("lock_acquired", (lock) => {
+      const branchTag = lock.branch ? ` [branch: ${lock.branch}]` : "";
+      console.log(`\u{1F512} ${yellow(`LOCK ACQUIRED:`)} [${lock.file}] by ${bold(lock.holderName)}${branchTag} ("${lock.reason}")`);
+    });
+    client.on("lock_released", (data) => {
+      console.log(`\u{1F513} ${green(`LOCK RELEASED:`)} [${data.file}] by ${bold(data.releasedBy)}`);
+    });
+    const keepalive = setInterval(() => {
+    }, 15e3);
+    const shutdown = async () => {
+      clearInterval(keepalive);
+      console.log(yellow("\n[CrossTalk] Disconnecting gracefully..."));
+      await client.disconnect("user_exit");
+      process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  } catch (err) {
+    console.error(red(`
+\u2716 Connection failed: ${err.message}`));
+    process.exit(1);
+  }
 });
 program2.command("who").description("List all active agents and file locks on the mesh").option("-u, --url <url>", "Server WebSocket URL", "ws://localhost:4488").action(async (options) => {
   const client = new CrossTalkClient({

@@ -9,9 +9,9 @@ import { createMeshStorage } from './storage.js';
 import { green, cyan, bold } from 'colorette';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-export async function startServer(port = 4488, host = '0.0.0.0', customStorage) {
+export async function startServer(port = 4488, host = '0.0.0.0', customStorage, allowedSubnets) {
     const storage = customStorage || await createMeshStorage();
-    const hub = new MeshHub(storage);
+    const hub = new MeshHub(storage, allowedSubnets);
     await hub.initStorage('default');
     const webDir = path.join(__dirname, 'web');
     const server = http.createServer((req, res) => {
@@ -63,6 +63,17 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage) 
             const messages = hub.getRecentMessages(channel).slice(-limit);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ channel, count: messages.length, limit, messages }, null, 2));
+            return;
+        }
+        // Agent Pairing & Invite Generator (3 Communication Options)
+        if (pathname === '/api/invite') {
+            const channel = url.searchParams.get('channel') || 'default';
+            const branch = url.searchParams.get('branch') || 'main';
+            const allowedSubnet = url.searchParams.get('subnet') || undefined;
+            const host = req.headers.host || `localhost:${port}`;
+            const invite = hub.createInvite({ channel, branch, allowedSubnet, host });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(invite, null, 2));
             return;
         }
         if (pathname === '/api/broadcast' && req.method === 'POST') {
@@ -129,8 +140,8 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage) 
     });
     // Attach WebSocket Server
     const wss = new WebSocketServer({ server });
-    wss.on('connection', (ws) => {
-        hub.handleConnection(ws);
+    wss.on('connection', (ws, req) => {
+        hub.handleConnection(ws, req);
     });
     server.listen(port, host, () => {
         console.log(`\n${bold(green('⚡ CrossTalk Mesh Network Server Running!'))}`);

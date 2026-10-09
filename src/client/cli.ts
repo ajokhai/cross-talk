@@ -20,19 +20,22 @@ program
   .description('Start the CrossTalk mesh hub server and web dashboard')
   .option('-p, --port <number>', 'Port to listen on', '4488')
   .option('-h, --host <host>', 'Host address to bind (0.0.0.0 for LAN/Wi-Fi)', '0.0.0.0')
+  .option('-s, --subnet <cidr>', 'Lock sockets to specific subnet (e.g. 192.168.1.0/24, lan, local)')
   .action((options) => {
     const port = parseInt(options.port, 10);
-    startServer(port, options.host);
+    const subnets = options.subnet ? [options.subnet] : undefined;
+    startServer(port, options.host, undefined, subnets);
   });
 
-// Single-line command: up / join (Auto-joins or auto-creates socket mesh on the spot)
+// Single-line command: up (Auto-joins or auto-creates socket mesh on the spot)
 program
   .command('up [channel]')
-  .alias('join')
   .description('Join a socket mesh channel in a single line (auto-spawns local socket if not yet running)')
   .option('-n, --name <name>', 'Agent display name', `Agent-${Math.floor(Math.random() * 9000 + 1000)}`)
   .option('-r, --role <role>', 'Agent role', 'developer')
+  .option('-b, --branch <branch>', 'Git branch name (auto-detected from git if omitted)')
   .option('-u, --url <url>', 'Server WebSocket URL', 'ws://localhost:4488')
+  .option('-s, --subnet <cidr>', 'Subnet lock CIDR (e.g. 192.168.1.0/24, lan, local)')
   .option('-p, --port <number>', 'Port to bind if auto-spawning', '4488')
   .action(async (channel = 'default', options) => {
     const port = parseInt(options.port, 10);
@@ -46,12 +49,14 @@ program
         name: options.name,
         role: options.role,
         environment: 'terminal',
+        branch: options.branch,
         currentTask: 'Interactive session'
       });
       await client.connect();
     } catch {
       console.log(yellow(`[CrossTalk] No socket hub detected at ${options.url}. Auto-spawning local socket mesh...`));
-      startServer(port, '0.0.0.0');
+      const subnets = options.subnet ? [options.subnet] : undefined;
+      startServer(port, '0.0.0.0', undefined, subnets);
       await new Promise(r => setTimeout(r, 400));
       client = new CrossTalkClient({
         url: options.url,
@@ -59,6 +64,7 @@ program
         name: options.name,
         role: options.role,
         environment: 'terminal',
+        branch: options.branch,
         currentTask: 'Interactive session'
       });
       await client.connect();
@@ -147,6 +153,164 @@ program
       }
       rl.prompt();
     });
+
+    const keepalive = setInterval(() => {}, 15000);
+    const shutdown = async () => {
+      clearInterval(keepalive);
+      console.log(yellow('\n[CrossTalk] Disconnecting gracefully...'));
+      await client.disconnect('user_exit');
+      process.exit(0);
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  });
+
+// Command: invite / pair / share
+program
+  .command('invite')
+  .alias('pair')
+  .alias('share')
+  .description('Generate cross-branch agent pairing invite with 3 communication options')
+  .option('-c, --channel <channel>', 'Channel name', 'default')
+  .option('-b, --branch <branch>', 'My git branch name (auto-detected if omitted)')
+  .option('-s, --subnet <cidr>', 'Subnet boundary lock (e.g. 192.168.1.0/24, lan, local)')
+  .option('-u, --url <url>', 'Hub URL or host address', 'localhost:4488')
+  .action(async (options) => {
+    const { execSync } = await import('node:child_process');
+    let branch = options.branch;
+    if (!branch) {
+      try {
+        branch = execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'main';
+      } catch {
+        branch = 'main';
+      }
+    }
+
+    const host = options.url.replace(/^(http|https|ws|wss):\/\//, '');
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    const subnetLock = options.subnet || (isLocal ? '192.168.0.0/16' : 'any');
+
+    const crypto = await import('node:crypto');
+    const randomSuffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const branchTag = branch.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8).toUpperCase() || 'SYNC';
+    const code = `XT-${randomSuffix}-${branchTag}`;
+
+    console.log(bold(cyan(`\n⚡ CrossTalk Agent Pairing & Cross-Branch Bridge`)));
+    console.log(`${gray('My Active Branch:')} ${bold(green(branch))}\n`);
+    console.log(`Give your friend (or their agent) ${bold('ONE')} of these 3 options to connect:\n`);
+
+    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
+    console.log(bold(`Option 1: Central Hosted Relay (Zero-Config · Recommended)`));
+    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
+    console.log(`  🔑 Session Code:  ${bold(yellow(code))}`);
+    console.log(`  🔗 Web Join Link: ${cyan(`http://${host}/?room=${code}&branch=${branch}`)}\n`);
+    console.log(`  💬 ${bold('What to tell your friend\'s agent in chat:')}`);
+    console.log(`     ${green(`"Join CrossTalk session ${code} on branch feature-ui"`)}\n`);
+    console.log(`  💻 ${bold('What your friend runs in terminal:')}`);
+    console.log(`     ${cyan(`crosstalk join ${code} --branch feature-ui`)}\n`);
+
+    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
+    console.log(bold(`Option 2: Open Mesh (Distributed Discovery Rendezvous)`));
+    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
+    console.log(`  🌐 Topic:         ${yellow(`mesh://open/repo-${branchTag.toLowerCase()}`)}\n`);
+    console.log(`  💬 ${bold('What to tell your friend\'s agent in chat:')}`);
+    console.log(`     ${green(`"Connect to open mesh channel 'team-${branchTag.toLowerCase()}' on branch feature-ui"`)}\n`);
+    console.log(`  💻 ${bold('What your friend runs in terminal:')}`);
+    console.log(`     ${cyan(`crosstalk up team-${branchTag.toLowerCase()} --mode mesh --branch feature-ui`)}\n`);
+
+    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
+    console.log(bold(`Option 3: Direct Computer-to-Computer (Subnet Locked P2P)`));
+    console.log(bold(cyan(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)));
+    console.log(`  📡 Direct Socket: ${cyan(`ws://${host}`)}`);
+    console.log(`  🔒 Subnet Lock:   ${yellow(subnetLock)} ${gray('(Strict boundary: external packets rejected)')}\n`);
+    console.log(`  💬 ${bold('What to tell your friend\'s agent in chat:')}`);
+    console.log(`     ${green(`"Connect directly to peer ws://${host} on branch feature-ui with subnet lock ${subnetLock}"`)}\n`);
+    console.log(`  💻 ${bold('What your friend runs in terminal:')}`);
+    console.log(`     ${cyan(`crosstalk join ws://${host} --branch feature-ui --subnet ${subnetLock}`)}\n`);
+  });
+
+// Command: join <target>
+program
+  .command('join <target>')
+  .description('Join a CrossTalk session using an invite code (XT-XXXX), URL, or direct address')
+  .option('-n, --name <name>', 'Agent display name', `Agent-${Math.floor(Math.random() * 9000 + 1000)}`)
+  .option('-r, --role <role>', 'Agent role', 'developer')
+  .option('-b, --branch <branch>', 'My git branch name (auto-detected if omitted)')
+  .option('-s, --subnet <cidr>', 'Subnet lock CIDR', 'any')
+  .action(async (target, options) => {
+    let url = 'ws://localhost:4488';
+    let channel = 'default';
+
+    if (target.startsWith('XT-')) {
+      channel = target;
+      console.log(bold(cyan(`\n⚡ Joining session via Invite Code ${bold(yellow(target))}...`)));
+    } else if (target.startsWith('ws://') || target.startsWith('wss://')) {
+      url = target;
+      console.log(bold(cyan(`\n⚡ Connecting directly to peer socket at ${cyan(url)}...`)));
+    } else if (target.startsWith('http://') || target.startsWith('https://')) {
+      try {
+        const parsed = new URL(target);
+        url = (parsed.protocol === 'https:' ? 'wss://' : 'ws://') + parsed.host;
+        channel = parsed.searchParams.get('room') || 'default';
+        console.log(bold(cyan(`\n⚡ Joining session via URL ${cyan(target)}...`)));
+      } catch {
+        channel = target;
+      }
+    } else {
+      channel = target;
+    }
+
+    const client = new CrossTalkClient({
+      url,
+      channel,
+      name: options.name,
+      role: options.role,
+      branch: options.branch,
+      environment: 'terminal',
+      currentTask: `Active in session #${channel}`
+    });
+
+    try {
+      await client.connect();
+      console.log(bold(green(`✔ Successfully linked to CrossTalk session [${channel}] on branch [${client['options']?.branch || 'main'}]!`)));
+      console.log(gray('Cooperative file locks and peer notifications active.\n'));
+
+      client.on('broadcast', (msg) => {
+        if (!client.shouldSuppressAutoReply(msg) && msg.from?.id !== client.agentId) {
+          const senderBranch = msg.branch ? ` (${msg.branch})` : '';
+          console.log(`📢 ${bold(cyan((msg.from?.name || 'Peer') + senderBranch))}: ${msg.content}`);
+        }
+      });
+
+      client.on('direct_message', (msg) => {
+        if (!client.shouldSuppressAutoReply(msg) && msg.from?.id !== client.agentId) {
+          const senderBranch = msg.branch ? ` (${msg.branch})` : '';
+          console.log(`🔒 ${bold(magenta(`DM from ${(msg.from?.name || 'Peer') + senderBranch}`))}: ${msg.content}`);
+        }
+      });
+
+      client.on('lock_acquired', (lock) => {
+        const branchTag = lock.branch ? ` [branch: ${lock.branch}]` : '';
+        console.log(`🔒 ${yellow(`LOCK ACQUIRED:`)} [${lock.file}] by ${bold(lock.holderName)}${branchTag} ("${lock.reason}")`);
+      });
+
+      client.on('lock_released', (data) => {
+        console.log(`🔓 ${green(`LOCK RELEASED:`)} [${data.file}] by ${bold(data.releasedBy)}`);
+      });
+
+      const keepalive = setInterval(() => {}, 15000);
+      const shutdown = async () => {
+        clearInterval(keepalive);
+        console.log(yellow('\n[CrossTalk] Disconnecting gracefully...'));
+        await client.disconnect('user_exit');
+        process.exit(0);
+      };
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
+    } catch (err: any) {
+      console.error(red(`\n✖ Connection failed: ${err.message}`));
+      process.exit(1);
+    }
   });
 
 // Command: who

@@ -11,9 +11,14 @@ import { blue, green, yellow, cyan, bold } from 'colorette';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export async function startServer(port: number = 4488, host: string = '0.0.0.0', customStorage?: IMeshStorage) {
+export async function startServer(
+  port: number = 4488,
+  host: string = '0.0.0.0',
+  customStorage?: IMeshStorage,
+  allowedSubnets?: string[]
+) {
   const storage = customStorage || await createMeshStorage();
-  const hub = new MeshHub(storage);
+  const hub = new MeshHub(storage, allowedSubnets);
   await hub.initStorage('default');
   const webDir = path.join(__dirname, 'web');
 
@@ -73,6 +78,18 @@ export async function startServer(port: number = 4488, host: string = '0.0.0.0',
       const messages = hub.getRecentMessages(channel).slice(-limit);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ channel, count: messages.length, limit, messages }, null, 2));
+      return;
+    }
+
+    // Agent Pairing & Invite Generator (3 Communication Options)
+    if (pathname === '/api/invite') {
+      const channel = url.searchParams.get('channel') || 'default';
+      const branch = url.searchParams.get('branch') || 'main';
+      const allowedSubnet = url.searchParams.get('subnet') || undefined;
+      const host = req.headers.host || `localhost:${port}`;
+      const invite = hub.createInvite({ channel, branch, allowedSubnet, host });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(invite, null, 2));
       return;
     }
 
@@ -144,8 +161,8 @@ export async function startServer(port: number = 4488, host: string = '0.0.0.0',
 
   // Attach WebSocket Server
   const wss = new WebSocketServer({ server });
-  wss.on('connection', (ws) => {
-    hub.handleConnection(ws);
+  wss.on('connection', (ws, req) => {
+    hub.handleConnection(ws, req);
   });
 
   server.listen(port, host, () => {

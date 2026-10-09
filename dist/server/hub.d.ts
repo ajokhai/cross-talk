@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import { AgentInfo, MessageEvent, ServerPacket } from './types.js';
 import { LockManager } from './locks.js';
 import { IMeshStorage } from './storage.js';
+import http from 'node:http';
 export declare class MeshHub {
     private clients;
     private lockManager;
@@ -12,11 +13,14 @@ export declare class MeshHub {
     private maxInboxPerAgent;
     private totalMessagesRouted;
     private startTime;
-    constructor(storage?: IMeshStorage);
+    private allowedSubnets;
+    constructor(storage?: IMeshStorage, allowedSubnets?: string[]);
+    setAllowedSubnets(subnets: string[]): void;
+    getAllowedSubnets(): string[];
     initStorage(channel?: string): Promise<void>;
     getStorage(): IMeshStorage;
     getLockManager(): LockManager;
-    handleConnection(ws: WebSocket): void;
+    handleConnection(ws: WebSocket, req?: http.IncomingMessage): void;
     private processPacket;
     private handleDisconnect;
     broadcastToChannel(channel: string, packet: ServerPacket, excludeIds?: string[]): void;
@@ -41,4 +45,38 @@ export declare class MeshHub {
     private addToInbox;
     recordAndBroadcastSystemMessage(channel: string, content: string): void;
     injectBroadcast(channel: string, fromName: string, content: string, role?: string): MessageEvent;
+    createInvite(options?: {
+        channel?: string;
+        branch?: string;
+        allowedSubnet?: string;
+        host?: string;
+    }): {
+        code: string;
+        channel: string;
+        branch: string;
+        subnetLock: string;
+        options: {
+            centralRelay: {
+                name: string;
+                code: string;
+                joinLink: string;
+                wsUrl: string;
+                agentPrompt: string;
+                cliCommand: string;
+            };
+            openMesh: {
+                name: string;
+                topic: string;
+                agentPrompt: string;
+                cliCommand: string;
+            };
+            directP2P: {
+                name: string;
+                address: string;
+                subnetLock: string;
+                agentPrompt: string;
+                cliCommand: string;
+            };
+        };
+    };
 }

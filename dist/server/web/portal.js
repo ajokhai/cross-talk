@@ -1,10 +1,13 @@
 /**
  * CrossTalk Portal & Telemetry Hub
- * Handles interactive socket address copy/paste/ping, XDialect compiler playground,
- * bilingual (English/Chinese) translation, live mesh metrics, and context synchronization.
+ * Handles Cal.com-style interactive agent pairing studio across branches/subnets,
+ * WebSocket copy/ping, XDialect compiler playground, bilingual translation,
+ * and live bounded ring-buffer synchronization.
  */
 
 let currentLanguage = 'en';
+let currentPairingOption = 'relay';
+let generatedSessionCode = '';
 
 // Toast notification helper
 function showToast(message, isSuccess = true) {
@@ -16,7 +19,7 @@ function showToast(message, isSuccess = true) {
 
   toastMsg.textContent = message;
   toastIcon.textContent = isSuccess ? '✔' : '✖';
-  toastIcon.style.color = isSuccess ? 'var(--accent-emerald, #10b981)' : 'var(--accent-rose, #f43f5e)';
+  toastIcon.style.color = isSuccess ? 'var(--cal-emerald, #10b981)' : 'var(--cal-rose, #f43f5e)';
 
   toast.classList.add('show');
   clearTimeout(toast._timeout);
@@ -106,13 +109,11 @@ function initSocketControls() {
     }
     window.copyText(addr, `Copied endpoint: ${addr}`);
     
-    const span = btnCopy.querySelector('span');
-    const originalText = span ? span.textContent : 'Copy Address';
-    if (span) span.textContent = 'Copied!';
-    btnCopy.classList.add('btn-copied-state');
+    const span = btnCopy.querySelector('span') || btnCopy;
+    const originalText = span.textContent;
+    span.textContent = 'Copied!';
     setTimeout(() => {
-      if (span) span.textContent = originalText;
-      btnCopy.classList.remove('btn-copied-state');
+      span.textContent = originalText;
     }, 1500);
   });
 
@@ -130,8 +131,8 @@ function initSocketControls() {
       return;
     }
 
-    if (dot) dot.className = 'status-indicator-dot dot-testing';
-    if (text) text.textContent = 'Testing connection...';
+    if (dot) dot.className = 'endpoint-dot dot-testing';
+    if (text) text.textContent = 'Pinging...';
 
     const t0 = performance.now();
     let socket;
@@ -143,60 +144,163 @@ function initSocketControls() {
       if (socket) {
         try { socket.close(); } catch (_) {}
       }
-      setPingResult(false, 'Timeout: Host unreachable (>3000ms)', null, isInitial);
+      setPingResult(false, 'Timeout (>3000ms)', null, isInitial);
     }, 3000);
 
     try {
       socket = new WebSocket(targetUrl);
-
       socket.onopen = () => {
         if (didFinish) return;
         didFinish = true;
         clearTimeout(timer);
-        const rtt = Math.round(performance.now() - t0);
-        setPingResult(true, `Connected · ${rtt}ms RTT (Mesh Active)`, rtt, isInitial);
-        try { socket.close(); } catch (_) {}
+        const latency = Math.round(performance.now() - t0);
+        socket.close();
+        setPingResult(true, `Connected (${latency}ms)`, latency, isInitial);
       };
-
       socket.onerror = () => {
         if (didFinish) return;
         didFinish = true;
         clearTimeout(timer);
-        setPingResult(false, 'Connection rejected or port closed', null, isInitial);
+        setPingResult(false, 'Unreachable', null, isInitial);
       };
-    } catch (err) {
+    } catch (e) {
       clearTimeout(timer);
-      setPingResult(false, `Invalid protocol (${err.message})`, null, isInitial);
+      setPingResult(false, 'Invalid URL', null, isInitial);
     }
   }
 
-  function setPingResult(success, statusText, rtt, isInitial) {
+  function setPingResult(isOk, statusMsg, latency, isInitial) {
     if (dot) {
-      dot.className = success 
-        ? 'status-indicator-dot dot-online' 
-        : 'status-indicator-dot dot-offline';
+      dot.className = isOk ? 'endpoint-dot dot-online' : 'endpoint-dot dot-offline';
     }
-    if (text) text.textContent = statusText;
+    if (text) {
+      text.textContent = isOk ? (latency !== null ? `Online (${latency}ms)` : 'Online') : statusMsg;
+    }
     if (!isInitial) {
-      showToast(
-        success ? `Online! Latency: ${rtt}ms` : `Connection failed: ${statusText}`,
-        success
-      );
+      showToast(isOk ? `Ping successful (${latency}ms)` : `Ping failed: ${statusMsg}`, isOk);
     }
   }
 }
 
-// XDialect Interactive Translation Engine
+// Cal.com Interactive Agent Pairing Studio
+function generateRandomCode(branch) {
+  const chars = '0123456789ABCDEF';
+  let rand = '';
+  for (let i = 0; i < 4; i++) rand += chars[Math.floor(Math.random() * chars.length)];
+  const branchTag = (branch || 'MAIN').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8).toUpperCase() || 'MAIN';
+  return `XT-${rand}-${branchTag}`;
+}
+
+function updatePairingStudio() {
+  const myBranchInput = document.getElementById('inputMyBranch');
+  const peerBranchInput = document.getElementById('inputPeerBranch');
+  const subnetSelect = document.getElementById('selectSubnetLock');
+  const customSubnetInput = document.getElementById('inputCustomSubnet');
+
+  const myBranch = (myBranchInput ? myBranchInput.value.trim() : '') || 'main';
+  const peerBranch = (peerBranchInput ? peerBranchInput.value.trim() : '') || 'feature-ui';
+  let subnet = subnetSelect ? subnetSelect.value : 'any';
+  if (subnet === 'custom' && customSubnetInput) {
+    customSubnetInput.classList.remove('hidden');
+    subnet = customSubnetInput.value.trim() || '192.168.1.0/24';
+  } else if (customSubnetInput) {
+    customSubnetInput.classList.add('hidden');
+  }
+
+  const branchUpper = myBranch.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8).toUpperCase() || 'MAIN';
+  if (!generatedSessionCode || !generatedSessionCode.endsWith(branchUpper)) {
+    generatedSessionCode = generateRandomCode(myBranch);
+  }
+
+  const host = window.location.host || 'localhost:4488';
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+  const codeEl = document.getElementById('sessionCodeDisplay');
+  const promptEl = document.getElementById('agentPromptSnippet');
+  const cliEl = document.getElementById('agentCliSnippet');
+  const webEl = document.getElementById('agentWebSnippet');
+
+  const explainerIcon = document.getElementById('explainerIcon');
+  const explainerTitle = document.getElementById('explainerTitle');
+  const explainerText = document.getElementById('explainerText');
+
+  if (codeEl) codeEl.textContent = generatedSessionCode;
+
+  if (currentPairingOption === 'relay') {
+    if (explainerIcon) explainerIcon.textContent = '🏢';
+    if (explainerTitle) explainerTitle.textContent = 'Option 1: Central Hosted Relay (Zero-Config · Recommended)';
+    if (explainerText) explainerText.textContent = 'Connects both agents through this website relay. 100% reliable across separate Wi-Fi networks, home routers, and corporate NATs. No port forwarding required.';
+
+    if (promptEl) promptEl.textContent = `Join CrossTalk session ${generatedSessionCode} on branch ${peerBranch}`;
+    if (cliEl) cliEl.textContent = `crosstalk join ${generatedSessionCode} --branch ${peerBranch}`;
+    if (webEl) webEl.textContent = `${protocol}//${host}/?room=${generatedSessionCode}&branch=${myBranch}`;
+  } else if (currentPairingOption === 'mesh') {
+    const topic = `mesh://open/repo-${myBranch.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase()}`;
+    if (explainerIcon) explainerIcon.textContent = '🌐';
+    if (explainerTitle) explainerTitle.textContent = 'Option 2: Open Mesh (Discovery Topic Rendezvous)';
+    if (explainerText) explainerText.textContent = `Broadcasts a discovery signal on the open topic "${topic}". Peer agents discover each other directly without a central server. Note: direct P2P rendezvous has higher failure rates across symmetric NATs without a relay.`;
+
+    if (promptEl) promptEl.textContent = `Connect to open mesh channel 'team-${myBranch.toLowerCase()}' on branch ${peerBranch}`;
+    if (cliEl) cliEl.textContent = `crosstalk up team-${myBranch.toLowerCase()} --mode mesh --branch ${peerBranch}`;
+    if (webEl) webEl.textContent = `${topic}`;
+  } else if (currentPairingOption === 'direct') {
+    const socketAddr = `${wsProtocol}//${host}`;
+    if (explainerIcon) explainerIcon.textContent = '🔒';
+    if (explainerTitle) explainerTitle.textContent = `Option 3: Direct Computer-to-Computer (Subnet Lock: ${subnet})`;
+    if (explainerText) explainerText.textContent = `Direct TCP socket between computers. Hardened by SubnetGuard: only IP addresses within "${subnet}" are accepted. Packets from external networks or unintended subnets are immediately rejected (code 4003).`;
+
+    if (promptEl) promptEl.textContent = `Connect directly to peer ${socketAddr} on branch ${peerBranch} with subnet lock ${subnet}`;
+    if (cliEl) cliEl.textContent = `crosstalk join ${socketAddr} --branch ${peerBranch} --subnet ${subnet}`;
+    if (webEl) webEl.textContent = `${socketAddr} (Subnet: ${subnet})`;
+  }
+}
+
+window.copyGeneratedPrompt = function() {
+  const el = document.getElementById('agentPromptSnippet');
+  if (el) window.copyText(el.textContent, 'Agent prompt copied! Paste into your friend\'s IDE chat.');
+};
+
+window.copyGeneratedCli = function() {
+  const el = document.getElementById('agentCliSnippet');
+  if (el) window.copyText(el.textContent, 'CLI command copied!');
+};
+
+window.copyGeneratedWebLink = function() {
+  const el = document.getElementById('agentWebSnippet');
+  if (el) window.copyText(el.textContent, 'Link copied!');
+};
+
+function initPairingStudio() {
+  const segBtns = document.querySelectorAll('.cal-segmented-control .seg-btn');
+  segBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      segBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentPairingOption = btn.getAttribute('data-option') || 'relay';
+      updatePairingStudio();
+    });
+  });
+
+  ['inputMyBranch', 'inputPeerBranch', 'selectSubnetLock', 'inputCustomSubnet'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', updatePairingStudio);
+      el.addEventListener('change', updatePairingStudio);
+    }
+  });
+
+  updatePairingStudio();
+}
+
+// XDialect Token Map
 const DIALECT_MAP = {
   actions: {
-    '!LCK': { en: 'Acquiring exclusive lock on', zh: '申请独占锁定文件', label: 'CLAIM_LOCK', color: '#06b6d4' },
-    '!REL': { en: 'Releasing lock on', zh: '释放文件锁', label: 'RELEASE_LOCK', color: '#10b981' },
-    '!WARN': { en: 'Conflict warning on', zh: '冲突警报：文件已锁定', label: 'CONFLICT_WARN', color: '#f59e0b' },
-    '!PASS': { en: 'Handing off task on', zh: '移交任务与文件锁', label: 'TASK_HANDOFF', color: '#8b5cf6' },
-    '!BCST': { en: 'Broadcasting to mesh', zh: '全网广播公告', label: 'BROADCAST', color: '#38bdf8' },
-    '!DM': { en: 'Direct message to peer', zh: '定向私信发送', label: 'DIRECT_MSG', color: '#ec4899' },
-    '!ACK': { en: 'Acknowledging', zh: '已确认收到', label: 'ACKNOWLEDGE', color: '#10b981' },
-    '!NACK': { en: 'Rejecting request', zh: '拒绝请求', label: 'REJECT', color: '#f43f5e' }
+    '!LCK': { en: 'I am claiming lock on', zh: '申请独占锁定文件', color: '#10b981' },
+    '!REL': { en: 'I have finished and released', zh: '已完成并释放文件锁定', color: '#3b82f6' },
+    '!WARN': { en: 'Conflict alert on', zh: '冲突风险警报', color: '#f59e0b' },
+    '!BCST': { en: 'Broadcasting announcement', zh: '广播状态通告', color: '#a855f7' },
+    '!PASS': { en: 'Handoff task to peer agent', zh: '工作移交下游智能体', color: '#06b6d4' }
   },
   intents: {
     '#REF': { en: 'refactoring', zh: '重构代码' },
@@ -224,12 +328,11 @@ function translatePlayground() {
 
   const raw = inputEl.value.trim();
   if (!raw) {
-    outputEl.innerHTML = '<span style="color:var(--text-faint)">Type an XDialect shorthand or English/Chinese command...</span>';
+    outputEl.innerHTML = '<span style="color:var(--cal-text-dim)">Type an XDialect shorthand or English/Chinese command...</span>';
     if (meterEl) meterEl.textContent = '0 Wire Bytes';
     return;
   }
 
-  // Check if input is XDialect shorthand or natural language
   if (raw.startsWith('!') || raw.includes('#') || raw.includes('@') || raw.includes('&')) {
     renderShorthandToLanguage(raw, outputEl, meterEl, currentLanguage);
   } else {
@@ -251,7 +354,7 @@ function renderShorthandToLanguage(raw, outputEl, meterEl, lang = 'en') {
     if (t.startsWith('!')) {
       const match = DIALECT_MAP.actions[t];
       action = match ? (lang === 'zh' ? match.zh : match.en) : `Action (${t})`;
-      badgesHtml += `<span class="dialect-chip action" style="border-color:${match?.color || '#06b6d4'}">${t}</span>`;
+      badgesHtml += `<span class="dialect-chip action" style="border-color:${match?.color || '#10b981'}">${t}</span>`;
     } else if (t.startsWith('@')) {
       file = t.slice(1);
       badgesHtml += `<span class="dialect-chip file">${t}</span>`;
@@ -292,18 +395,14 @@ function renderShorthandToLanguage(raw, outputEl, meterEl, lang = 'en') {
   if (!sentence) sentence = raw;
 
   const wireBytes = 10 + (file ? file.length : 0) + (reason ? Math.min(reason.length, 16) : 0);
-  const audioKBytes = 240;
 
   if (meterEl) {
-    meterEl.innerHTML = `<strong>${wireBytes} Wire Bytes</strong> <span class="efficiency-ratio">(${Math.round((audioKBytes * 1024) / wireBytes)}x vs Audio)</span>`;
+    meterEl.innerHTML = `<strong>${wireBytes} Wire Bytes</strong>`;
   }
 
   outputEl.innerHTML = `
     ${badgesHtml}
     <div class="human-sentence">"${sentence.trim()}"</div>
-    <div class="wire-efficiency-tip">
-      ⚡ Packed into a <strong>${wireBytes}-byte</strong> binary frame. Zero audio overhead, sub-millisecond global mesh delivery.
-    </div>
   `;
 }
 
@@ -341,11 +440,8 @@ function renderNaturalToShorthand(raw, outputEl, meterEl) {
   }
 
   outputEl.innerHTML = `
-    <div class="human-sentence" style="color:var(--accent-cyan); font-family:var(--font-mono); font-size:0.95rem;">
+    <div class="human-sentence" style="color:var(--cal-emerald); font-family:var(--font-mono); font-size:0.95rem;">
       ${generated}
-    </div>
-    <div class="wire-efficiency-tip">
-      Synthesized XDialect shorthand from natural ${currentLanguage === 'zh' ? 'Chinese' : 'English'}. Reversible across all agent runtimes!
     </div>
   `;
 }
@@ -371,11 +467,9 @@ async function fetchMeshStats() {
     if (elBuffer) elBuffer.textContent = `${data.recentHistoryCount || 0} / 100`;
     if (elStorageBadge) {
       if (data.storageMode === 'mongodb') {
-        elStorageBadge.textContent = 'MongoDB Capped';
-        elStorageBadge.title = 'MongoDB Capped Collection (Ring Buffer max 100 msgs)';
+        elStorageBadge.textContent = 'MongoDB Capped Ring';
       } else {
-        elStorageBadge.textContent = 'Memory Ring < 25KB';
-        elStorageBadge.title = 'Zero-weight in-memory ring buffer';
+        elStorageBadge.textContent = 'Bounded Ring (<25KB)';
       }
     }
   } catch (_) {}
@@ -408,9 +502,9 @@ window.fetchRecentHistory = async function() {
       const isLock = m.content.includes('!LCK') || m.content.includes('locked');
       const isRel = m.content.includes('!REL') || m.content.includes('released');
 
-      let chip = '<span class="signal-chip">EVENT</span>';
-      if (isLock) chip = '<span class="signal-chip chip-lock">LOCK CLAIM</span>';
-      if (isRel) chip = '<span class="signal-chip chip-rel">RELEASE</span>';
+      let chip = '<span class="cal-chip">EVENT</span>';
+      if (isLock) chip = '<span class="cal-chip chip-lock">LOCK CLAIM</span>';
+      if (isRel) chip = '<span class="cal-chip chip-rel">RELEASE</span>';
 
       return `
         <div class="feed-event-row">
@@ -453,27 +547,11 @@ function initGuideTabs() {
   });
 }
 
-// Preset Socket Pills
-function initSocketPillPresets() {
-  const input = document.getElementById('socketAddressInput');
-  const presets = document.querySelectorAll('.socket-preset-pill');
-
-  presets.forEach(pill => {
-    pill.addEventListener('click', () => {
-      const targetUrl = pill.getAttribute('data-url');
-      if (input && targetUrl) {
-        input.value = targetUrl;
-        document.getElementById('btnPingSocket')?.click();
-      }
-    });
-  });
-}
-
 // Initialize on DOM Ready
 document.addEventListener('DOMContentLoaded', () => {
   initSocketControls();
+  initPairingStudio();
   initGuideTabs();
-  initSocketPillPresets();
 
   const dialectInput = document.getElementById('dialectInput');
   if (dialectInput) {
@@ -484,7 +562,6 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchMeshStats();
   window.fetchRecentHistory();
 
-  // Poll metrics every 3 seconds
   setInterval(fetchMeshStats, 3000);
   setInterval(window.fetchRecentHistory, 5000);
 });

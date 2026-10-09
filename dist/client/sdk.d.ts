@@ -15,6 +15,8 @@ export interface CrossTalkClientOptions {
     autoHeartbeat?: boolean;
     gibberlinkCapable?: boolean;
     dialectVersion?: string;
+    branch?: string;
+    sessionKey?: string;
 }
 export declare class CrossTalkClient extends EventEmitter {
     private ws;
@@ -26,6 +28,7 @@ export declare class CrossTalkClient extends EventEmitter {
     private pendingLockResolvers;
     private pendingStateResolver;
     private pendingInboxResolver;
+    private recentMessages;
     constructor(options: CrossTalkClientOptions);
     get agentId(): string;
     get dialect(): DialectDictionary;
@@ -47,7 +50,6 @@ export declare class CrossTalkClient extends EventEmitter {
     parseShorthand(shorthand: string): ParsedDialectMessage;
     shorthandToHuman(shorthand: string): string;
     humanToShorthand(english: string): string;
-    sendDirectMessage(toAgentId: string, content: string, metadata?: Record<string, any>): void;
     sendGibberlinkSignal(payload: string | object, mode?: 'audible_fast' | 'audible_standard' | 'ultrasonic', to?: string): GibberlinkSignalPacket;
     sendBinary(frame: BinaryFrame): void;
     lockFile(file: string, reason: string, ttlSeconds?: number): Promise<{
@@ -66,7 +68,13 @@ export declare class CrossTalkClient extends EventEmitter {
         recentMessages: MessageEvent[];
     }>;
     fetchInbox(since?: number): Promise<MessageEvent[]>;
-    disconnect(): void;
+    shouldSuppressAutoReply(msg: MessageEvent): boolean;
+    sendDirectMessage(toAgentId: string, content: string, options?: {
+        isAck?: boolean;
+        replyExpected?: boolean;
+        metadata?: Record<string, any>;
+    } | Record<string, any>): void;
+    disconnect(reason?: string): Promise<void>;
     private sendPacket;
 }
 export declare class CrossTalk {
