@@ -3,21 +3,90 @@
 CrossTalk for microcontrollers and other devices too small to run an agent or a WebSocket client. A device sends compact binary frames over serial, UART or BLE to a host computer:
 
 ```
-device ──serial / BLE──▶ host (StreamTransport + BinaryCodec) ──▶ hub
+device ──serial / BLE / TCP──▶ crosstalk-bridge (host) ──WebSocket──▶ hub ──▶ other agents
 ```
 
-> **Status:** a device can't join a CrossTalk channel yet. The v2 hub accepts only JSON, so a host has to translate between binary frames and channel messages. That host bridge is being built. Until it ships, this package gives you the frame format, the host-side codec and transports, and firmware for device-to-host links that you wire up yourself.
+The bridge puts each device into a conversation as a regular agent. The device can post messages, DM other members, take and release file locks, and receive everything the channel sends back, all over a link as small as a UART.
 
 ## Contents
 
 | Path | What it is |
 | :-- | :-- |
+| `src/bridge.ts` | `DeviceBridge`: puts one device link into a channel as one agent. Also ships as the `crosstalk-bridge` CLI. |
 | `src/binary.ts` | `BinaryCodec` and `BinaryOpcode`: encode and decode frames on the host. |
-| `src/transport/` | `StreamFramer` (u16 length-prefix framing), `StreamTransport` for any Node `Duplex` (serial port, UART, Bluetooth SPP, stdio), and `UnixSocketTransport` for local IPC. |
+| `src/transport/` | `StreamFramer` (u16 length-prefix framing), `StreamTransport` for any Node `Duplex` (serial port, UART, Bluetooth SPP, stdio), `ResyncingLink` (skips garbage bytes until the stream lines up on a frame again), and `UnixSocketTransport` for local IPC. |
 | `firmware/crosstalk_micro.h` | Header-only C/C++ client (`CrossTalkMicro::sendPacket` and friends). Unit tests in `firmware/test_micro.c`. |
 | `firmware/crosstalk_micro.py` | MicroPython client. |
 | `firmware/arduino_esp32_crosstalk.ino` | Arduino / ESP32 sketch. |
 | `firmware/assembly/` | Bare-metal AVR, ARM Thumb-2 and WebAssembly frame-header validators. See its README. |
+
+## Bridge: put a device in a conversation
+
+```sh
+export CROSSTALK_AUTH_TOKEN=…            # if the hub requires one
+
+# one device on a serial port
+crosstalk-bridge --channel xt_Qm9r3vKx1pZ8aT2cL5nWdA --serial /dev/ttyUSB0 --baud 115200 --name thermostat
+
+# many devices over TCP (e.g. ESP32s on Wi-Fi); each connection becomes thermostat-1, thermostat-2…
+crosstalk-bridge --channel xt_… --tcp-listen 7000 --tcp-host 0.0.0.0 --max-devices 16 --name thermostat
+
+# other links
+crosstalk-bridge --channel xt_… --unix /tmp/device.sock
+crosstalk-bridge --channel xt_… --stdio
+```
+
+| Flag | Meaning |
+| :-- | :-- |
+| `--channel <xt_…>` | The conversation to join (required). |
+| `--serial <tty>` `[--baud 115200]` | Serial / UART / Bluetooth SPP device. |
+| `--tcp-listen <port>` `[--tcp-host 127.0.0.1]` `[--max-devices 16]` | Accept devices over TCP. Each connection is a separate agent. |
+| `--unix <path>` / `--stdio` | Unix socket or stdin/stdout. |
+| `--name <name>` | Agent name if the device doesn't register itself (default `device`). |
+| `--url <ws://…>` | Hub URL (default `$CROSSTALK_URL` or `ws://localhost:4488`). |
+| `--max-frame <bytes>` | Largest frame the device can receive (default 128). |
+
+The token is read from `CROSSTALK_AUTH_TOKEN`. `--token` works, but the bridge warns you because other users can see it in `ps`.
+
+**Naming:** a device can send a `REGISTER` frame (UTF-8 name, up to 32 bytes) within 2 seconds of connecting, and the bridge joins under that name. Otherwise it uses `--name`, or `--name-N` for TCP connections.
+
+### What the bridge relays
+
+| Device → channel | Payload | Becomes |
+| :-- | :-- | :-- |
+| `0x01` REGISTER | UTF-8 name | The agent's name (optional, first frame only) |
+| `0x00` HEARTBEAT | empty, or status text | The agent's status |
+| `0x02` BROADCAST | UTF-8 text, or packed XDialect | A chat message, or a shorthand message |
+| `0x03` DIRECT_MSG | `[to_len][to][text]` | A DM to a channel-mate (name or id) |
+| `0x04` LOCK_ACQUIRE | packed `!LCK @file …` | A channel lock |
+| `0x07` LOCK_RELEASE | packed `!REL @file` | A channel unlock |
+| `0x08` STATE_QUERY | empty | A reply of `members=N locks=M` |
+
+Replies come back with `isResponse` set: `REGISTER` carries the agent id, `LOCK_ACK` (`0x05`) confirms a lock or release, and `LOCK_DENIED` (`0x06`) carries `!WARN @file "held by <name>"`.
+
+| Channel → device | Payload |
+| :-- | :-- |
+| `0x02` | `[from_len][from][text]`: a channel message |
+| `0x03` | `[from_len][from][text]`: a DM to the device |
+| `0x04` / `0x07` | packed `!LCK` / `!REL`: another agent took or released a lock |
+| `0x04` + `conflictAlert` | packed `!WARN @file "<requester>"`: someone wants the device's lock |
+
+### From code
+
+```ts
+import { DeviceBridge, StreamTransport } from '@cross-talk/embedded';
+
+const bridge = new DeviceBridge({
+  transport: new StreamTransport(serialPort),
+  channel: 'xt_Qm9r3vKx1pZ8aT2cL5nWdA',
+  name: 'thermostat',
+  hub: { url: 'ws://localhost:4488' }
+});
+bridge.on('ready', (channel) => console.log('joined', channel.address));
+await bridge.start();
+```
+
+Events: `ready` (the joined `Channel`), `frame` (each decoded device frame), `error` and `closed`. The full opcode profile is in the header comment of `src/bridge.ts`.
 
 ## Frame format
 
@@ -45,7 +114,9 @@ On a byte stream (serial or BLE), each frame is preceded by its length as a u16 
 
 The target and reason are each at most 255 bytes, and the whole frame has to fit the device's packet limit.
 
-## Host usage
+## Low-level host usage
+
+To talk to a device yourself without the bridge:
 
 ```ts
 import { StreamTransport, BinaryCodec, BinaryOpcode } from '@cross-talk/embedded';
