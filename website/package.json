@@ -1,0 +1,9 @@
+{
+  "name": "cross-talk-website",
+  "private": true,
+  "type": "module",
+  "description": "Marketing site and cockpit for CrossTalk. Static files plus Vercel functions in api/.",
+  "scripts": {
+    "dev": "npx --yes serve@14.2.4 ."
+  }
+}

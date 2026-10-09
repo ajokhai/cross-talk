@@ -1,231 +1,150 @@
 import path from 'node:path';
-import { FileLock, AgentInfo } from './types.js';
+import type { AgentRef, FileLock } from '../protocol.js';
 
-export interface LockAcquireResult {
-  success: boolean;
-  lock?: FileLock;
-  quotaExceeded?: boolean;
-  error?: string;
-  existingHolder?: {
-    id: string;
-    name: string;
-    reason: string;
-    expiresAt: number;
-    remainingSeconds: number;
-  };
-  conflictWarningSent?: boolean;
+export type AcquireResult =
+  | { ok: true; lock: FileLock; renewed: boolean }
+  | { ok: false; reason: 'held'; lock: FileLock }
+  | { ok: false; reason: 'quota'; limit: number };
+
+export interface LockManagerOptions {
+  minTtlSeconds?: number;
+  maxTtlSeconds?: number;
+  defaultTtlSeconds?: number;
+  maxLocksPerAgent?: number;
+  now?: () => number;
 }
 
+/**
+ * Cooperative, advisory file locks scoped to a channel.
+ *
+ * Locks are keyed by `channel + normalized relative path`, so two agents on
+ * different machines collaborating in the same channel contend for the same
+ * key as long as they use repo-relative paths (the SDK does this for them).
+ *
+ * The manager owns no timers; the hub calls `sweepExpired()` periodically so
+ * it can announce expirations to channel members.
+ */
 export class LockManager {
-  public static readonly MAX_TTL_SECONDS = 1800; // 30 minutes maximum to prevent starvation DoS
-  public static readonly MIN_TTL_SECONDS = 5;    // 5 seconds minimum
-  public static readonly MAX_LOCKS_PER_AGENT = 10; // Max 10 active concurrent locks per agent
+  readonly minTtlSeconds: number;
+  readonly maxTtlSeconds: number;
+  readonly defaultTtlSeconds: number;
+  readonly maxLocksPerAgent: number;
+  private readonly now: () => number;
+  private readonly locks = new Map<string, FileLock>();
 
-  // Key: channel::workspace::normalizedFilePath -> FileLock
-  private locks: Map<string, FileLock> = new Map();
-  private cleanupInterval: NodeJS.Timeout | null = null;
-
-  constructor() {
-    // Periodically expire stale locks every 5 seconds
-    this.cleanupInterval = setInterval(() => {
-      this.cleanExpiredLocks();
-    }, 5000);
+  constructor(options: LockManagerOptions = {}) {
+    this.minTtlSeconds = options.minTtlSeconds ?? 5;
+    this.maxTtlSeconds = options.maxTtlSeconds ?? 30 * 60;
+    this.defaultTtlSeconds = options.defaultTtlSeconds ?? 5 * 60;
+    this.maxLocksPerAgent = options.maxLocksPerAgent ?? 25;
+    this.now = options.now ?? Date.now;
   }
 
-  public normalizePath(filePath: string): string {
-    if (!filePath) return '';
-    // Normalize slashes and clean up relative dots
-    let normalized = path.normalize(filePath).replace(/\\/g, '/');
-    // Remove leading ./ if present
-    if (normalized.startsWith('./')) {
-      normalized = normalized.slice(2);
-    }
+  /** Normalizes to a forward-slash relative-looking path. Returns '' for invalid input. */
+  static normalizePath(file: string): string {
+    if (typeof file !== 'string') return '';
+    const cleaned = file.trim().replace(/\\/g, '/');
+    if (!cleaned) return '';
+    let normalized = path.posix.normalize(cleaned);
+    if (normalized.startsWith('./')) normalized = normalized.slice(2);
+    if (normalized === '.' || normalized === '/') return '';
     return normalized;
   }
 
-  public getLockKey(channel: string, workspace: string, file: string): string {
-    const ch = (channel || 'default').trim().toLowerCase();
-    const ws = (workspace || 'default').trim();
-    const f = this.normalizePath(file);
-    return `${ch}::${ws}::${f}`;
+  private key(channel: string, file: string): string {
+    return `${channel}\u0000${file}`;
   }
 
-  public acquire(
-    rawPath: string,
-    agent: AgentInfo,
-    reason: string,
-    ttlSeconds: number = 300,
-    channel: string = 'default'
-  ): LockAcquireResult {
-    const file = this.normalizePath(rawPath);
-    const workspace = agent.workspace || 'default';
-    const lockKey = this.getLockKey(channel, workspace, file);
-    const now = Date.now();
-
-    // Clamp TTL to safe boundaries (5s to 30 mins) to prevent indefinite file starvation
-    const clampedTtl = Math.max(
-      LockManager.MIN_TTL_SECONDS,
-      Math.min(ttlSeconds || 300, LockManager.MAX_TTL_SECONDS)
-    );
-
-    const existing = this.locks.get(lockKey);
-
-    // If existing lock is valid and held
-    if (existing && existing.expiresAt > now) {
-      if (existing.holderId === agent.id) {
-        // Renewal by the same agent (does not consume additional quota)
-        existing.expiresAt = now + clampedTtl * 1000;
-        existing.reason = reason;
-        return { success: true, lock: existing };
-      }
-
-      const remainingSeconds = Math.max(0, Math.round((existing.expiresAt - now) / 1000));
-      return {
-        success: false,
-        existingHolder: {
-          id: existing.holderId,
-          name: existing.holderName,
-          reason: existing.reason,
-          expiresAt: existing.expiresAt,
-          remainingSeconds
-        }
-      };
+  private live(key: string): FileLock | undefined {
+    const lock = this.locks.get(key);
+    if (lock && lock.expiresAt <= this.now()) {
+      this.locks.delete(key);
+      return undefined;
     }
-
-    // Per-Agent Quota Enforcement: Prevent one agent from hoarding all locks
-    const currentAgentLocks = this.getLocksByAgent(agent.id);
-    if (currentAgentLocks.length >= LockManager.MAX_LOCKS_PER_AGENT) {
-      return {
-        success: false,
-        quotaExceeded: true,
-        error: `Lock quota exceeded: Agent '${agent.name}' already holds ${currentAgentLocks.length} active locks (max ${LockManager.MAX_LOCKS_PER_AGENT}). Release a lock before claiming another.`
-      };
-    }
-
-    // Lock granted in specific channel and workspace
-    const lock: FileLock = {
-      file,
-      holderId: agent.id,
-      holderName: agent.name,
-      reason,
-      acquiredAt: now,
-      expiresAt: now + clampedTtl * 1000,
-      channel,
-      workspace
-    };
-
-    this.locks.set(lockKey, lock);
-    return { success: true, lock };
+    return lock;
   }
 
-  public release(
-    rawPath: string,
-    agentId: string,
-    force: boolean = false,
-    channel?: string,
-    workspace?: string
-  ): { success: boolean; lock?: FileLock } {
-    const file = this.normalizePath(rawPath);
-
-    // Fast path: direct key lookup if channel and workspace are known
-    if (channel && workspace) {
-      const key = this.getLockKey(channel, workspace, file);
-      const existing = this.locks.get(key);
-      if (existing) {
-        if (!force && existing.holderId !== agentId) {
-          return { success: false, lock: existing };
-        }
-        this.locks.delete(key);
-        return { success: true, lock: existing };
-      }
-    }
-
-    // Flexible fallback: match across map
-    for (const [key, lock] of this.locks.entries()) {
-      if (lock.file === file) {
-        if (channel && lock.channel !== channel) continue;
-        if (workspace && lock.workspace !== workspace) continue;
-
-        if (!force && lock.holderId !== agentId) {
-          return { success: false, lock };
-        }
-
-        this.locks.delete(key);
-        return { success: true, lock };
-      }
-    }
-
-    return { success: false };
+  clampTtl(ttlSeconds?: number): number {
+    const ttl = Number.isFinite(ttlSeconds) && ttlSeconds! > 0 ? ttlSeconds! : this.defaultTtlSeconds;
+    return Math.max(this.minTtlSeconds, Math.min(Math.floor(ttl), this.maxTtlSeconds));
   }
 
-  public releaseAllByAgent(agentId: string): FileLock[] {
+  acquire(channel: string, file: string, holder: AgentRef, reason: string, ttlSeconds?: number): AcquireResult {
+    const key = this.key(channel, file);
+    const now = this.now();
+    const expiresAt = now + this.clampTtl(ttlSeconds) * 1000;
+    const existing = this.live(key);
+
+    if (existing) {
+      if (existing.holder.id !== holder.id) return { ok: false, reason: 'held', lock: existing };
+      existing.expiresAt = expiresAt;
+      existing.reason = reason;
+      return { ok: true, lock: existing, renewed: true };
+    }
+
+    if (this.byHolder(holder.id).length >= this.maxLocksPerAgent) {
+      return { ok: false, reason: 'quota', limit: this.maxLocksPerAgent };
+    }
+
+    const lock: FileLock = { channel, file, holder: { ...holder }, reason, acquiredAt: now, expiresAt };
+    this.locks.set(key, lock);
+    return { ok: true, lock, renewed: false };
+  }
+
+  /** Releases a lock held by `holderId`. Returns the released lock, or the blocking lock if held by someone else. */
+  release(channel: string, file: string, holderId: string): { released?: FileLock; heldBy?: FileLock } {
+    const key = this.key(channel, file);
+    const existing = this.live(key);
+    if (!existing) return {};
+    if (existing.holder.id !== holderId) return { heldBy: existing };
+    this.locks.delete(key);
+    return { released: existing };
+  }
+
+  get(channel: string, file: string): FileLock | undefined {
+    return this.live(this.key(channel, file));
+  }
+
+  list(channel?: string): FileLock[] {
+    const out: FileLock[] = [];
+    for (const key of [...this.locks.keys()]) {
+      const lock = this.live(key);
+      if (lock && (!channel || lock.channel === channel)) out.push(lock);
+    }
+    return out;
+  }
+
+  byHolder(holderId: string, channel?: string): FileLock[] {
+    return this.list(channel).filter(l => l.holder.id === holderId);
+  }
+
+  /** Drops every lock held by `holderId` (optionally only within one channel). */
+  releaseAllBy(holderId: string, channel?: string): FileLock[] {
     const released: FileLock[] = [];
-    for (const [key, lock] of this.locks.entries()) {
-      if (lock.holderId === agentId) {
-        released.push(lock);
+    for (const [key, lock] of this.locks) {
+      if (lock.holder.id === holderId && (!channel || lock.channel === channel)) {
         this.locks.delete(key);
+        released.push(lock);
       }
     }
     return released;
   }
 
-  public isLocked(
-    rawPath: string,
-    channel?: string,
-    workspace?: string
-  ): { locked: boolean; lock?: FileLock } {
-    const file = this.normalizePath(rawPath);
-    const now = Date.now();
-
-    for (const [key, lock] of this.locks.entries()) {
-      if (lock.file === file) {
-        if (channel && lock.channel !== channel) continue;
-        if (workspace && lock.workspace !== workspace) continue;
-
-        if (lock.expiresAt <= now) {
-          this.locks.delete(key);
-          continue;
-        }
-
-        return { locked: true, lock };
-      }
+  releaseChannel(channel: string): void {
+    for (const [key, lock] of this.locks) {
+      if (lock.channel === channel) this.locks.delete(key);
     }
-
-    return { locked: false };
   }
 
-  public getLocks(channel?: string, workspace?: string): FileLock[] {
-    const now = Date.now();
-    const active: FileLock[] = [];
-    for (const [key, lock] of this.locks.entries()) {
-      if (lock.expiresAt > now) {
-        if (channel && lock.channel !== channel) continue;
-        if (workspace && lock.workspace !== workspace) continue;
-        active.push(lock);
-      } else {
-        this.locks.delete(key);
-      }
-    }
-    return active;
-  }
-
-  public getLocksByAgent(agentId: string, channel?: string, workspace?: string): FileLock[] {
-    return this.getLocks(channel, workspace).filter(l => l.holderId === agentId);
-  }
-
-  private cleanExpiredLocks() {
-    const now = Date.now();
-    for (const [key, lock] of this.locks.entries()) {
+  sweepExpired(): FileLock[] {
+    const now = this.now();
+    const expired: FileLock[] = [];
+    for (const [key, lock] of this.locks) {
       if (lock.expiresAt <= now) {
         this.locks.delete(key);
+        expired.push(lock);
       }
     }
-  }
-
-  public destroy() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
+    return expired;
   }
 }
