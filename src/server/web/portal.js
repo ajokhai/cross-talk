@@ -1,6 +1,7 @@
 /**
  * CrossTalk Portal & Telemetry Hub
- * Handles Cal.com-style interactive agent pairing studio across branches/subnets,
+ * Handles multi-AI swarm simulation (Grok, ChatGPT, Gemini, Claude),
+ * zero context-dumping view modes, Cal.com-style interactive agent pairing studio,
  * WebSocket copy/ping, XDialect compiler playground, bilingual translation,
  * and live bounded ring-buffer synchronization.
  */
@@ -88,6 +89,102 @@ window.setPlayground = function(dialectSnippet) {
   if (inputEl) {
     inputEl.value = dialectSnippet;
     translatePlayground();
+  }
+};
+
+// Swarm View Mode: Plain English vs Nerd XDialect
+window.toggleSwarmView = function(mode) {
+  const btnPlain = document.getElementById('btnViewPlain');
+  const btnNerd = document.getElementById('btnViewNerd');
+  const plainElements = document.querySelectorAll('.speech-plain');
+  const nerdElements = document.querySelectorAll('.speech-nerd');
+
+  if (mode === 'nerd') {
+    if (btnNerd) btnNerd.classList.add('active');
+    if (btnPlain) btnPlain.classList.remove('active');
+    plainElements.forEach(el => el.classList.add('hidden'));
+    nerdElements.forEach(el => el.classList.remove('hidden'));
+  } else {
+    if (btnPlain) btnPlain.classList.add('active');
+    if (btnNerd) btnNerd.classList.remove('active');
+    plainElements.forEach(el => el.classList.remove('hidden'));
+    nerdElements.forEach(el => el.classList.add('hidden'));
+  }
+};
+
+// Swarm Simulation cycle
+const SWARM_STEPS = [
+  {
+    ticker: "ChatGPT finished database & backend routes ➔ Handed off to Gemini to craft responsive Cal-style UI in 0.4ms.",
+    gptPlain: "I just finished creating the database models and login route! Locking backend/auth.ts so nobody edits it while I deploy.",
+    gptNerd: "!LCK @backend/auth.ts #FEAT \"jwt router\" ~180 &WAIT",
+    geminiPlain: "Awesome ChatGPT! Styling the modern UI in src/App.tsx right now. Grok, can you run real-time stress tests on the new endpoints?",
+    geminiNerd: "!LCK @src/App.tsx #UI \"cal-styling\" &PASS ^Grok \"run e2e\"",
+    grokPlain: "Stress tests firing... 50,000 rapid logins across the network handled in 14ms! Zero memory leaks, zero deadlocks.",
+    grokNerd: "!TEST @tests/stress.py #STRESS \"50k reqs 14ms\" &PROCEED",
+    claudePlain: "Security and type inference scan 100% clean. Releasing all file locks—the entire feature is ready to ship!",
+    claudeNerd: "!REL @* &DONE &PROCEED #DOC \"production verified\""
+  },
+  {
+    ticker: "Robotic Node (ESP32) detected IMU sensor drift ➔ Grok analyzed telemetry logs ➔ Gemini rendered 3D cockpit alert.",
+    gptPlain: "Received sensor stream from ESP32 robotics unit. Validating payload schemas and buffering telemetry ring.",
+    gptNerd: "!LCK @sensors/imu.c #FIX \"calibration\" &WAIT",
+    geminiPlain: "Visualizing telemetry on real-time radar screen. Updated actuator coordinates for robotic arm.",
+    geminiNerd: "!UI @cockpit/radar.ts #FEAT \"quaternion 3d\" &PROCEED",
+    grokPlain: "Grok analyzing vibrational harmonics: detected 3Hz motor oscillation. Applying PID filter fix.",
+    grokNerd: "!PASS ^ESP32 @firmware/pid.h #OPT \"pid gain tuning\" &URGENT",
+    claudePlain: "Hardware verification confirmed: robotic motor angles calibrated within 0.01 deg tolerance.",
+    claudeNerd: "!ACK &DONE &PROCEED #TEST \"motor calibrated\""
+  },
+  {
+    ticker: "Zero-Context Task Handoff: ChatGPT handed micro-signal directly to Grok with 0 prior tokens dumped.",
+    gptPlain: "Refactored payment stripe webhook. Dispatched 34-byte handoff packet to Grok for edge-case chaos testing.",
+    gptNerd: "!PASS ^Grok @api/stripe.ts #REF \"idempotency keys\" &PROCEED",
+    geminiPlain: "Updated checkout button states and billing portal layout while ChatGPT & Grok handled payments.",
+    geminiNerd: "!LCK @src/Billing.tsx #UI \"stripe elements\" &WAIT",
+    grokPlain: "Simulated network partitions and double-click payment race conditions: idempotency held perfectly!",
+    grokNerd: "!TEST @tests/chaos.ts #TEST \"race conditions pass\" &PROCEED",
+    claudePlain: "PCI-DSS compliance checklist verified. No credit card data leaked to logs. Merge approved!",
+    claudeNerd: "!REL @* &DONE &PROCEED #SEC \"pci compliant\""
+  }
+];
+
+let swarmStepIndex = 0;
+window.cycleSwarmSimulation = function() {
+  swarmStepIndex = (swarmStepIndex + 1) % SWARM_STEPS.length;
+  const step = SWARM_STEPS[swarmStepIndex];
+
+  const ticker = document.getElementById('swarmTickerMsg');
+  if (ticker) ticker.innerHTML = step.ticker;
+
+  const bubbleGpt = document.getElementById('speechBubbleGpt');
+  const bubbleGemini = document.getElementById('speechBubbleGemini');
+  const bubbleGrok = document.getElementById('speechBubbleGrok');
+  const bubbleClaude = document.getElementById('speechBubbleClaude');
+
+  if (bubbleGpt) {
+    const plain = bubbleGpt.querySelector('.speech-plain');
+    const nerd = bubbleGpt.querySelector('.speech-nerd code');
+    if (plain) plain.textContent = `"${step.gptPlain}"`;
+    if (nerd) nerd.textContent = step.gptNerd;
+  }
+  if (bubbleGemini) {
+    const plain = bubbleGemini.querySelector('.speech-plain');
+    const nerd = bubbleGemini.querySelector('.speech-nerd code');
+    if (plain) plain.textContent = `"${step.geminiPlain}"`;
+    if (nerd) nerd.textContent = step.geminiNerd;
+  }
+  if (bubbleGrok) {
+    const plain = bubbleGrok.querySelector('.speech-plain');
+    const nerd = bubbleGrok.querySelector('.speech-nerd code');
+    if (plain) plain.textContent = `"${step.grokPlain}"`;
+    if (nerd) nerd.textContent = step.grokNerd;
+  }
+  if (bubbleClaude) {
+    const plain = bubbleClaude.querySelector('.speech-plain');
+    const nerd = bubbleClaude.querySelector('.speech-nerd code');
+    if (plain) plain.textContent = `"${step.claudePlain}"`;
+    if (nerd) nerd.textContent = step.claudeNerd;
   }
 };
 
@@ -196,9 +293,14 @@ function updatePairingStudio() {
   const peerBranchInput = document.getElementById('inputPeerBranch');
   const subnetSelect = document.getElementById('selectSubnetLock');
   const customSubnetInput = document.getElementById('inputCustomSubnet');
+  const myModelSelect = document.getElementById('selectMyModel');
+  const peerModelSelect = document.getElementById('selectPeerModel');
 
   const myBranch = (myBranchInput ? myBranchInput.value.trim() : '') || 'main';
   const peerBranch = (peerBranchInput ? peerBranchInput.value.trim() : '') || 'feature-ui';
+  const myModelName = myModelSelect ? myModelSelect.value.split(' ')[1] || myModelSelect.value.split(' ')[0] : 'Gemini';
+  const peerModelName = peerModelSelect ? peerModelSelect.value.split(' ')[1] || peerModelSelect.value.split(' ')[0] : 'Grok';
+
   let subnet = subnetSelect ? subnetSelect.value : 'any';
   if (subnet === 'custom' && customSubnetInput) {
     customSubnetInput.classList.remove('hidden');
@@ -230,27 +332,27 @@ function updatePairingStudio() {
   if (currentPairingOption === 'relay') {
     if (explainerIcon) explainerIcon.textContent = '🏢';
     if (explainerTitle) explainerTitle.textContent = 'Option 1: Central Hosted Relay (Zero-Config · Recommended)';
-    if (explainerText) explainerText.textContent = 'Connects both agents through this website relay. 100% reliable across separate Wi-Fi networks, home routers, and corporate NATs. No port forwarding required.';
+    if (explainerText) explainerText.textContent = `Connects both AIs through our website hub. 100% reliable across separate Wi-Fi networks, home routers, and corporate NATs. Zero setup needed for ${myModelName} and ${peerModelName}.`;
 
-    if (promptEl) promptEl.textContent = `Join CrossTalk session ${generatedSessionCode} on branch ${peerBranch}`;
+    if (promptEl) promptEl.textContent = `Join CrossTalk session ${generatedSessionCode} on branch ${peerBranch} to collaborate with ${myModelName}`;
     if (cliEl) cliEl.textContent = `crosstalk join ${generatedSessionCode} --branch ${peerBranch}`;
     if (webEl) webEl.textContent = `${protocol}//${host}/?room=${generatedSessionCode}&branch=${myBranch}`;
   } else if (currentPairingOption === 'mesh') {
     const topic = `mesh://open/repo-${myBranch.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase()}`;
     if (explainerIcon) explainerIcon.textContent = '🌐';
     if (explainerTitle) explainerTitle.textContent = 'Option 2: Open Mesh (Discovery Topic Rendezvous)';
-    if (explainerText) explainerText.textContent = `Broadcasts a discovery signal on the open topic "${topic}". Peer agents discover each other directly without a central server. Note: direct P2P rendezvous has higher failure rates across symmetric NATs without a relay.`;
+    if (explainerText) explainerText.textContent = `Broadcasts a discovery signal on the open topic "${topic}". Peer agents discover each other directly without a central server.`;
 
-    if (promptEl) promptEl.textContent = `Connect to open mesh channel 'team-${myBranch.toLowerCase()}' on branch ${peerBranch}`;
+    if (promptEl) promptEl.textContent = `Connect to open mesh channel 'team-${myBranch.toLowerCase()}' on branch ${peerBranch} to collaborate with ${myModelName}`;
     if (cliEl) cliEl.textContent = `crosstalk up team-${myBranch.toLowerCase()} --mode mesh --branch ${peerBranch}`;
     if (webEl) webEl.textContent = `${topic}`;
   } else if (currentPairingOption === 'direct') {
     const socketAddr = `${wsProtocol}//${host}`;
     if (explainerIcon) explainerIcon.textContent = '🔒';
     if (explainerTitle) explainerTitle.textContent = `Option 3: Direct Computer-to-Computer (Subnet Lock: ${subnet})`;
-    if (explainerText) explainerText.textContent = `Direct TCP socket between computers. Hardened by SubnetGuard: only IP addresses within "${subnet}" are accepted. Packets from external networks or unintended subnets are immediately rejected (code 4003).`;
+    if (explainerText) explainerText.textContent = `Direct TCP socket between computers. Hardened by SubnetGuard: only IP addresses within "${subnet}" are accepted. Outside packets are rejected (code 4003).`;
 
-    if (promptEl) promptEl.textContent = `Connect directly to peer ${socketAddr} on branch ${peerBranch} with subnet lock ${subnet}`;
+    if (promptEl) promptEl.textContent = `Connect directly to peer ${socketAddr} on branch ${peerBranch} with subnet lock ${subnet} to collaborate with ${myModelName}`;
     if (cliEl) cliEl.textContent = `crosstalk join ${socketAddr} --branch ${peerBranch} --subnet ${subnet}`;
     if (webEl) webEl.textContent = `${socketAddr} (Subnet: ${subnet})`;
   }
@@ -258,7 +360,7 @@ function updatePairingStudio() {
 
 window.copyGeneratedPrompt = function() {
   const el = document.getElementById('agentPromptSnippet');
-  if (el) window.copyText(el.textContent, 'Agent prompt copied! Paste into your friend\'s IDE chat.');
+  if (el) window.copyText(el.textContent, 'Agent prompt copied! Paste into your friend\'s AI chat.');
 };
 
 window.copyGeneratedCli = function() {
@@ -282,7 +384,7 @@ function initPairingStudio() {
     });
   });
 
-  ['inputMyBranch', 'inputPeerBranch', 'selectSubnetLock', 'inputCustomSubnet'].forEach(id => {
+  ['inputMyBranch', 'inputPeerBranch', 'selectSubnetLock', 'inputCustomSubnet', 'selectMyModel', 'selectPeerModel'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
       el.addEventListener('input', updatePairingStudio);
@@ -564,4 +666,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setInterval(fetchMeshStats, 3000);
   setInterval(window.fetchRecentHistory, 5000);
+
+  // Auto-cycle swarm simulation every 7 seconds
+  setInterval(() => {
+    if (typeof window.cycleSwarmSimulation === 'function') {
+      window.cycleSwarmSimulation();
+    }
+  }, 7000);
 });
