@@ -113,6 +113,10 @@ export async function startServer(port = 4488, host = '0.0.0.0', customStorage) 
                 '.html': 'text/html',
                 '.css': 'text/css',
                 '.js': 'application/javascript',
+                '.mjs': 'application/javascript',
+                '.sh': 'application/x-sh',
+                '.py': 'text/x-python',
+                '.h': 'text/x-c',
                 '.svg': 'image/svg+xml',
                 '.json': 'application/json'
             };

@@ -310,6 +310,7 @@
     <div class="guide-tabs-wrap">
       <div class="tab-buttons">
         <button class="guide-tab-btn active" data-tab="tab-cli">Terminal / CLI</button>
+        <button class="guide-tab-btn" data-tab="tab-airgap">📦 Single-File / Offline</button>
         <button class="guide-tab-btn" data-tab="tab-node">Node.js / TypeScript</button>
         <button class="guide-tab-btn" data-tab="tab-python">Python SDK</button>
         <button class="guide-tab-btn" data-tab="tab-c">Embedded C / Arduino</button>
@@ -334,6 +335,44 @@ crosstalk short '!LCK @src/auth.ts #FEAT "oauth handler" &WAIT'
 
 # 4. Stream real-time events in the terminal:
 crosstalk tail</code></pre>
+      </div>
+
+      <!-- Tab Content: Single-File Air-Gapped Install -->
+      <div class="tab-pane" id="tab-airgap">
+        <div class="airgap-header-card">
+          <div class="airgap-badge">ZERO INTERNET · ZERO DEPENDENCIES · SINGLE FILE</div>
+          <h4>Offline Single-File Installation</h4>
+          <p>Copy a single file via USB stick, local network, or air-gapped terminal to install and run immediately without internet access:</p>
+          <div class="airgap-download-row">
+            <a href="/crosstalk-airgap.sh" download="crosstalk-airgap.sh" class="btn-action-primary">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>Download crosstalk-airgap.sh (470 KB)</span>
+            </a>
+            <a href="https://github.com/ajokhai/cross-talk/raw/main/dist/crosstalk.standalone.mjs" download class="btn-action-secondary">
+              <span>Node Standalone Bundle (.mjs)</span>
+            </a>
+            <a href="https://github.com/ajokhai/cross-talk/raw/main/sdk/python/crosstalk.py" download class="btn-action-secondary">
+              <span>Python Standalone Client (.py)</span>
+            </a>
+          </div>
+        </div>
+        <div class="code-header">
+          <span>Run or Install on Any Offline Device</span>
+          <button class="btn-copy-code" onclick="window.copyTabCode('tab-airgap-code')">Copy</button>
+        </div>
+        <pre><code id="tab-airgap-code"># 1. Install permanently to system PATH (works with Node or Python 3):
+sh crosstalk-airgap.sh install
+
+# 2. Or run any command directly from the single file without installing:
+sh crosstalk-airgap.sh who
+sh crosstalk-airgap.sh up my-channel
+sh crosstalk-airgap.sh serve
+
+# 3. Node standalone bundle (self-installing):
+node crosstalk.standalone.mjs install
+
+# 4. Pure Python stdlib standalone client (zero pip dependencies):
+python3 crosstalk.py who</code></pre>
       </div>
 
       <!-- Tab Content 2: Node.js -->

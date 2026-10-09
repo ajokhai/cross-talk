@@ -471,4 +471,66 @@ program
     }
   });
 
+// Command: install (Offline single-file installer to system PATH)
+program
+  .command('install')
+  .description('Install this standalone CrossTalk CLI to system PATH (works 100% offline from a single file)')
+  .option('-d, --dir <directory>', 'Destination directory (defaults to /usr/local/bin or ~/.local/bin)')
+  .option('-n, --name <name>', 'Command binary name', 'crosstalk')
+  .action(async (options) => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const os = await import('node:os');
+
+    const binName = options.name || 'crosstalk';
+    let targetDir = options.dir;
+
+    if (!targetDir) {
+      const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+      if (isRoot) {
+        targetDir = '/usr/local/bin';
+      } else {
+        // Test write access to /usr/local/bin
+        try {
+          fs.accessSync('/usr/local/bin', fs.constants.W_OK);
+          targetDir = '/usr/local/bin';
+        } catch {
+          targetDir = path.join(os.homedir(), '.local', 'bin');
+        }
+      }
+    }
+
+    try {
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      const sourceFile = process.argv[1];
+      const targetFile = path.join(targetDir, binName);
+
+      fs.copyFileSync(sourceFile, targetFile);
+      fs.chmodSync(targetFile, 0o755);
+
+      console.log(bold(green(`\n✔ CrossTalk v1.0.0 successfully installed to ${targetFile}!`)));
+      console.log(cyan(`✔ Air-gapped offline installation complete without internet connection.`));
+
+      const pathEnv = process.env.PATH || '';
+      if (!pathEnv.includes(targetDir)) {
+        console.log(yellow(`\n⚠️  Notice: ${targetDir} is not currently in your system PATH.`));
+        console.log(`Add it to your shell profile by running:`);
+        console.log(bold(`  echo 'export PATH="${targetDir}:$PATH"' >> ~/.bashrc (or ~/.zshrc)`));
+        console.log(`  source ~/.bashrc\n`);
+      } else {
+        console.log(green(`✔ Directory is in your PATH. You can immediately run:`));
+        console.log(bold(`  ${binName} who`));
+        console.log(bold(`  ${binName} up`));
+        console.log(bold(`  ${binName} serve`));
+        console.log(bold(`  ${binName} dict\n`));
+      }
+    } catch (err: any) {
+      console.error(bold(red(`\n✖ Installation failed: ${err.message}`)));
+      console.log(`Try running with sudo if installing to /usr/local/bin: sudo node ${process.argv[1]} install\n`);
+    }
+  });
+
 program.parse(process.argv);

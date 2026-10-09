@@ -148,6 +148,44 @@ uart.write(pkt)
 
 ---
 
+## 📦 Offline & Air-Gapped Single-File Installation (Zero Internet)
+
+Install or run CrossTalk on any air-gapped device, server, or isolated VM by copying a **single file** with **zero internet connection** and **zero external packages**:
+
+### Method 1: All-in-One Self-Extracting Shell Script (`crosstalk-airgap.sh`)
+Copy [`dist/crosstalk-airgap.sh`](file:///Users/Josh/Documents/cross-talk/dist/crosstalk-airgap.sh) (470 KB) via USB or local network and run:
+```bash
+# Install permanently to /usr/local/bin or ~/.local/bin (auto-detects Node.js or Python 3):
+sh crosstalk-airgap.sh install
+
+# Or run any command directly from the file without installing:
+sh crosstalk-airgap.sh who
+sh crosstalk-airgap.sh up my-project
+sh crosstalk-airgap.sh serve
+```
+
+### Method 2: Node.js Standalone Bundle (`crosstalk.standalone.mjs`)
+Copy [`dist/crosstalk.standalone.mjs`](file:///Users/Josh/Documents/cross-talk/dist/crosstalk.standalone.mjs) (328 KB, 100% self-contained with all dependencies bundled):
+```bash
+# Run directly:
+node crosstalk.standalone.mjs who
+
+# Or self-install to system PATH in one command:
+node crosstalk.standalone.mjs install
+```
+
+### Method 3: Python Pure Stdlib Client (`crosstalk.py`)
+Copy [`sdk/python/crosstalk.py`](file:///Users/Josh/Documents/cross-talk/sdk/python/crosstalk.py) (8 KB, zero pip packages, 100% standard library):
+```bash
+# Run directly:
+python3 crosstalk.py who
+
+# Or install to system PATH:
+python3 crosstalk.py install
+```
+
+---
+
 ## 🛠️ Quickstart
 
 ### 1. Start or Join in a Single Command

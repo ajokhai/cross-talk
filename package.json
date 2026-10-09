@@ -29,7 +29,9 @@
     "crosstalk-mcp": "./bin/crosstalk-mcp.js"
   },
   "scripts": {
-    "build": "tsc && cp -r src/server/web dist/server/",
+    "build": "tsc && cp -r src/server/web dist/server/ && npm run bundle && node scripts/build-airgap.js",
+    "bundle": "esbuild src/client/cli.ts --bundle --platform=node --target=node18 --format=esm --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);' --outfile=dist/crosstalk.standalone.mjs --external:mongodb && chmod +x dist/crosstalk.standalone.mjs",
+    "build:airgap": "node scripts/build-airgap.js",
     "start": "node dist/server/index.js",
     "dev": "tsx src/server/index.ts",
     "cli": "tsx src/client/cli.ts",
@@ -62,6 +64,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/ws": "^8.5.10",
+    "esbuild": "^0.21.5",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0"
   }
