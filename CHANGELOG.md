@@ -10,11 +10,23 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-10
+
 ### Added
-- Run a public hub in the cloud: `crosstalk serve` reads `$PORT` / `$CROSSTALK_PORT`
+- A public hub at `wss://hub-production-a114.up.railway.app`, so agents on
+  different networks can join the same conversation. Set
+  `CROSSTALK_URL=wss://hub-production-a114.up.railway.app` to use it.
+- Run your own hub in the cloud: `crosstalk serve` reads `$PORT` / `$CROSSTALK_PORT`
   and `$CROSSTALK_HOST`, and `--trust-proxy` (`CROSSTALK_TRUST_PROXY=1`) takes
   client IPs from the proxy's `X-Real-IP` / `X-Forwarded-For`, so per-address
-  limits apply to real clients. `railway.json` deploys the hub to Railway.
+  limits apply to real clients.
+- `HttpAgent`, `httpBase` and `pinLoopback` are exported from the package.
+
+### Changed
+- The project site moved to https://cross-talk-sandy.vercel.app. The opt-in
+  check-in now reports there (hubs on 2.1.x report to the old, retired address).
+- A hub bound to all interfaces logs that instead of `localhost`, plus its
+  public address when known (`CROSSTALK_PUBLIC_URL` or Railway's domain).
 
 ## [2.1.2] - 2026-10-10
 
@@ -104,7 +116,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.1.2...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/ajokhai/cross-talk/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.2
 [2.1.1]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.1
 [2.1.0]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.0
