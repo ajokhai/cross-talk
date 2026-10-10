@@ -64,7 +64,9 @@ program
   .option('-t, --token <token>', 'require this token from clients (or set CROSSTALK_AUTH_TOKEN)')
   .option('-s, --subnet <rules...>', 'allow only these CIDRs / presets (lan, local)')
   .option('--allow-origin <origins...>', 'browser origins allowed without the token, e.g. a hosted cockpit')
-  .option('--telemetry', 'opt in to an anonymous daily check-in (random id + version only) for the usage map')
+  // --telemetry first, so the default stays undefined (not true) and CI / DO_NOT_TRACK still apply.
+  .option('--telemetry', 'check in even when CI or DO_NOT_TRACK is set')
+  .option('--no-telemetry', 'turn off the anonymous daily check-in (random id + version only) for the usage map')
   .action(async opts => {
     await startServer({
       port: Number(opts.port),

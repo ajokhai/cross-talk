@@ -24,33 +24,25 @@ async function collector() {
   return { url: `http://127.0.0.1:${port}/api/ping`, bodies, close: () => new Promise(r => server.close(r)) };
 }
 
-test('telemetry is off unless explicitly enabled, and the env can veto the flag', () => {
-  const saved = process.env.CROSSTALK_TELEMETRY;
-  try {
-    delete process.env.CROSSTALK_TELEMETRY;
-    assert.equal(telemetryEnabled(), false);
-    assert.equal(telemetryEnabled(true), true);
-    process.env.CROSSTALK_TELEMETRY = '1';
-    assert.equal(telemetryEnabled(), true);
-    process.env.CROSSTALK_TELEMETRY = '0';
-    assert.equal(telemetryEnabled(true), false);
-  } finally {
-    if (saved === undefined) delete process.env.CROSSTALK_TELEMETRY;
-    else process.env.CROSSTALK_TELEMETRY = saved;
-  }
+test('telemetry is on by default; the flag, CROSSTALK_TELEMETRY, DO_NOT_TRACK and CI turn it off', () => {
+  assert.equal(telemetryEnabled(undefined, {}), true);
+  assert.equal(telemetryEnabled(false, {}), false);
+  assert.equal(telemetryEnabled(undefined, { CROSSTALK_TELEMETRY: '0' }), false);
+  assert.equal(telemetryEnabled(true, { CROSSTALK_TELEMETRY: 'off' }), false, 'the env var vetoes the flag');
+  assert.equal(telemetryEnabled(undefined, { DO_NOT_TRACK: '1' }), false);
+  assert.equal(telemetryEnabled(undefined, { CI: 'true' }), false);
+  assert.equal(telemetryEnabled(undefined, { CI: 'true', CROSSTALK_TELEMETRY: '1' }), true, 'an explicit opt-in beats CI');
+  assert.equal(telemetryEnabled(undefined, { DO_NOT_TRACK: '0' }), true);
 });
 
 test('disabled telemetry sends nothing', async () => {
   const c = await collector();
-  const saved = process.env.CROSSTALK_TELEMETRY;
-  delete process.env.CROSSTALK_TELEMETRY;
   try {
-    const stop = startTelemetry({ url: c.url, idFile: tmpFile() });
+    const stop = startTelemetry({ enabled: false, url: c.url, idFile: tmpFile() });
     await new Promise(r => setTimeout(r, 200));
     stop();
     assert.equal(c.bodies.length, 0);
   } finally {
-    if (saved !== undefined) process.env.CROSSTALK_TELEMETRY = saved;
     await c.close();
   }
 });
@@ -79,7 +71,7 @@ test('the id is stable across runs and failures never throw', async () => {
   const file = tmpFile();
   assert.equal(telemetryId(file), telemetryId(file));
   assert.equal(await checkIn('http://127.0.0.1:9/nothing-listens-here', telemetryId(file)), false);
-  // Without a configured endpoint, opting in sends nothing and says so.
+  // Without a configured endpoint, nothing is sent and the log says so.
   const lines: string[] = [];
   startTelemetry({ enabled: true, url: '', idFile: file, log: l => lines.push(l) })();
   assert.match(lines[0], /no valid endpoint/);

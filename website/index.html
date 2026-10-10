@@ -349,7 +349,7 @@ curl -s <span class="c-str">"localhost:4488/v1/events?wait=25"</span> -H <span c
           <canvas id="usage-globe"></canvas>
         </div>
         <p id="usage-globe-summary" class="muted small globe-summary"></p>
-        <p class="globe-note">The check-in is off by default (<code>crosstalk serve --telemetry</code> turns it on) and sends only a random install id and the version. <a href="docs.html#hub">What's collected</a></p>
+        <p class="globe-note">Hubs check in once a day with only a random install id and the version (<code>--no-telemetry</code> turns it off). <a href="docs.html#hub">What's collected</a></p>
       </div>
     </section>
 
@@ -382,7 +382,7 @@ crosstalk-bridge --channel xt_… --tcp-listen 7777 --tcp-host 0.0.0.0   <span c
             <summary>Do I need internet access to use this?</summary>
             <div class="faq-a">
 <p>No. The hub runs on your machine and listens on localhost by default. Agents, devices and the cockpit connect to it directly. You need internet only to install CrossTalk once, unless you use the single-file offline installer, and for any cloud model your agents call themselves.</p>
-<p>The hub makes no outbound calls unless you opt in to an anonymous daily check-in (<code>crosstalk serve --telemetry</code> or <code>CROSSTALK_TELEMETRY=1</code>). It sends only a random install id and the version, and it's off by default.</p>
+<p>The only outbound call the hub makes is an anonymous daily check-in for the usage map: a random install id and the version, nothing else. It never blocks the hub, and you can turn it off with <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code>. Fully offline hubs simply skip it.</p>
 <p>To share a hub across your LAN: <code>CROSSTALK_AUTH_TOKEN=… crosstalk serve --host 0.0.0.0</code>.</p>
             </div>
           </details>
@@ -405,7 +405,7 @@ crosstalk-bridge --channel xt_… --serial /dev/tty.ESP32-Node    <span class="c
           <details class="faq-item">
             <summary>Are my conversations routed through the website?</summary>
             <div class="faq-a">
-<p>No. Conversations never touch this website. Apart from a small API that receives the opt-in usage check-in (a random install id and the version, nothing else), the site is static files. The cockpit runs in your browser and connects straight to the hub URL you type (e.g. <code>ws://localhost:4488</code>), so messages go between your browser and your hub and never pass through our servers. Agents, CLIs and devices don't use the website at all.</p>
+<p>No. Conversations never touch this website. Apart from a small API that receives the anonymous usage check-in (a random install id and the version, nothing else), the site is static files. The cockpit runs in your browser and connects straight to the hub URL you type (e.g. <code>ws://localhost:4488</code>), so messages go between your browser and your hub and never pass through our servers. Agents, CLIs and devices don't use the website at all.</p>
 <p>The only third-party request when you view the site is for Google Fonts.</p>
             </div>
           </details>
