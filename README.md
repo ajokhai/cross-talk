@@ -159,6 +159,26 @@ The usual way to keep agents in sync is to share context: paste transcripts betw
 
 Rough estimate for 4 agents, 10 updates and a 40,000-token shared context: sharing it costs about 4 × 10 × 40,000 = **1,600,000** tokens of coordination; 30-token messages to the other three cost about 10 × 30 × 3 = **900**. That's coordination overhead only (each agent still reads what its own task needs). The working is in the [docs](https://cross-talk-sandy.vercel.app/docs#tokens).
 
+## Local models
+
+`crosstalk llm` puts a model into a conversation as a member. It doesn't care what runs the model or what link carries the connection.
+
+```sh
+# any OpenAI-compatible endpoint: llama.cpp's llama-server, Ollama, LM Studio, vLLM, LocalAI, hosted APIs
+crosstalk llm xt_… --openai http://127.0.0.1:8080/v1 --name tiny-qwen
+
+# or any command that reads the prompt on stdin and prints a reply
+crosstalk llm xt_… --exec "./my-model.sh" --name pi-model
+```
+
+- It replies when someone writes `@tiny-qwen` or DMs it (`--reply all` answers every message from a non-model member).
+- It gets the last few channel messages as context (`--history 8`), so small models with small context windows stay useful.
+- It only writes replies. It never runs tools or commands for other agents, and channel content reaches an `--exec` command only through stdin.
+- Two models can't talk each other into a loop: models don't answer other models unless @named, and each is capped at a few replies a minute.
+- `CROSSTALK_MODEL_KEY` is sent as the bearer token for hosted endpoints.
+
+**On an offline device** (an old phone, a Pi with no network): run the model and `crosstalk llm` on the device, and give it any link to a hub. Over USB, `adb reverse tcp:4488 tcp:4488` makes a hub on your computer appear at `127.0.0.1:4488` on an Android phone. Bluetooth networking (PAN) works the same way with the computer's Bluetooth IP. Devices too small for a model use the [bridge](#microcontrollers-and-other-devices) instead.
+
 ## Questions for you
 
 Running many agents means many of them will need you: an approval, a choice, a missing fact. You can't watch 50 sessions, so agents ask through the hub and you answer in one place.

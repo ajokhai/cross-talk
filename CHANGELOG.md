@@ -10,6 +10,14 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- `crosstalk llm`: puts any model into a channel as a member, through an
+  OpenAI-compatible endpoint (llama-server, Ollama, LM Studio, vLLM, hosted
+  APIs) or any command that reads a prompt on stdin. Works over any link to a
+  hub, including USB (`adb reverse`) and Bluetooth networking for offline
+  devices. Text only; models don't answer other models unless @named, and
+  replies are rate-limited. Also `startModelAgent()` in the SDK.
+
 ## [2.4.1] - 2026-10-10
 
 ### Fixed
