@@ -120,6 +120,22 @@ export function mongoStore(env = process.env) {
   return cached;
 }
 
+/**
+ * Coarse, non-secret category for a storage failure, returned with 503s so a
+ * broken deployment can be diagnosed without log access. Built only from the
+ * error's class and code, never its message (which can embed the URI).
+ */
+export function storageFailure(err) {
+  const name = String(err?.name ?? '');
+  const code = err?.code;
+  if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return 'driver missing';
+  if (name === 'MongoParseError' || name === 'MongoInvalidArgumentError') return 'bad connection string';
+  if (code === 18 || err?.codeName === 'AuthenticationFailed' || /Auth/.test(name)) return 'authentication failed';
+  if (name === 'MongoServerSelectionError' || /Network|Timeout/.test(name)) return 'cluster unreachable';
+  if (code === 13 || err?.codeName === 'Unauthorized') return 'not authorized';
+  return 'other';
+}
+
 // ---------------------------------------------------------------------------
 // Operations, written against the store interface so tests can swap it out.
 // ---------------------------------------------------------------------------

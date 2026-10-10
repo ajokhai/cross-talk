@@ -3,7 +3,7 @@
 // The country comes from Vercel's geo header. The IP and the id are stored only
 // as salted hashes, and both expire (rate limits after 2h, pings after 35 days).
 
-import { countryOf, mongoStore, parsePing, recordPing, storeConfigured } from './_telemetry.js';
+import { countryOf, mongoStore, parsePing, recordPing, storageFailure, storeConfigured } from './_telemetry.js';
 
 const MAX_BODY = 256;
 
@@ -59,7 +59,7 @@ export async function handle(req, res, getStore = mongoStore) {
   } catch (err) {
     // Never err.message: driver messages can embed the URI's user or host.
     console.error('ping: storage unavailable:', err?.name, err?.code, err?.codeName);
-    return send(res, 503, { error: 'storage unavailable' });
+    return send(res, 503, { error: 'storage unavailable', reason: storageFailure(err) });
   }
 }
 

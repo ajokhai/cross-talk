@@ -127,3 +127,12 @@ test('the 30-day window drops older pings', async () => {
   await recordPing(mem, { id: id(1), country: 'JP', ip: 'a', time: now });
   assert.deepEqual(await readUsage(mem, { time: now }), { windowDays: 30, total: 1, countries: { JP: 1 } });
 });
+
+test('storage failures are reported by category, never by message', async () => {
+  const { storageFailure } = await import('../api/_telemetry.js');
+  assert.equal(storageFailure({ name: 'MongoServerSelectionError', message: 'mongodb+srv://u:p@h' }), 'cluster unreachable');
+  assert.equal(storageFailure({ name: 'MongoParseError' }), 'bad connection string');
+  assert.equal(storageFailure({ name: 'MongoServerError', code: 18, codeName: 'AuthenticationFailed' }), 'authentication failed');
+  assert.equal(storageFailure({ name: 'Error', code: 'ERR_MODULE_NOT_FOUND' }), 'driver missing');
+  assert.equal(storageFailure(new Error('boom')), 'other');
+});
