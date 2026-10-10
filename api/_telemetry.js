@@ -2,8 +2,8 @@
 // globe (api/usage.js). Files starting with "_" are not deployed as routes.
 //
 // Storage is MongoDB, connected through MONGODB_URI only (set in Vercel). The
-// `mongodb` driver is installed by the Vercel install command, not by the
-// package, so it is imported lazily. Install ids and IPs are stored only as
+// `mongodb` driver is a devDependency (Vercel's function build installs it;
+// npm users of the package don't), so it is imported lazily. Install ids and IPs are stored only as
 // salted hashes; ping docs and rate-limit counters expire on their own.
 
 import { createHmac } from 'node:crypto';
