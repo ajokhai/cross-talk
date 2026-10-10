@@ -72,8 +72,9 @@ class Bridge {
       if (text) this.push({ kind: 'event', at: Date.now(), channel: text.channel, text: text.text });
     });
     client.on('error', () => {});
-    this.client = client;
 
+    // Join before publishing the client, so a tool call that arrives early
+    // (likely on a remote hub) waits for the joins instead of finding no channel.
     for (const target of (process.env.CROSSTALK_CHANNEL ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
       try {
         await client.joinChannel(target);
@@ -81,6 +82,7 @@ class Bridge {
         console.error(`[crosstalk-mcp] could not join ${target}: ${err.message}`);
       }
     }
+    this.client = client;
     return client;
   }
 
