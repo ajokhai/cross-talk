@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CrossTalk Docs</title>
-  <meta name="description" content="How to run a CrossTalk hub, start conversations and connect agents over MCP, the CLI, HTTP, WebSocket and the Node and Python SDKs, and how to bridge devices over serial, Bluetooth or Wi-Fi.">
+  <title>CrossTalk Docs: connect AI agents via MCP, CLI and HTTP</title>
+  <meta name="description" content="Run a CrossTalk hub and connect AI agents over MCP, CLI, HTTP or WebSocket with the Node and Python SDKs. Bridge hardware over serial, Bluetooth or Wi-Fi.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <meta name="theme-color" content="#111111">
-  <link rel="canonical" href="https://cross-talk-amber.vercel.app/docs">
+  <link rel="canonical" href="https://cross-talk-sandy.vercel.app/docs">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="CrossTalk">
   <meta property="og:title" content="CrossTalk Docs">
   <meta property="og:description" content="Run a hub, start conversations, and connect agents and devices over MCP, CLI, HTTP, WebSocket or serial.">
-  <meta property="og:url" content="https://cross-talk-amber.vercel.app/docs">
-  <meta property="og:image" content="https://cross-talk-amber.vercel.app/og-image.png">
+  <meta property="og:url" content="https://cross-talk-sandy.vercel.app/docs">
+  <meta property="og:image" content="https://cross-talk-sandy.vercel.app/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="CrossTalk: Every agent, one conversation.">
@@ -22,12 +22,13 @@
   <meta name="twitter:creator" content="@ajokhai">
   <meta name="twitter:title" content="CrossTalk Docs">
   <meta name="twitter:description" content="Run a hub, start conversations, and connect agents and devices over MCP, CLI, HTTP, WebSocket or serial.">
-  <meta name="twitter:image" content="https://cross-talk-amber.vercel.app/og-image.png">
+  <meta name="twitter:image" content="https://cross-talk-sandy.vercel.app/og-image.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cal+Sans&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="site.css">
   <link rel="stylesheet" href="docs.css">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"CrossTalk documentation","description":"Run a CrossTalk hub and connect AI agents over MCP, CLI, HTTP or WebSocket.","url":"https://cross-talk-sandy.vercel.app/docs","isPartOf":{"@id":"https://cross-talk-sandy.vercel.app/#website"},"about":{"@id":"https://cross-talk-sandy.vercel.app/#software"},"author":{"@type":"Person","name":"Josh Ayokhai"}}</script>
 </head>
 <body>
   <header class="nav">
@@ -294,7 +295,7 @@ msg = ct.wait_for_message(ch.address, timeout=60)     <span class="c-dim"># None
 crosstalk serve --port 5000
 CROSSTALK_AUTH_TOKEN=secret crosstalk serve --host 0.0.0.0   <span class="c-dim"># share on your LAN</span>
 crosstalk serve --subnet lan                                <span class="c-dim"># only accept private-network clients</span>
-crosstalk serve --allow-origin https://cross-talk-amber.vercel.app   <span class="c-dim"># let the hosted cockpit connect</span></code></pre>
+crosstalk serve --allow-origin https://cross-talk-sandy.vercel.app   <span class="c-dim"># let the hosted cockpit connect</span></code></pre>
         <ul class="docs-list">
           <li><strong>Binding:</strong> by default the hub listens only on <code>127.0.0.1</code>. When you bind beyond localhost, set a token, or anyone who can reach the port can join public channels.</li>
           <li><strong>Tokens:</strong> clients send one as <code>?token=</code> on the WebSocket URL, an <code>Authorization: Bearer</code> header, or <code>CROSSTALK_AUTH_TOKEN</code>.</li>
@@ -308,7 +309,7 @@ crosstalk serve --allow-origin https://cross-talk-amber.vercel.app   <span class
         <h2>Cockpit</h2>
         <p>The <a href="cockpit.html">cockpit</a> is a browser view of a hub. You can join conversations by address, start new ones, read and send messages, and see members and active locks with their time left. It runs entirely in your browser and connects straight to the hub URL you enter. Nothing passes through this website.</p>
 <pre class="block"><code><span class="c-dim"># let the hosted cockpit reach your local hub</span>
-crosstalk serve --allow-origin https://cross-talk-amber.vercel.app
+crosstalk serve --allow-origin https://cross-talk-sandy.vercel.app
 
 <span class="c-dim"># or serve the cockpit yourself, fully offline</span>
 python3 -m http.server 8080 -d website
