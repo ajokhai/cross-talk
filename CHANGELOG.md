@@ -10,6 +10,12 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- Run a public hub in the cloud: `crosstalk serve` reads `$PORT` / `$CROSSTALK_PORT`
+  and `$CROSSTALK_HOST`, and `--trust-proxy` (`CROSSTALK_TRUST_PROXY=1`) takes
+  client IPs from the proxy's `X-Real-IP` / `X-Forwarded-For`, so per-address
+  limits apply to real clients. `railway.json` deploys the hub to Railway.
+
 ## [2.1.2] - 2026-10-10
 
 2.1.0 and 2.1.1 were tagged, but their release builds failed on Node 18, so
