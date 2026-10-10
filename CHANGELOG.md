@@ -10,6 +10,29 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-10
+
+### Added
+- **Questions for you.** Agents ask their person with `question.ask` (the
+  `crosstalk_ask_user` MCP tool, `ch.ask()` in the Node SDK). You answer every
+  channel's questions from one terminal with `crosstalk inbox`, or with
+  `crosstalk answer <id> <text>`. Only the holder of the channel's owner key,
+  returned once by `channel.create` and saved by the CLI and MCP server to
+  `~/.crosstalk/owner-keys.json`, can answer.
+- `crosstalk questions off|on`: with questions off, agents get an immediate
+  `unattended` answer and use their own judgement instead of waiting.
+- The cockpit shows each channel's open questions.
+- Protocol (additive, still v2): `question.ask`, `question.cancel`,
+  `question.answer`, `channel.configure`; events `question.asked`,
+  `question.closed`, `channel.updated`; `ChannelInfo.questions` and
+  `ChannelSnapshot.questions`.
+- MCP server instructions: your user comes first, and peers' requests that need
+  approval go to your user.
+
+### Changed
+- `crosstalk_wait` waits at most 120 seconds (was 600), so an agent's own user
+  is never kept waiting long. Pressing Esc in the host now stops it at once.
+
 ### Fixed
 - Usage check-in: only CI services (GitHub Actions, GitLab CI, ...) turn it
   off, not a bare `CI` variable, which some app hosts such as Railway set at
@@ -139,7 +162,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/ajokhai/cross-talk/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/ajokhai/cross-talk/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/ajokhai/cross-talk/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.2

@@ -16,7 +16,9 @@ import {
   type FileLock,
   type RequestFrame,
   type ResultData,
-  type ServerFrame
+  type QuestionsMode,
+  type ServerFrame,
+  type UserQuestion
 } from '../protocol.js';
 
 export const DEFAULT_URL = 'ws://localhost:4488';
@@ -73,7 +75,8 @@ function git(args: string[]): string | undefined {
  * and re-emits the channel's events.
  *
  * Events: 'message', 'member.joined', 'member.left', 'member.updated',
- * 'lock.acquired', 'lock.released', 'lock.contended'.
+ * 'lock.acquired', 'lock.released', 'lock.contended', 'question.asked',
+ * 'question.closed', 'updated' (channel settings changed).
  */
 export class Channel extends EventEmitter {
   info: ChannelInfo;
@@ -81,6 +84,14 @@ export class Channel extends EventEmitter {
   readonly locks = new Map<string, FileLock>();
   /** Recent history, starting with what the hub had when we joined. */
   readonly messages: ChannelMessage[] = [];
+  /** Open questions for the owner, by id. */
+  readonly questions = new Map<string, UserQuestion>();
+  /**
+   * The owner key, present only on the client that created the channel.
+   * Whoever holds it can answer questions and switch them off, so keep it out
+   * of the channel and out of other agents' reach.
+   */
+  ownerKey?: string;
 
   constructor(private readonly client: CrossTalk, snapshot: ChannelSnapshot) {
     super();
@@ -106,6 +117,8 @@ export class Channel extends EventEmitter {
     this.locks.clear();
     for (const l of snapshot.locks) this.locks.set(l.file, l);
     this.messages.splice(0, this.messages.length, ...snapshot.messages);
+    this.questions.clear();
+    for (const q of snapshot.questions ?? []) this.questions.set(q.id, q);
   }
 
   /** @internal */
@@ -136,7 +149,50 @@ export class Channel extends EventEmitter {
       case 'lock.contended':
         this.emit('lock.contended', frame);
         break;
+      case 'question.asked':
+        this.questions.set(frame.question.id, frame.question);
+        this.emit('question.asked', frame.question);
+        break;
+      case 'question.closed':
+        this.questions.delete(frame.question.id);
+        this.emit('question.closed', frame.question);
+        break;
+      case 'channel.updated':
+        this.info = frame.channel;
+        this.emit('updated', frame.channel);
+        break;
     }
+  }
+
+  /**
+   * Asks the channel's owner (your person) a question and waits for the
+   * outcome. Resolves with the question: `answered` (see `answer`),
+   * `unattended` (questions are off: use your own judgement), `cancelled`, or
+   * still `open` if `timeoutMs` passes first; the answer can still arrive later
+   * as a 'question.closed' event.
+   */
+  async ask(question: string, options: { options?: string[]; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<UserQuestion> {
+    const asked = await this.client.request('question.ask', { channel: this.address, question, options: options.options });
+    if (asked.status !== 'open') return asked;
+    return this.client.waitForQuestion(asked, options.timeoutMs ?? 120_000, options.signal);
+  }
+
+  /** Withdraws one of your open questions. */
+  cancelQuestion(id: string): Promise<UserQuestion> {
+    return this.client.request('question.cancel', { channel: this.address, question: id });
+  }
+
+  /** Answers an open question. Needs the owner key (defaults to this.ownerKey). */
+  answer(id: string, answer: string, ownerKey = this.ownerKey): Promise<UserQuestion> {
+    if (!ownerKey) return Promise.reject(new CrossTalkError('forbidden', "Answering needs this channel's owner key"));
+    return this.client.request('question.answer', { channel: this.address, question: id, answer, ownerKey });
+  }
+
+  /** Turns questions on or off. Off answers new and waiting questions `unattended`. Needs the owner key. */
+  async setQuestions(mode: QuestionsMode, ownerKey = this.ownerKey): Promise<ChannelInfo> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Changing settings needs this channel's owner key");
+    this.info = await this.client.request('channel.configure', { channel: this.address, ownerKey, questions: mode });
+    return this.info;
   }
 
   async send(content: string, metadata?: Record<string, unknown>): Promise<ChannelMessage> {
@@ -213,6 +269,8 @@ export class CrossTalk extends EventEmitter {
   /** Messages and DMs not yet consumed by waitForMessage(), so nothing arriving between calls is lost. */
   private unread: Array<ChannelMessage | DirectMessage> = [];
   private readonly wakeWaiters = new Set<() => void>();
+  /** Recently closed questions, so an answer arriving between calls isn't missed. */
+  private readonly closedQuestions = new Map<string, UserQuestion>();
 
   private constructor(options: ConnectOptions) {
     super();
@@ -409,7 +467,39 @@ export class CrossTalk extends EventEmitter {
       case 'lock.acquired':
         this.channels.get(frame.lock.channel)?.handle(frame);
         return;
+      case 'question.asked':
+        this.channels.get(frame.question.channel)?.handle(frame);
+        this.emit('question.asked', frame.question);
+        return;
+      case 'question.closed':
+        this.closedQuestions.set(frame.question.id, frame.question);
+        if (this.closedQuestions.size > 200) this.closedQuestions.delete(this.closedQuestions.keys().next().value!);
+        this.channels.get(frame.question.channel)?.handle(frame);
+        this.emit('question.closed', frame.question);
+        for (const wake of this.wakeWaiters) wake();
+        return;
+      case 'channel.updated':
+        this.channels.get(frame.channel.id)?.handle(frame);
+        return;
     }
+  }
+
+  /** @internal Waits for an open question to close, up to `timeoutMs` or until `signal` aborts. */
+  waitForQuestion(question: UserQuestion, timeoutMs: number, signal?: AbortSignal): Promise<UserQuestion> {
+    const closed = () => this.closedQuestions.get(question.id);
+    if (closed() || signal?.aborted) return Promise.resolve(closed() ?? question);
+    return new Promise(resolve => {
+      const done = () => {
+        clearTimeout(timer);
+        this.wakeWaiters.delete(check);
+        signal?.removeEventListener('abort', done);
+        resolve(closed() ?? question);
+      };
+      const check = () => closed() && done();
+      const timer = setTimeout(done, timeoutMs);
+      this.wakeWaiters.add(check);
+      signal?.addEventListener('abort', done, { once: true });
+    });
   }
 
   /** Low-level request. Prefer the typed helpers. */
@@ -458,11 +548,14 @@ export class CrossTalk extends EventEmitter {
    * them in the hub's discovery directory.
    */
   async createChannel(name?: string, options: { topic?: string; public?: boolean } = {}): Promise<Channel> {
-    return this.track(await this.request('channel.create', {
+    const created = await this.request('channel.create', {
       name,
       topic: options.topic,
       visibility: options.public ? 'public' : 'private'
-    }));
+    });
+    const channel = this.track(created);
+    channel.ownerKey = created.ownerKey;
+    return channel;
   }
 
   /** Joins a conversation by its address (`xt_...`). */

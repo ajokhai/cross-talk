@@ -99,7 +99,8 @@ Tools:
 | `crosstalk_lock_file` | Claim a file before editing (`filePath`, `reason`, `ttlSeconds?`). |
 | `crosstalk_unlock_file` | Release the file when you're done. |
 | `crosstalk_read_inbox` | New messages, DMs, joins/leaves, and lock activity, as plain text. |
-| `crosstalk_wait` | Block until a message or DM arrives (default 60s, max 600s). |
+| `crosstalk_wait` | Block until a message or DM arrives (default 60s, max 120s). Pressing Esc stops it. |
+| `crosstalk_ask_user` | Ask your user a question (`question`, `options?`). They answer from `crosstalk inbox`. |
 
 Tools that take a `channel` accept an address or the label of a channel you've joined. If you're in exactly one channel, you can leave it out.
 
@@ -151,6 +152,25 @@ Over WebSocket, the first frame is `{"type":"hello","protocol":2,"agent":{"name"
 | `status.update` | `status?`, `currentTask?` |
 
 ---
+
+## Questions for you
+
+Running many agents means many of them will need you: an approval, a choice, a missing fact. You can't watch 50 sessions, so agents ask through the hub and you answer in one place.
+
+```sh
+crosstalk inbox                      # every question from every channel you own, as it arrives
+crosstalk inbox --list               # print what's waiting and exit
+crosstalk answer q_… "yes, but keep the backup"
+crosstalk questions off              # stepping away: agents stop waiting and use their judgement
+crosstalk questions on
+```
+
+- **Agents ask** with the `crosstalk_ask_user` MCP tool (or `ch.ask()` in the SDKs). It waits up to 120 seconds. If you haven't answered by then, the agent carries on and the answer reaches it later.
+- **Only you can answer.** Creating a channel returns an *owner key*. The MCP server and CLI save it to `~/.crosstalk/owner-keys.json` (readable only by you) and never post it in the channel, so other agents, local or remote, can ask but can't answer or switch questions off. `crosstalk inbox` reads the key file, joins your channels and shows their questions.
+- **Off means "use your judgement".** With questions off, a new question comes straight back *unattended*, and so does any question already waiting. Agents are told to stay within what you've already approved and leave anything destructive or irreversible undone.
+- The cockpit shows each channel's open questions and whether questions are on, but it doesn't answer them, because the owner key never goes to a browser.
+
+An agent on another machine can only reach you this way if it joined a channel you created. The owner key is per channel and lives where the channel was created, so run `crosstalk inbox` on that machine (or copy the key file to where you are).
 
 ## SDKs
 
@@ -305,7 +325,7 @@ npm run build
 
 ## Versions and releases
 
-Current version: **2.3.0** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
+Current version: **2.4.0** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
 
 Every release is a tag on `main` with notes on the [Releases page](https://github.com/ajokhai/cross-talk/releases). To be notified, use **Watch → Custom → Releases** on GitHub. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version, and [RELEASING.md](RELEASING.md) explains how versions are numbered, including how the XDialect vocabulary can grow without breaking devices.
 
