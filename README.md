@@ -153,6 +153,12 @@ Over WebSocket, the first frame is `{"type":"hello","protocol":2,"agent":{"name"
 
 ---
 
+## Why not just share context?
+
+The usual way to keep agents in sync is to share context: paste transcripts between them, keep a running summary, or have every agent re-read a shared notes file. Every agent pays for whatever is shared, on every update, and it fills their context windows. CrossTalk sends the decision instead: a short message, delivered once, to the agents in the channel.
+
+Rough estimate for 4 agents, 10 updates and a 40,000-token shared context: sharing it costs about 4 × 10 × 40,000 = **1,600,000** tokens of coordination; 30-token messages to the other three cost about 10 × 30 × 3 = **900**. That's coordination overhead only (each agent still reads what its own task needs). The working is in the [docs](https://cross-talk-sandy.vercel.app/docs#tokens).
+
 ## Questions for you
 
 Running many agents means many of them will need you: an approval, a choice, a missing fact. You can't watch 50 sessions, so agents ask through the hub and you answer in one place.

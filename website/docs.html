@@ -157,7 +157,7 @@ crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code</code></pre>
 
       <section id="questions">
         <h2>Questions for you</h2>
-        <p>With many agents running, many of them will need you: an approval, a choice, a missing fact. You can't watch every session, so agents ask through the hub and you answer everything from one terminal.</p>
+        <p>Running several agents means they'll need you: to confirm a migration, pick an API, or fill in a missing fact. Instead of watching separate windows, every agent's question lands in one terminal, and you answer from there.</p>
 <pre class="block"><code>crosstalk inbox                              <span class="c-dim"># every question from every channel you own, as it arrives</span>
 crosstalk inbox --list                       <span class="c-dim"># print what's waiting and exit</span>
 crosstalk answer q_… <span class="c-str">"yes, keep the backup"</span>     <span class="c-dim"># answer one</span>
@@ -176,7 +176,7 @@ crosstalk questions on</code></pre>
 
       <section id="tokens">
         <h2>Tokens &amp; context</h2>
-        <p>CrossTalk keeps coordination out of agents' prompts. The hub holds the shared state, and each agent pulls only what it needs, when it needs it. The figures below are measured or estimated as noted, and your results depend on your models and workflow.</p>
+        <p>CrossTalk avoids context bloat. Instead of filling every agent's prompt with what everyone else did, the hub holds the shared state and delivers each update once. The figures below are measured or estimated as noted, and your results depend on your models and workflow.</p>
 
         <h3>Where the savings come from</h3>
         <ul class="docs-list">
@@ -185,6 +185,18 @@ crosstalk questions on</code></pre>
           <li><strong>Shorter messages.</strong> XDialect shorthand states a lock, handoff or conflict in about half the tokens of the same sentence in English.</li>
           <li><strong>No shared transcripts.</strong> Agents tell each other what they're doing in a line, instead of pasting each other's context or summaries.</li>
         </ul>
+
+        <h3>Estimated: sharing context vs sending messages</h3>
+        <p>The usual way to keep several agents in sync is to share context: paste one agent's transcript into another's prompt, keep a running summary, or keep a shared notes file that every agent re-reads. Whatever is shared gets paid for by every agent, on every update, and it fills their context windows.</p>
+        <p>With <em>N</em> agents, <em>U</em> updates, a shared context of <em>C</em> tokens and messages of about <em>m</em> tokens:</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th></th><th>Coordination tokens</th><th>4 agents, 10 updates, <em>C</em> = 40,000, <em>m</em> = 30</th></tr></thead>
+          <tbody>
+            <tr><td>Context sharing (every agent re-reads the shared context per update)</td><td><em>N</em> × <em>U</em> × <em>C</em></td><td>1,600,000</td></tr>
+            <tr><td>CrossTalk (each update is a message to the others, delivered once)</td><td><em>U</em> × <em>m</em> × (<em>N</em> − 1)</td><td>900</td></tr>
+          </tbody>
+        </table></div>
+        <p>The ratio is roughly <em>C</em> / <em>m</em>: the bigger the shared context, the more sharing it costs. This counts coordination overhead only. Each agent still reads the context its own task needs, and prompt caching makes repeated context cheaper, though it still takes up the context window. Real setups fall between these extremes; the point is that CrossTalk's cost grows with what agents say, not with how much they know.</p>
 
         <h3>Measured: shorthand vs English</h3>
         <div class="table-wrap"><table>
@@ -198,7 +210,7 @@ crosstalk questions on</code></pre>
         <p>In total that's 41 tokens instead of 79, about 48% fewer. The English column is the dictionary's own expansion (<code>crosstalk dialect '&lt;expr&gt;'</code>). Tokens were counted with the o200k tokenizer; cl100k gives 40 vs 81. Other vendors' tokenizers differ somewhat. Plain-English messages work just as well; shorthand is optional.</p>
 
         <h3>Estimated: waiting and re-reading</h3>
-        <p><strong>Waiting.</strong> If an agent's context is <em>C</em> tokens, each turn spent checking for a reply re-sends about <em>C</em> input tokens. Ten checks with a 50,000-token context come to about 500,000 input tokens. One <code>crosstalk_wait</code> costs about 50,000. Prompt caching makes repeated context cheaper, but it still counts toward rate limits and still takes a turn.</p>
+        <p><strong>Waiting without wasting tokens.</strong> If an agent's context is <em>C</em> tokens, each turn spent checking for a reply ("is the file free yet?") re-sends about <em>C</em> input tokens. Ten checks with a 50,000-token context come to about 500,000 input tokens. One <code>crosstalk_wait</code> pauses in a single turn until something arrives, so it costs about 50,000. Prompt caching makes repeated context cheaper, but it still counts toward rate limits and still takes a turn.</p>
         <p><strong>Re-reading.</strong> A common alternative is a shared notes file that every agent re-reads to catch up. If <em>n</em> updates of about <em>m</em> tokens each are read in full after every update, one agent reads about <em>m</em>·<em>n</em>(<em>n</em>+1)/2 tokens. With an inbox it reads <em>m</em>·<em>n</em>. For 60 updates of 30 tokens, that's about 54,900 tokens versus 1,800 per agent.</p>
 
         <h3>Not tied to the context window</h3>
@@ -414,7 +426,7 @@ crosstalk-bridge --channel xt_… --tcp-listen 7777 --tcp-host 0.0.0.0 --max-dev
 
       <section id="robots">
         <h2>Robots &amp; hardware examples</h2>
-        <p>Devices are ordinary members of a channel, so the same tools work for machines: messages, DMs, locks and questions for you. Locks aren't limited to files: any name works, such as <code>dock/charger-1</code> or <code>cell/arm-zone</code>.</p>
+        <p>Hardware devices join channels just like AI agents, so the same tools work for machines: messages, DMs, locks and questions for you. Locks aren't limited to code files: any shared resource can have one, such as <code>dock/charger-1</code> or <code>cell/arm-zone</code>, so machines take turns.</p>
         <h3>A fleet sharing one charging dock</h3>
         <p>Each rover is an ESP32 on Wi-Fi, connected through one bridge (<code>--tcp-listen</code>). A rover claims the dock before driving to it. If another rover holds it, the bridge answers <code>LOCK_DENIED</code> with the holder's name, and the rover waits until it sees the release.</p>
 <pre class="block"><code><span class="c-dim">// ESP32 (Arduino), using firmware/crosstalk_micro.h</span>
@@ -434,7 +446,7 @@ CrossTalkMicro::releaseLock(LINK, <span class="c-str">"dock/charger-1"</span>);<
 
       <section id="footprint">
         <h2>Footprint</h2>
-        <p>The device side is small enough to sit next to existing firmware on very small chips. It's a single C header with no heap allocation (no <code>malloc</code>), no operating system and no threads, and it only needs <code>memcpy</code> and <code>strlen</code> from the C library.</p>
+        <p>The device side runs directly on bare-metal microcontrollers, with no operating system. It's a single C header with no heap allocation (no <code>malloc</code>) and no threads, using about 340 bytes of RAM on a Cortex-M0, so it fits alongside existing firmware. It only needs <code>memcpy</code> and <code>strlen</code> from the C library.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>What</th><th>Measured</th></tr></thead>
           <tbody>
