@@ -2,7 +2,7 @@
 // for the globe on the landing page.
 // {"configured":true,"windowDays":30,"total":N,"countries":{"US":12,...}}
 
-import { WINDOW_DAYS, mongoStore, readUsage, storeConfigured } from './_telemetry.js';
+import { WINDOW_DAYS, mongoStore, readUsage, storageFailure, storeConfigured } from './_telemetry.js';
 
 /** `store` is injectable for tests; production uses MongoDB via MONGODB_URI. */
 export async function handle(req, res, getStore = mongoStore) {
@@ -23,7 +23,7 @@ export async function handle(req, res, getStore = mongoStore) {
       res.statusCode = 503;
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/json');
-      return res.end(JSON.stringify({ error: 'storage unavailable' }));
+      return res.end(JSON.stringify({ error: 'storage unavailable', reason: storageFailure(err) }));
     }
   }
   res.statusCode = 200;
