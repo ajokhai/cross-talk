@@ -1,7 +1,7 @@
 {
   "name": "@cross-talk/dialect-zh",
   "version": "0.1.0",
-  "description": "Chinese (中文) expansion and compilation for XDialect shorthand",
+  "description": "Chinese (\u4e2d\u6587) expansion and compilation for XDialect shorthand",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,12 +11,17 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p ."
   },
   "peerDependencies": {
     "cross-talk": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "cross-talk": "file:../.."
+  }
 }

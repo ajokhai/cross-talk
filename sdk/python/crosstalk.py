@@ -21,6 +21,8 @@ Two transports, picked automatically:
 The file also runs as a command-line tool: `python3 crosstalk.py --help`.
 """
 
+__version__ = "2.0.0"
+
 import json
 import os
 import re

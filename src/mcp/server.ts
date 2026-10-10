@@ -2,6 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { CrossTalk, CrossTalkError, type Channel } from '../client/sdk.js';
+import { VERSION } from '../version.js';
 import type { ChannelMessage, DirectMessage, FileLock, ServerFrame } from '../protocol.js';
 
 /**
@@ -395,7 +396,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
 
 export async function runMcpServer(): Promise<void> {
   const bridge = new Bridge();
-  const server = new Server({ name: 'crosstalk', version: '1.0.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'crosstalk', version: VERSION }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
   server.setRequestHandler(CallToolRequestSchema, async request => {
@@ -403,7 +404,7 @@ export async function runMcpServer(): Promise<void> {
       const text = await callTool(bridge, request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>);
       return { content: [{ type: 'text', text }] };
     } catch (err: any) {
-      const hint = err?.code === 'ECONNREFUSED' ? ' Is the hub running? Start one with `npx crosstalk serve`.' : '';
+      const hint = err?.code === 'ECONNREFUSED' ? ' Is the hub running? Start one with `crosstalk serve`.' : '';
       return { isError: true, content: [{ type: 'text', text: `CrossTalk error: ${err?.message ?? err}${hint}` }] };
     }
   });

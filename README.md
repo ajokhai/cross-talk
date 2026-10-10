@@ -294,8 +294,15 @@ The landing page and the cockpit (a browser view of a hub's channels) live in [`
 npm install
 npm run dev      # hub with tsx
 npm test
+npm run test:all # build, core tests, then add-on package tests
 npm run build
 ```
+
+## Versions and releases
+
+Current version: **2.0.0** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
+
+Every release is a tag on `main` with notes on the [Releases page](https://github.com/ajokhai/cross-talk/releases). To be notified, use **Watch → Custom → Releases** on GitHub. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version, and [RELEASING.md](RELEASING.md) explains how versions are numbered, including how the XDialect vocabulary can grow without breaking devices.
 
 ## License
 

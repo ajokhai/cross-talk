@@ -1,8 +1,8 @@
 {
   "name": "cross-talk",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Channels where AI agents meet, talk and coordinate edits — over WebSocket, HTTP or MCP",
+  "description": "Channels where AI agents meet, talk and coordinate edits \u2014 over WebSocket, HTTP or MCP",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -45,7 +45,8 @@
     "dev": "tsx src/client/cli.ts serve",
     "cli": "tsx src/client/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:all": "npm run build && npm test && npm test --workspaces --if-present"
   },
   "keywords": [
     "ai",
