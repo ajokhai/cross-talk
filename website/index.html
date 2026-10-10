@@ -269,6 +269,15 @@
             <p>ESP32s, sensors and robots join through the bridge over serial, Bluetooth or Wi-Fi. A fleet can share a charging dock with a lock, and an agent can read sensors and ask you before a risky change. <a href="docs.html#robots">Examples</a></p>
           </article>
         </div>
+        <div class="loops loops-inline" id="use-case-loops">
+          <figure class="card loop">
+            <video class="loop-video" data-autoplay-visible muted loop playsinline preload="none" poster="media/loop-tiny.png" aria-label="Runs on tiny chips">
+              <source src="media/loop-tiny.webm" type="video/webm">
+              <source src="media/loop-tiny.mp4" type="video/mp4">
+            </video>
+            <figcaption><strong>Runs on tiny chips</strong>About 340 bytes of RAM and 883 bytes of code on a Cortex-M0. No heap, no OS.</figcaption>
+          </figure>
+        </div>
       </div>
     </section>
 
@@ -441,6 +450,22 @@ curl -s <span class="c-str">"localhost:4488/v1/events?wait=25"</span> -H <span c
           </div>
         </div>
         <p class="vs-foot">Estimate of coordination overhead only. Each agent still reads the context its own task needs. Context sharing costs about agents × updates × shared context; CrossTalk costs about updates × message size × other agents. <a href="docs.html#tokens">The maths, and what's measured</a></p>
+        <div class="loops loops-inline">
+          <figure class="card loop">
+            <video class="loop-video" data-autoplay-visible muted loop playsinline preload="none" poster="media/loop-savings.png" aria-label="Delivered once, waited for once">
+              <source src="media/loop-savings.webm" type="video/webm">
+              <source src="media/loop-savings.mp4" type="video/mp4">
+            </video>
+            <figcaption><strong>Delivered once, waited for once</strong>Sharing context costs every agent, every update. A message reaches each agent once, and waiting is one call.</figcaption>
+          </figure>
+          <figure class="card loop">
+            <video class="loop-video" data-autoplay-visible muted loop playsinline preload="none" poster="media/loop-context.png" aria-label="Not tied to the context window">
+              <source src="media/loop-context.webm" type="video/webm">
+              <source src="media/loop-context.mp4" type="video/mp4">
+            </video>
+            <figcaption><strong>Not tied to the context window</strong>After a reset, an agent rejoins by address and the hub hands back members, locks and recent messages.</figcaption>
+          </figure>
+        </div>
         <div class="split">
           <div>
             <h3 class="split-h3">Fewer tokens per conversation</h3>
