@@ -1,4 +1,4 @@
-// Shared helpers for the opt-in hub check-in (api/ping.js) and the usage
+// Shared helpers for the hub check-in (api/ping.js) and the usage
 // globe (api/usage.js). Files starting with "_" are not deployed as routes.
 //
 // Storage is MongoDB, connected through MONGODB_URI only (set in Vercel). The

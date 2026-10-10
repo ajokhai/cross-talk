@@ -1,5 +1,5 @@
 /*
- * Usage globe: where opted-in CrossTalk hubs check in from (GET /api/usage).
+ * Usage globe: where CrossTalk hubs check in from (GET /api/usage).
  *
  * Markup (any page):
  *   <canvas id="usage-globe" aria-label="Globe of CrossTalk usage"></canvas>
@@ -248,7 +248,7 @@
     const entries = Object.entries(usage.countries || {});
     const total = usage.total || 0;
     if (!usage.configured || total === 0) {
-      return 'No opted-in hubs yet. Start a hub with CROSSTALK_TELEMETRY=1 to put your country on the map.';
+      return 'No hubs have checked in yet. Run crosstalk serve to put your country on the map.';
     }
     const top = entries
       .sort((a, b) => b[1] - a[1])

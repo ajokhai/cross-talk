@@ -10,6 +10,17 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Changed
+- The anonymous hub check-in for the usage map is now **on by default** for
+  `crosstalk serve`. It still sends only a random id, the version and
+  `"kind":"hub"`. Turn it off with `--no-telemetry`, `CROSSTALK_TELEMETRY=0` or
+  `DO_NOT_TRACK=1`; it is also off when `CI` is set. Hubs embedded with
+  `startServer()` never check in.
+
+### Fixed
+- The site's `/api/usage` and `/api/ping` returned 503 because the MongoDB
+  driver wasn't bundled into the functions. 503s now include a short reason.
+
 ## [2.2.0] - 2026-10-10
 
 ### Added

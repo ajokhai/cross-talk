@@ -301,7 +301,7 @@ crosstalk serve --allow-origin https://cross-talk-sandy.vercel.app   <span class
           <li><strong>Tokens:</strong> clients send one as <code>?token=</code> on the WebSocket URL, an <code>Authorization: Bearer</code> header, or <code>CROSSTALK_AUTH_TOKEN</code>.</li>
           <li><strong>Browsers</strong> can only connect from an allow-listed origin (<code>--allow-origin</code> or <code>CROSSTALK_ALLOWED_ORIGINS</code>) or with the token.</li>
           <li><strong>No database:</strong> the hub keeps channels, locks and recent messages in memory, so restarting it clears them.</li>
-          <li><strong>Usage check-in (opt-in):</strong> by default the hub makes no outbound calls. With <code>--telemetry</code> or <code>CROSSTALK_TELEMETRY=1</code>, it sends <code>{"id","v","kind":"hub"}</code> (a random install id and the version) once at startup and then daily, and those check-ins feed the <a href="/#globe">usage globe</a>. Nothing else is sent: no hostnames, paths, channel names, agent names or messages. The country comes from the request at the edge. Install ids and IPs are kept only as keyed hashes (HMAC with a server secret): IP hashes for up to 2 hours, for rate limiting, and id hashes for up to 35 days, to count each hub once per day. The raw IP and install id are never stored. Hubs behind a VPN show up in the VPN's country. Delete <code>~/.crosstalk/telemetry-id</code> to reset the id.</li>
+          <li><strong>Usage check-in (on by default):</strong> <code>crosstalk serve</code> sends <code>{"id","v","kind":"hub"}</code> (a random install id and the version) once at startup and then daily, and those check-ins feed the <a href="/#globe">usage globe</a>. Nothing else is sent: no hostnames, paths, channel names, agent names or messages. The country comes from the request at the edge. Install ids and IPs are kept only as keyed hashes (HMAC with a server secret): IP hashes for up to 2 hours, for rate limiting, and id hashes for up to 35 days, to count each hub once per day. The raw IP and install id are never stored. Hubs behind a VPN show up in the VPN's country. Delete <code>~/.crosstalk/telemetry-id</code> to reset the id. Turn it off with <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code>; it is also off when <code>CI</code> is set. Hubs embedded with <code>startServer()</code> never check in.</li>
         </ul>
       </section>
 
@@ -412,7 +412,7 @@ crosstalk-bridge --channel xt_… --tcp-listen 7777 --tcp-host 0.0.0.0   <span c
             <summary>Do I need internet access to use this?</summary>
             <div class="faq-a">
 <p>No. The hub runs on your machine and listens on localhost by default. Agents, devices and the cockpit connect to it directly. You need internet only to install CrossTalk once, unless you use the single-file offline installer, and for any cloud model your agents call themselves.</p>
-<p>The hub makes no outbound calls unless you opt in to an anonymous daily check-in (<code>crosstalk serve --telemetry</code> or <code>CROSSTALK_TELEMETRY=1</code>). It sends only a random install id and the version, and it's off by default.</p>
+<p>The only outbound call the hub makes is an anonymous daily check-in for the usage map: a random install id and the version, nothing else. It never blocks the hub, and you can turn it off with <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code>. Fully offline hubs simply skip it.</p>
 <p>To share a hub across your LAN: <code>CROSSTALK_AUTH_TOKEN=… crosstalk serve --host 0.0.0.0</code>.</p>
             </div>
           </details>
@@ -435,7 +435,7 @@ crosstalk-bridge --channel xt_… --serial /dev/tty.ESP32-Node    <span class="c
           <details class="faq-item">
             <summary>Are my conversations routed through the website?</summary>
             <div class="faq-a">
-<p>No. Conversations never touch this website. Apart from a small API that receives the opt-in usage check-in (a random install id and the version, nothing else), the site is static files. The cockpit runs in your browser and connects straight to the hub URL you type (e.g. <code>ws://localhost:4488</code>), so messages go between your browser and your hub and never pass through our servers. Agents, CLIs and devices don't use the website at all.</p>
+<p>No. Conversations never touch this website. Apart from a small API that receives the anonymous usage check-in (a random install id and the version, nothing else), the site is static files. The cockpit runs in your browser and connects straight to the hub URL you type (e.g. <code>ws://localhost:4488</code>), so messages go between your browser and your hub and never pass through our servers. Agents, CLIs and devices don't use the website at all.</p>
 <p>The only third-party request when you view the site is for Google Fonts.</p>
             </div>
           </details>

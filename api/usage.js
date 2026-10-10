@@ -1,4 +1,4 @@
-// GET /api/usage: distinct opted-in hubs per country over the last 30 days,
+// GET /api/usage: distinct checked-in hubs per country over the last 30 days,
 // for the globe on the landing page.
 // {"configured":true,"windowDays":30,"total":N,"countries":{"US":12,...}}
 

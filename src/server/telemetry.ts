@@ -5,10 +5,10 @@ import path from 'node:path';
 import { VERSION } from '../version.js';
 
 /**
- * Opt-in, anonymous usage check-in for `crosstalk serve`.
+ * Anonymous usage check-in for `crosstalk serve`, feeding the site's usage map.
  *
- * Off unless the operator sets CROSSTALK_TELEMETRY=1 or passes --telemetry.
- * When on, the hub POSTs once at startup and then once a day:
+ * On by default. Off with --no-telemetry, CROSSTALK_TELEMETRY=0, DO_NOT_TRACK=1,
+ * or when CI is set. When on, the hub POSTs once at startup and then once a day:
  *
  *   {"id": "<random 32 hex, kept in ~/.crosstalk/telemetry-id>", "v": "<version>", "kind": "hub"}
  *
@@ -23,7 +23,7 @@ export const TELEMETRY_URL = 'https://cross-talk-sandy.vercel.app/api/ping';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface TelemetryOptions {
-  /** Explicit opt-in (e.g. the --telemetry flag). The env var also opts in. */
+  /** The --telemetry / --no-telemetry flag; undefined means the default (on). */
   enabled?: boolean;
   url?: string;
   /** Where the anonymous id is kept. */
@@ -32,10 +32,16 @@ export interface TelemetryOptions {
   log?: (line: string) => void;
 }
 
-export function telemetryEnabled(flag?: boolean): boolean {
-  const env = (process.env.CROSSTALK_TELEMETRY ?? '').trim().toLowerCase();
-  if (env === '0' || env === 'false' || env === 'off') return false;
-  return flag === true || env === '1' || env === 'true' || env === 'on';
+export function telemetryEnabled(flag?: boolean, env: NodeJS.ProcessEnv = process.env): boolean {
+  const setting = (env.CROSSTALK_TELEMETRY ?? '').trim().toLowerCase();
+  if (['0', 'false', 'off', 'no'].includes(setting)) return false;
+  if (flag === false) return false;
+  if (flag === true || ['1', 'true', 'on', 'yes'].includes(setting)) return true;
+  // General opt-outs: the DO_NOT_TRACK convention, and CI runs, which aren't real hubs.
+  const dnt = (env.DO_NOT_TRACK ?? '').trim().toLowerCase();
+  if (dnt && dnt !== '0' && dnt !== 'false') return false;
+  if ((env.CI ?? '').trim() && env.CI !== 'false') return false;
+  return true;
 }
 
 /** Returns the stored anonymous id, creating it on first use. */
@@ -73,7 +79,7 @@ export async function checkIn(url: string, id: string): Promise<boolean> {
 }
 
 /**
- * Starts the daily check-in if the operator opted in. Returns a stop function
+ * Starts the daily check-in unless the operator opted out. Returns a stop function
  * (a no-op when telemetry is off). Never blocks and never throws.
  */
 export function startTelemetry(options: TelemetryOptions = {}): () => void {
@@ -82,12 +88,12 @@ export function startTelemetry(options: TelemetryOptions = {}): () => void {
 
   const url = (options.url ?? process.env.CROSSTALK_TELEMETRY_URL ?? TELEMETRY_URL).trim();
   if (!/^https:\/\//.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(url)) {
-    log('telemetry requested but no valid endpoint is configured (set CROSSTALK_TELEMETRY_URL); nothing will be sent');
+    log('telemetry is on but no valid endpoint is configured (set CROSSTALK_TELEMETRY_URL); nothing will be sent');
     return () => {};
   }
 
   const id = telemetryId(options.idFile);
-  log(`telemetry on: once a day sends {id: ${id.slice(0, 6)}… (random), version: ${VERSION}} to ${url}. Disable with CROSSTALK_TELEMETRY=0`);
+  log(`telemetry on: once a day sends {id: ${id.slice(0, 6)}… (random), version: ${VERSION}} to ${url}. Turn off with --no-telemetry or CROSSTALK_TELEMETRY=0`);
 
   void checkIn(url, id);
   const timer = setInterval(() => void checkIn(url, id), options.intervalMs ?? DAY_MS);

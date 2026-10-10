@@ -1,4 +1,4 @@
-// POST /api/ping: opt-in check-in from a CrossTalk hub (CROSSTALK_TELEMETRY=1).
+// POST /api/ping: anonymous daily check-in from a CrossTalk hub (on unless CROSSTALK_TELEMETRY=0).
 // Body: {"id":"<32 hex>","v":"<version>","kind":"hub"}, at most 256 bytes.
 // The country comes from Vercel's geo header. The IP and the id are stored only
 // as salted hashes, and both expire (rate limits after 2h, pings after 35 days).
