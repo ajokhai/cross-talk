@@ -10,6 +10,11 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-10
+
+### Added
+- `crosstalk serve --no-telemetry` turns off the usage check-in.
+
 ### Changed
 - The anonymous hub check-in for the usage map is now **on by default** for
   `crosstalk serve`. It still sends only a random id, the version and
@@ -127,7 +132,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/ajokhai/cross-talk/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/ajokhai/cross-talk/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.2
 [2.1.1]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.1
