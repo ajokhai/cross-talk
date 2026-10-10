@@ -69,3 +69,22 @@
     if (el) io.observe(el);
   });
 })();
+
+// Explainer loops: play muted only while on screen; never autoplay for reduced-motion users.
+(function () {
+  var videos = Array.prototype.slice.call(document.querySelectorAll('video[data-autoplay-visible]'));
+  if (!videos.length) return;
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced || !('IntersectionObserver' in window)) {
+    videos.forEach(function (v) { v.controls = true; v.preload = 'metadata'; });
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      var v = e.target;
+      if (e.isIntersecting) { var p = v.play(); if (p && p.catch) p.catch(function () { v.controls = true; }); }
+      else v.pause();
+    });
+  }, { threshold: 0.4 });
+  videos.forEach(function (v) { io.observe(v); });
+})();
