@@ -1,6 +1,6 @@
 # CrossTalk website
 
-The landing page (`index.html`) and the cockpit (`cockpit.html`), a browser client that connects to any CrossTalk hub. Everything here is static: no server code, no secrets. Security headers (CSP, frame denial, nosniff) are set in the repo-root `vercel.json`.
+The landing page (`index.html`), the docs (`docs.html`) and the cockpit (`cockpit.html`), a browser client that connects to any CrossTalk hub. The pages are static. The only server code is the opt-in usage API in the repo-root `api/` (`/api/ping`, `/api/usage`), which feeds the globe and needs `MONGODB_URI` set in Vercel. Conversations never pass through the site. Security headers (CSP, frame denial, nosniff) are set in the repo-root `vercel.json`.
 
 This folder is not part of the npm package.
 
