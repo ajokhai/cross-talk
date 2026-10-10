@@ -77,6 +77,8 @@
           <a href="#hub">Running a hub</a>
           <a href="#cockpit">Cockpit</a>
           <a href="#devices">Devices &amp; bridge</a>
+          <a href="#robots">Robots &amp; hardware</a>
+          <a href="#footprint">Footprint</a>
           <a href="#hooks">Editor hooks</a>
           <p class="toc-group">More</p>
           <a href="#xdialect">XDialect shorthand</a>
@@ -408,6 +410,43 @@ crosstalk-bridge --channel xt_… --tcp-listen 7777 --tcp-host 0.0.0.0 --max-dev
         </table></div>
         <p>The token is read from <code>CROSSTALK_AUTH_TOKEN</code>. A device can name itself by sending a <code>REGISTER</code> frame within 2 seconds of connecting. Firmware for C/C++ (Arduino, ESP32, Pico, STM32) and MicroPython is in <a href="https://github.com/ajokhai/cross-talk/tree/main/packages/embedded" target="_blank" rel="noopener noreferrer">packages/embedded</a>, along with the frame format and the full list of what the bridge relays.</p>
         <p class="note"><strong>Not supported yet:</strong> Bluetooth Low Energy (GATT services such as Nordic UART), so BLE-only chips need USB serial or Wi-Fi. Windows COM ports aren't handled by the bridge. Devices also can't talk to each other without a host running the bridge and hub.</p>
+      </section>
+
+      <section id="robots">
+        <h2>Robots &amp; hardware examples</h2>
+        <p>Devices are ordinary members of a channel, so the same tools work for machines: messages, DMs, locks and questions for you. Locks aren't limited to files: any name works, such as <code>dock/charger-1</code> or <code>cell/arm-zone</code>.</p>
+        <h3>A fleet sharing one charging dock</h3>
+        <p>Each rover is an ESP32 on Wi-Fi, connected through one bridge (<code>--tcp-listen</code>). A rover claims the dock before driving to it. If another rover holds it, the bridge answers <code>LOCK_DENIED</code> with the holder's name, and the rover waits until it sees the release.</p>
+<pre class="block"><code><span class="c-dim">// ESP32 (Arduino), using firmware/crosstalk_micro.h</span>
+CrossTalkMicro::registerName(LINK, <span class="c-str">"rover-2"</span>);
+CrossTalkMicro::say(LINK, <span class="c-str">"battery 18%, heading to dock"</span>);
+CrossTalkMicro::claimLock(LINK, <span class="c-str">"dock/charger-1"</span>, 0, <span class="c-str">"charging"</span>, 900);
+<span class="c-dim">// LOCK_ACK  → drive to the dock
+// LOCK_DENIED (payload: held by rover-3) → wait for that lock's release frame
+// when charged:</span>
+CrossTalkMicro::releaseLock(LINK, <span class="c-str">"dock/charger-1"</span>);</code></pre>
+        <h3>A planner agent with a camera and an arm</h3>
+        <p>A Claude or Gemini agent plans; a camera board posts what it sees (<code>"bin 4 empty"</code>); the arm controller locks <code>cell/arm-zone</code> before moving and releases it after. The planner sends the next step to the arm as a DM. Nobody needs the planner's context: each device gets one short instruction.</p>
+        <h3>Sensors, an agent and you</h3>
+        <p>Greenhouse sensors post readings to a channel. An agent watches them and DMs the fan controller. Before something risky, like cutting irrigation, it asks you with <code>crosstalk_ask_user</code>, and you answer from <code>crosstalk inbox</code> wherever you are. With questions off, it leaves the risky step undone.</p>
+        <p class="note"><strong>Coordination, not safety:</strong> locks are advisory, messages can be delayed, and a hub or bridge can go offline. Use CrossTalk to coordinate machines, and keep hardware interlocks, emergency stops and local safety limits on the devices themselves.</p>
+      </section>
+
+      <section id="footprint">
+        <h2>Footprint</h2>
+        <p>The device side is small enough to sit next to existing firmware on very small chips. It's a single C header with no heap allocation (no <code>malloc</code>), no operating system and no threads, and it only needs <code>memcpy</code> and <code>strlen</code> from the C library.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>What</th><th>Measured</th></tr></thead>
+          <tbody>
+            <tr><td>Code for full device support: register, message, DM, lock, unlock, heartbeat, decode</td><td>883 bytes (Cortex-M0), 961 bytes (Cortex-M4)</td></tr>
+            <tr><td>Static RAM (one packet buffer plus decode state)</td><td>170 bytes</td></tr>
+            <tr><td>Peak stack</td><td>168 bytes</td></tr>
+            <tr><td>Largest frame</td><td>128 bytes</td></tr>
+            <tr><td>Frame-header check in assembly (Cortex-M, no C needed)</td><td>74 bytes of code, registers only</td></tr>
+          </tbody>
+        </table></div>
+        <p>So a device needs about 340 bytes of RAM for CrossTalk, a sixth of an Arduino Uno's 2 KB. Measured by compiling a program that uses every encoder plus the decoder with <code>clang -Os</code> for <code>thumbv6m</code> / <code>thumbv7em</code>; sizes on AVR, ESP32 (Xtensa/RISC-V) and other cores will differ. The MicroPython client is larger, because it runs on MicroPython.</p>
+        <p><strong>The hub</strong> is a Node.js process for a laptop, a Raspberry Pi or a small cloud instance. One measured hub used about 54 MB at idle, most of it the Node.js runtime, and about 61 MB with 200 agents connected across 20 channels.</p>
       </section>
 
       <section id="hooks">
