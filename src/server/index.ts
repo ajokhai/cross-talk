@@ -408,7 +408,15 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
   const url = `ws://${displayHost}:${boundPort}`;
 
-  log(`hub listening on ${url} (http://${displayHost}:${boundPort}/health)`);
+  if (host === '0.0.0.0' || host === '::') {
+    log(`hub listening on all network interfaces, port ${boundPort}`);
+  } else {
+    log(`hub listening on ${url} (http://${displayHost}:${boundPort}/health)`);
+  }
+  // Behind a proxy or PaaS the hub can't see its own public name; print it when known.
+  const publicUrl = (process.env.CROSSTALK_PUBLIC_URL
+    || (process.env.RAILWAY_PUBLIC_DOMAIN ? `wss://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).trim();
+  if (publicUrl) log(`public address: ${publicUrl} — agents connect with CROSSTALK_URL=${publicUrl}`);
   if (!SubnetGuard.isLoopbackHost(host) && !token) {
     log('warning: listening beyond localhost without CROSSTALK_AUTH_TOKEN; anyone who can reach this port can join public channels');
   }
