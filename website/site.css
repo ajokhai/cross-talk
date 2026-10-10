@@ -299,3 +299,34 @@ p { margin: 0; }
 /* Grid children must be allowed to shrink below their code blocks' width */
 .steps > *, .grid > *, .split > *, .cta > *, .tabs, .code-card, .cta-code { min-width: 0; }
 .mini { white-space: pre-wrap; word-break: break-word; }
+
+/* FAQ (landing + docs) */
+.faq { display: grid; gap: 12px; }
+.faq-center { max-width: 760px; margin: 0 auto; }
+.faq-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.faq-item[open] { border-color: var(--border-strong); }
+.faq-item summary {
+  list-style: none; cursor: pointer; padding: 18px 52px 18px 22px; position: relative;
+  font-weight: 500; font-size: 16px; color: var(--text);
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after {
+  content: ""; position: absolute; right: 22px; top: 50%; width: 10px; height: 10px; margin-top: -7px;
+  border-right: 1.8px solid var(--muted); border-bottom: 1.8px solid var(--muted); transform: rotate(45deg);
+  transition: transform .15s;
+}
+.faq-item[open] summary::after { transform: rotate(-135deg); margin-top: -2px; }
+.faq-item summary:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; border-radius: var(--radius); }
+.faq-a { padding: 0 22px 20px; color: var(--text-2); font-size: 15px; display: grid; gap: 12px; }
+.faq-a code { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 13px; }
+.faq-a a { text-decoration: underline; text-underline-offset: 2px; }
+.block {
+  margin: 0; padding: 16px 18px; border-radius: 10px; background: var(--code-bg); color: var(--code-fg);
+  font: 13px/1.7 var(--mono); overflow-x: auto;
+}
+.block code { background: none; border: 0; padding: 0; font-size: inherit; color: inherit; }
+.faq-more { text-align: center; margin-top: 28px; }
+.faq-more a { font-weight: 500; text-decoration: none; }
+.faq-more a:hover { text-decoration: underline; }
+.nav-links a[aria-current="page"] { color: var(--text); }
+@media (max-width: 720px) { .faq-a .block { font-size: 12px; } }

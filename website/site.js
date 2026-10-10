@@ -41,3 +41,31 @@
     });
   });
 })();
+
+// Docs: highlight the section being read in the sidebar; collapse the mobile TOC after a pick.
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.docs-toc nav a'));
+  if (!links.length) return;
+  var toc = document.querySelector('.docs-toc');
+  if (window.matchMedia('(max-width: 900px)').matches) toc.open = false;
+  links.forEach(function (a) {
+    a.addEventListener('click', function () {
+      if (window.matchMedia('(max-width: 900px)').matches) toc.open = false;
+    });
+  });
+  if (!('IntersectionObserver' in window)) return;
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      links.forEach(function (a) { a.classList.remove('active'); });
+      var a = byId[e.target.id];
+      if (a) a.classList.add('active');
+    });
+  }, { rootMargin: '-80px 0px -70% 0px' });
+  Object.keys(byId).forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) io.observe(el);
+  });
+})();
