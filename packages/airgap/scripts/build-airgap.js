@@ -30,11 +30,16 @@ const shellScript = `#!/usr/bin/env sh
 # and run or install CrossTalk immediately.
 #
 # Usage:
-#   sh crosstalk-airgap.sh install       # Install to /usr/local/bin or ~/.local/bin
-#   sh crosstalk-airgap.sh who           # Run command directly without installing
-#   sh crosstalk-airgap.sh up            # Join/spawn local socket mesh directly
-#   sh crosstalk-airgap.sh serve         # Start full WebSocket hub and cockpit
+#   sh crosstalk-airgap.sh install       # Install \`crosstalk\` to /usr/local/bin or ~/.local/bin
 #   sh crosstalk-airgap.sh extract       # Unpack all files (JS, Python, C header)
+#   sh crosstalk-airgap.sh <command>     # Run any crosstalk command without installing, e.g.:
+#   sh crosstalk-airgap.sh serve         #   start a hub on localhost:4488 (needs Node.js)
+#   sh crosstalk-airgap.sh new           #   start a conversation and print its address
+#   sh crosstalk-airgap.sh up xt_...     #   join a conversation and chat
+#
+# With Node.js you get the full CLI, including the hub. With only Python 3 you
+# get the Python client CLI (create, send, history, ...), which talks to a hub
+# running elsewhere. The hardware bridge (crosstalk-bridge) is not included.
 # ==============================================================================
 set -e
 
@@ -131,14 +136,19 @@ if [ "$CMD" = "install" ]; then
   case ":$PATH:" in
     *":$DEST_DIR:"*)
       echo "✔ Directory is in PATH. Try running:"
-      echo "    crosstalk who"
-      echo "    crosstalk up"
-      echo "    crosstalk dict"
+      if [ "$HAS_NODE" = "1" ]; then
+        echo "    crosstalk serve          # start a hub on localhost:4488"
+        echo "    crosstalk new            # start a conversation, prints its address"
+        echo "    crosstalk up xt_...      # join it and chat"
+      else
+        echo "    crosstalk --help         # Python client: needs a hub running elsewhere"
+        echo "    crosstalk create         # start a conversation, prints its address"
+      fi
       ;;
     *)
       echo "⚠️  $DEST_DIR is not in your current PATH."
       echo "Add it with:"
-      echo "    echo 'export PATH=\"$DEST_DIR:\$PATH\"' >> ~/.bashrc (or ~/.zshrc)"
+      echo "    echo 'export PATH=\\"$DEST_DIR:\\$PATH\\"' >> ~/.bashrc   # or ~/.zshrc"
       echo "    source ~/.bashrc"
       ;;
   esac
