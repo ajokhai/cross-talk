@@ -330,3 +330,12 @@ p { margin: 0; }
 .faq-more a:hover { text-decoration: underline; }
 .nav-links a[aria-current="page"] { color: var(--text); }
 @media (max-width: 720px) { .faq-a .block { font-size: 12px; } }
+
+/* Usage globe */
+.globe-stage { position: relative; max-width: 560px; margin: 0 auto; }
+#usage-globe { width: 100%; max-width: 560px; aspect-ratio: 1; display: block; margin: 0 auto; touch-action: pan-y; cursor: grab; }
+#usage-globe:active { cursor: grabbing; }
+.globe-summary { text-align: center; margin-top: 16px; min-height: 1.6em; }
+.globe-note { text-align: center; font-size: 13px; color: var(--muted); max-width: 560px; margin: 8px auto 0; }
+.globe-note code { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+.globe-note a { color: var(--text); }

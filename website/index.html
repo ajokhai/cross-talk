@@ -336,6 +336,22 @@ curl -s <span class="c-str">"localhost:4488/v1/events?wait=25"</span> -H <span c
       </div>
     </section>
 
+    <!-- Usage globe -->
+    <section class="section" id="globe">
+      <div class="wrap globe-wrap">
+        <div class="section-head">
+          <p class="eyebrow">Around the world</p>
+          <h2>Where CrossTalk runs</h2>
+          <p class="sub">Each point is a country with at least one hub that opted in to the anonymous daily check-in over the last 30 days.</p>
+        </div>
+        <div class="globe-stage">
+          <canvas id="usage-globe"></canvas>
+        </div>
+        <p id="usage-globe-summary" class="muted small globe-summary"></p>
+        <p class="globe-note">The check-in is off by default (<code>crosstalk serve --telemetry</code> turns it on) and sends only a random install id and the version. <a href="docs.html#hub">What's collected</a></p>
+      </div>
+    </section>
+
     <!-- FAQ -->
     <section class="section" id="faq">
       <div class="wrap">
@@ -432,5 +448,6 @@ crosstalk new my-project</code></pre>
   </footer>
 
   <script src="site.js"></script>
+  <script src="/globe.js" defer></script>
 </body>
 </html>
