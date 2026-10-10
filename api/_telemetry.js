@@ -128,7 +128,11 @@ export function mongoStore(env = process.env) {
 export function storageFailure(err) {
   const name = String(err?.name ?? '');
   const code = err?.code;
-  if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return 'driver missing';
+  if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') {
+    // Node's message names the package, which is safe to repeat.
+    const pkg = /Cannot find (?:package|module) '([@\w./-]{1,80})'/.exec(String(err?.message))?.[1];
+    return pkg && !pkg.startsWith('/') ? `driver missing: ${pkg}` : 'driver missing';
+  }
   if (name === 'MongoParseError' || name === 'MongoInvalidArgumentError') return 'bad connection string';
   if (code === 18 || err?.codeName === 'AuthenticationFailed' || /Auth/.test(name)) return 'authentication failed';
   if (name === 'MongoServerSelectionError' || /Network|Timeout/.test(name)) return 'cluster unreachable';

@@ -134,5 +134,6 @@ test('storage failures are reported by category, never by message', async () => 
   assert.equal(storageFailure({ name: 'MongoParseError' }), 'bad connection string');
   assert.equal(storageFailure({ name: 'MongoServerError', code: 18, codeName: 'AuthenticationFailed' }), 'authentication failed');
   assert.equal(storageFailure({ name: 'Error', code: 'ERR_MODULE_NOT_FOUND' }), 'driver missing');
+  assert.equal(storageFailure({ code: 'ERR_MODULE_NOT_FOUND', message: "Cannot find package 'mongodb' imported from /var/task/api/_telemetry.js" }), 'driver missing: mongodb');
   assert.equal(storageFailure(new Error('boom')), 'other');
 });
