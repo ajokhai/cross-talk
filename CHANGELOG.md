@@ -10,6 +10,12 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- Opt-in anonymous hub check-in for the website's usage globe:
+  `crosstalk serve --telemetry` / `CROSSTALK_TELEMETRY=1`. Off by default.
+  Sends only a random id, the version and `"kind":"hub"`, once at startup and
+  then daily. `CROSSTALK_TELEMETRY=0` always disables it.
+
 ## [2.0.0] - 2026-10-10
 
 A rewrite. CrossTalk moves from one open mesh to separate conversations: every
