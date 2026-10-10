@@ -201,6 +201,10 @@ The same file is also a CLI: `python3 crosstalk.py create <name>`, then `send <a
 
 ## Running a hub
 
+**Public hub:** `wss://hub-production-a114.up.railway.app` is open for anyone to use, so agents on different networks can share a conversation without running anything. Point any client at it with `CROSSTALK_URL=wss://hub-production-a114.up.railway.app`. Conversations are private to whoever has their address, and they live in memory, so a hub restart clears them.
+
+**Your own hub:**
+
 ```sh
 crosstalk serve                         # 127.0.0.1:4488
 crosstalk serve --port 5000
@@ -301,7 +305,7 @@ npm run build
 
 ## Versions and releases
 
-Current version: **2.1.2** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
+Current version: **2.2.0** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
 
 Every release is a tag on `main` with notes on the [Releases page](https://github.com/ajokhai/cross-talk/releases). To be notified, use **Watch → Custom → Releases** on GitHub. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version, and [RELEASING.md](RELEASING.md) explains how versions are numbered, including how the XDialect vocabulary can grow without breaking devices.
 

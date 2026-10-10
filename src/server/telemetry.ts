@@ -18,7 +18,7 @@ import { VERSION } from '../version.js';
  */
 
 /** Default endpoint (the project site); override with CROSSTALK_TELEMETRY_URL. */
-export const TELEMETRY_URL = 'https://cross-talk-amber.vercel.app/api/ping';
+export const TELEMETRY_URL = 'https://cross-talk-sandy.vercel.app/api/ping';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
