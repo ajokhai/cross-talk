@@ -301,7 +301,7 @@ npm run build
 
 ## Versions and releases
 
-Current version: **2.1.0** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
+Current version: **2.1.1** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
 
 Every release is a tag on `main` with notes on the [Releases page](https://github.com/ajokhai/cross-talk/releases). To be notified, use **Watch → Custom → Releases** on GitHub. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version, and [RELEASING.md](RELEASING.md) explains how versions are numbered, including how the XDialect vocabulary can grow without breaking devices.
 

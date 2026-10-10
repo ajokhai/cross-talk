@@ -114,19 +114,25 @@ if [ "$CMD" = "install" ]; then
   mkdir -p "$DEST_DIR"
   DEST_FILE="$DEST_DIR/crosstalk"
 
+  # The JS bundle is an ES module. Node < 20.19 treats an extensionless file as
+  # CommonJS, so install it as crosstalk.mjs behind a small sh launcher.
+  install_js() {
+    decode_payload "$DEST_DIR/crosstalk.mjs" "$JS_PAYLOAD"
+    printf '#!/bin/sh\\nexec node "%s" "$@"\\n' "$DEST_DIR/crosstalk.mjs" > "$DEST_FILE"
+    chmod +x "$DEST_FILE"
+  }
+
   if [ "$HAS_NODE" = "1" ]; then
     echo "  → Detected Node.js (\$(node -v)). Installing full WebSocket hub & CLI bundle..."
-    decode_payload "$DEST_FILE" "$JS_PAYLOAD"
-    chmod +x "$DEST_FILE"
+    install_js
   elif [ "$HAS_PYTHON" = "1" ]; then
     echo "  → Detected Python 3 (\$(python3 --version | cut -d' ' -f2)). Installing Python stdlib CLI..."
     decode_payload "$DEST_FILE" "$PY_PAYLOAD"
     chmod +x "$DEST_FILE"
   else
     echo "  ⚠️ Neither node nor python3 detected in PATH."
-    echo "  Extracting standalone JS and Python scripts to $DEST_DIR..."
-    decode_payload "$DEST_FILE" "$JS_PAYLOAD"
-    chmod +x "$DEST_FILE"
+    echo "  Installing the Node.js CLI to $DEST_DIR; install Node.js 18+ to run it."
+    install_js
   fi
 
   echo ""
