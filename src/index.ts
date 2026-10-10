@@ -3,6 +3,7 @@
  */
 
 export * from './protocol.js';
+export { VERSION } from './version.js';
 export { CrossTalk, Channel, CrossTalkError, DEFAULT_URL, type ConnectOptions } from './client/sdk.js';
 export { startServer, type ServerOptions, type RunningServer } from './server/index.js';
 export { MeshHub, Connection, SERVER_VERSION, type HubOptions, type Peer } from './server/hub.js';

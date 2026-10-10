@@ -3,12 +3,18 @@
   "version": "0.1.0",
   "description": "Single-file, offline, self-extracting CrossTalk installer",
   "type": "module",
-  "files": ["dist", "scripts"],
+  "files": [
+    "dist",
+    "scripts"
+  ],
   "scripts": {
     "build": "node scripts/build-airgap.js"
   },
   "peerDependencies": {
     "cross-talk": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "cross-talk": "file:../.."
+  }
 }

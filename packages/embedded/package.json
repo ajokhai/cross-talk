@@ -25,5 +25,8 @@
   "license": "MIT",
   "bin": {
     "crosstalk-bridge": "./dist/bridge-cli.js"
+  },
+  "devDependencies": {
+    "cross-talk": "file:../.."
   }
 }

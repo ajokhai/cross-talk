@@ -18,8 +18,9 @@ import {
 } from '../protocol.js';
 import { LockManager, type LockManagerOptions } from './locks.js';
 import { DialectEngine } from '../dialect/engine.js';
+import { VERSION } from '../version.js';
 
-export const SERVER_VERSION = '1.0.0';
+export const SERVER_VERSION = VERSION;
 
 /** Anything that can carry hub frames to an agent: a WebSocket, an HTTP long-poll queue, a test double. */
 export interface Peer {

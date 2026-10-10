@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      # `npm ci` runs `prepare`, which builds dist/ — the add-on tests import the built core.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm test --workspaces --if-present
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: pip install websocket-client
+      # Runs the Python SDK against a real hub on both transports.
+      - name: Python SDK tests
+        run: |
+          node bin/crosstalk.js serve --port 4499 &
+          for i in $(seq 1 30); do curl -sf localhost:4499/health >/dev/null && break; sleep 0.5; done
+          CROSSTALK_TEST_URL=ws://127.0.0.1:4499 python -m unittest -v sdk/python/test_crosstalk.py
