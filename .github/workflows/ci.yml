@@ -26,6 +26,17 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm test --workspaces --if-present
+      # The standalone bundle (used by the air-gap installer) must run from anywhere.
+      - name: Standalone bundle runs outside the repo
+        run: |
+          npm run bundle
+          dir=$(mktemp -d) && cp dist/crosstalk.standalone.mjs "$dir/crosstalk"
+          cd "$dir"
+          test "$(node ./crosstalk --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
+          node ./crosstalk serve --port 4598 & pid=$!
+          for i in $(seq 1 30); do curl -sf localhost:4598/health && break; sleep 0.5; done
+          node ./crosstalk new ci-check --url ws://localhost:4598
+          kill $pid
 
   python:
     runs-on: ubuntu-latest
