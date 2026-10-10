@@ -288,6 +288,19 @@ p { margin: 0; }
 .loop figcaption strong { display: block; color: var(--text); font-weight: 600; margin-bottom: 4px; }
 @media (max-width: 560px) { .loops { grid-template-columns: 1fr; } }
 
+/* Context sharing vs CrossTalk */
+.vs { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 960px; margin: 0 auto; }
+.vs-col { border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; background: var(--surface); }
+.vs-old { background: var(--bg-alt); border-style: dashed; }
+.vs-new { box-shadow: var(--shadow); border-color: var(--border-strong); }
+.vs-label { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.vs-num { margin: 8px 0 6px; font: 400 clamp(40px, 6vw, 64px)/1 var(--display); color: var(--text); font-variant-numeric: tabular-nums; }
+.vs-old .vs-num { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
+.vs-how { margin: 0; color: var(--text-2); font-size: 15px; }
+.vs-foot { max-width: 760px; margin: 16px auto 56px; text-align: center; font-size: 13px; color: var(--muted); }
+.vs-foot a { color: var(--text); }
+@media (max-width: 720px) { .vs { grid-template-columns: 1fr; } .vs-col { padding: 22px; } }
+
 /* CTA */
 .cta { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; padding: 48px; }
 .cta h2 { text-align: left; }
