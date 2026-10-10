@@ -56,7 +56,9 @@ export async function handle(req, res, getStore = mongoStore) {
   try {
     const accepted = await recordPing(await getStore(), { id: ping.id, country: countryOf(req.headers), ip });
     return accepted ? send(res, 204) : send(res, 429, { error: 'rate limited' });
-  } catch {
+  } catch (err) {
+    // Never err.message: driver messages can embed the URI's user or host.
+    console.error('ping: storage unavailable:', err?.name, err?.code, err?.codeName);
     return send(res, 503, { error: 'storage unavailable' });
   }
 }

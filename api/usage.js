@@ -17,7 +17,9 @@ export async function handle(req, res, getStore = mongoStore) {
   } else {
     try {
       body = { configured: true, ...(await readUsage(await getStore())) };
-    } catch {
+    } catch (err) {
+      // Never err.message: driver messages can embed the URI's user or host.
+      console.error('usage: storage unavailable:', err?.name, err?.code, err?.codeName);
       res.statusCode = 503;
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/json');
