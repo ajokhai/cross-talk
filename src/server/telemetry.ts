@@ -17,8 +17,8 @@ import { VERSION } from '../version.js';
  * and does not store IPs. Failures are silent and never affect the hub.
  */
 
-/** Default endpoint. Empty until the project site is live; override with CROSSTALK_TELEMETRY_URL. */
-export const TELEMETRY_URL = '';
+/** Default endpoint (the project site); override with CROSSTALK_TELEMETRY_URL. */
+export const TELEMETRY_URL = 'https://cross-talk-amber.vercel.app/api/ping';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

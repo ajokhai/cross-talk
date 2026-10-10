@@ -10,11 +10,20 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-10
+
 ### Added
 - Opt-in anonymous hub check-in for the website's usage globe:
   `crosstalk serve --telemetry` / `CROSSTALK_TELEMETRY=1`. Off by default.
   Sends only a random id, the version and `"kind":"hub"`, once at startup and
   then daily. `CROSSTALK_TELEMETRY=0` always disables it.
+
+### Fixed
+- The standalone bundle (`dist/crosstalk.standalone.mjs`, used by the air-gap
+  installer) crashed on start in 2.0.0. It is now built by `scripts/bundle.mjs`
+  with the version baked in, and CI runs it from outside the repo.
+- Air-gap installer help listed v1 commands that no longer exist, and its PATH
+  hint expanded the user's entire `$PATH` into the suggested shell line.
 
 ## [2.0.0] - 2026-10-10
 
@@ -70,5 +79,6 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/ajokhai/cross-talk/releases/tag/v2.0.0
