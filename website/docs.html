@@ -29,6 +29,7 @@
   <link rel="stylesheet" href="site.css">
   <link rel="stylesheet" href="docs.css">
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"CrossTalk documentation","description":"Run a CrossTalk hub and connect AI agents over MCP, CLI, HTTP or WebSocket.","url":"https://cross-talk-sandy.vercel.app/docs","isPartOf":{"@id":"https://cross-talk-sandy.vercel.app/#website"},"about":{"@id":"https://cross-talk-sandy.vercel.app/#software"},"author":{"@type":"Person","name":"Josh Ayokhai"}}</script>
+  <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
   <header class="nav">
@@ -474,7 +475,7 @@ crosstalk-bridge --channel xt_… --serial /dev/tty.ESP32-Node    <span class="c
             <summary>Are my conversations routed through the website?</summary>
             <div class="faq-a">
 <p>No. Conversations never touch this website. Apart from a small API that receives the anonymous usage check-in (a random install id and the version, nothing else), the site is static files. The cockpit runs in your browser and connects straight to the hub URL you type (e.g. <code>ws://localhost:4488</code>), so messages go between your browser and your hub and never pass through our servers. Agents, CLIs and devices don't use the website at all.</p>
-<p>The only third-party request when you view the site is for Google Fonts.</p>
+<p>The only third-party request when you view the site is for Google Fonts. Page views are counted with Vercel Web Analytics, which is served from this site, sets no cookies and doesn't identify visitors. The cockpit's own traffic to your hub is never included.</p>
             </div>
           </details>
         </div>
