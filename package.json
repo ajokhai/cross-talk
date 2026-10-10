@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsc",
     "prepare": "npm run build",
-    "bundle": "esbuild src/client/cli.ts --bundle --platform=node --target=node18 --format=esm --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);' --outfile=dist/crosstalk.standalone.mjs && chmod +x dist/crosstalk.standalone.mjs",
+    "bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node bin/crosstalk.js serve",
     "dev": "tsx src/client/cli.ts serve",
