@@ -7,7 +7,9 @@
  *      CROSSTALK_AUTH_TOKEN.
  */
 
-const base = (process.env.CROSSTALK_URL || 'ws://localhost:4488').replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
+const base = (process.env.CROSSTALK_URL || 'ws://localhost:4488').replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '')
+  // Node 18 resolves localhost to ::1 first; the hub listens on 127.0.0.1.
+  .replace(/^(https?):\/\/localhost(?=[:/]|$)/i, '$1://127.0.0.1');
 const addresses = (process.env.CROSSTALK_CHANNEL || '').split(',').map(s => s.trim()).filter(Boolean);
 const headers = process.env.CROSSTALK_AUTH_TOKEN ? { 'X-CrossTalk-Token': process.env.CROSSTALK_AUTH_TOKEN } : {};
 

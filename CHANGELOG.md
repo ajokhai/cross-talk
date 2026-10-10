@@ -10,10 +10,18 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
-## [2.1.1] - 2026-10-10
+## [2.1.2] - 2026-10-10
 
-2.1.0 was tagged but its release build failed, so it was never published.
-2.1.1 contains everything listed under 2.1.0 below, plus:
+2.1.0 and 2.1.1 were tagged, but their release builds failed on Node 18, so
+neither was published. 2.1.2 contains everything listed under both, plus:
+
+### Fixed
+- On Node 18, clients using a `localhost` URL (the default) could not reach a
+  hub: Node 18 resolves `localhost` to `::1` first and doesn't fall back to
+  IPv4, while the hub listens on `127.0.0.1`. The SDK, HTTP client, CLI and
+  editor hooks now connect to `127.0.0.1` for `localhost`.
+
+## [2.1.1] - 2026-10-10
 
 ### Fixed
 - The air-gap installer and standalone bundle failed on Node 18 (and Node 20
@@ -90,7 +98,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.1.2...HEAD
+[2.1.2]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.2
 [2.1.1]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.1
 [2.1.0]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/ajokhai/cross-talk/releases/tag/v2.0.0

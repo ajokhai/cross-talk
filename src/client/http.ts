@@ -8,7 +8,7 @@ import {
   type ResultData,
   type ServerFrame
 } from '../protocol.js';
-import { CrossTalkError, DEFAULT_URL } from './sdk.js';
+import { CrossTalkError, DEFAULT_URL, pinLoopback } from './sdk.js';
 
 type RequestType = RequestFrame['type'];
 type RequestBody<T extends RequestType> = Omit<Extract<RequestFrame, { type: T }>, 'type' | 'id'>;
@@ -27,7 +27,7 @@ export interface HttpAgentOptions {
 
 /** Converts ws(s):// hub URLs to http(s):// for the REST API. */
 export function httpBase(url: string): string {
-  return url.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
+  return pinLoopback(url).replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
 }
 
 /**

@@ -21,6 +21,15 @@ import {
 
 export const DEFAULT_URL = 'ws://localhost:4488';
 
+/**
+ * Maps `localhost` to 127.0.0.1. The hub binds IPv4 loopback by default, and
+ * Node 18 resolves `localhost` to ::1 first without falling back, so a plain
+ * `localhost` URL would never reach a default hub there.
+ */
+export function pinLoopback(url: string): string {
+  return url.replace(/^(wss?|https?):\/\/localhost(?=[:/]|$)/i, '$1://127.0.0.1');
+}
+
 export interface ConnectOptions {
   name: string;
   /** Hub WebSocket URL. Defaults to $CROSSTALK_URL or ws://localhost:4488. */
@@ -253,7 +262,7 @@ export class CrossTalk extends EventEmitter {
 
   private open(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = new URL(this.options.url);
+      const url = new URL(pinLoopback(this.options.url));
       const headers: Record<string, string> = {};
       if (this.options.token) {
         headers.Authorization = `Bearer ${this.options.token}`;
