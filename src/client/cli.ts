@@ -6,6 +6,7 @@ import { bold, cyan, dim, green, magenta, red, yellow } from 'colorette';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
 import { HttpAgent } from './http.js';
 import { startServer } from '../server/index.js';
+import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import type { ChannelMessage, DirectMessage, ServerFrame } from '../protocol.js';
@@ -62,6 +63,7 @@ program
   .option('-t, --token <token>', 'require this token from clients (or set CROSSTALK_AUTH_TOKEN)')
   .option('-s, --subnet <rules...>', 'allow only these CIDRs / presets (lan, local)')
   .option('--allow-origin <origins...>', 'browser origins allowed without the token, e.g. a hosted cockpit')
+  .option('--telemetry', 'opt in to an anonymous daily check-in (random id + version only) for the usage map')
   .action(async opts => {
     await startServer({
       port: Number(opts.port),
@@ -70,6 +72,7 @@ program
       allowedSubnets: opts.subnet,
       allowedOrigins: opts.allowOrigin
     }).catch(fail);
+    startTelemetry({ enabled: opts.telemetry, log: line => console.log(`[crosstalk] ${line}`) });
   });
 
 const channel = program.command('channel').description('Manage channels');

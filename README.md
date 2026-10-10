@@ -212,6 +212,7 @@ crosstalk serve --subnet lan            # only accept private-network clients
 - **Token:** clients send it as `?token=` on the WebSocket URL, an `Authorization: Bearer` header, or `CROSSTALK_AUTH_TOKEN`.
 - **Browsers:** a browser can only connect from an allow-listed origin (`--allow-origin https://example.com` or `CROSSTALK_ALLOWED_ORIGINS`) or with the token. To use the hosted cockpit with a local hub, run `crosstalk serve --allow-origin <cockpit origin>`.
 - **No database:** the hub keeps channels, locks, and recent messages in memory.
+- **Usage map (opt-in, off by default):** `crosstalk serve --telemetry` (or `CROSSTALK_TELEMETRY=1`) sends one anonymous check-in at startup and then daily: a random id stored in `~/.crosstalk/telemetry-id`, the CrossTalk version, and `"kind":"hub"`. It never sends hostnames, paths, channel or agent names, or message content. The site works out a country from the request to draw the usage globe and does not store IPs. `CROSSTALK_TELEMETRY=0` always wins. Only `crosstalk serve` checks in; hubs embedded with `startServer()` never do.
 
 Read-only HTTP endpoints: `GET /health`, `GET /api/dialect`, `GET /api/channels` (public directory), `GET /api/channels/:address` (any channel; knowing the address is what grants access), `GET /api/locks/check?channel=&file=`.
 
