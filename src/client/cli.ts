@@ -58,8 +58,9 @@ const program = new Command()
 program
   .command('serve')
   .description('Run a hub')
-  .option('-p, --port <port>', 'port', '4488')
-  .option('-H, --host <host>', 'bind address (0.0.0.0 for LAN)', '127.0.0.1')
+  .option('-p, --port <port>', 'port (or $PORT / $CROSSTALK_PORT)', process.env.PORT || process.env.CROSSTALK_PORT || '4488')
+  .option('-H, --host <host>', 'bind address, 0.0.0.0 for LAN or cloud (or $CROSSTALK_HOST)', process.env.CROSSTALK_HOST || '127.0.0.1')
+  .option('--trust-proxy', 'take client IPs from X-Real-IP / X-Forwarded-For (only behind a reverse proxy)')
   .option('-t, --token <token>', 'require this token from clients (or set CROSSTALK_AUTH_TOKEN)')
   .option('-s, --subnet <rules...>', 'allow only these CIDRs / presets (lan, local)')
   .option('--allow-origin <origins...>', 'browser origins allowed without the token, e.g. a hosted cockpit')
@@ -70,7 +71,8 @@ program
       host: opts.host,
       token: opts.token,
       allowedSubnets: opts.subnet,
-      allowedOrigins: opts.allowOrigin
+      allowedOrigins: opts.allowOrigin,
+      trustProxy: opts.trustProxy || undefined
     }).catch(fail);
     startTelemetry({ enabled: opts.telemetry, log: line => console.log(`[crosstalk] ${line}`) });
   });

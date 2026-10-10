@@ -21,6 +21,14 @@ export interface ServerOptions {
    * cannot join your channels.
    */
   allowedOrigins?: string[];
+  /**
+   * Behind a reverse proxy (Railway, Fly, nginx...), take the client address
+   * from X-Real-IP / X-Forwarded-For instead of the socket, so per-address
+   * limits and subnet rules apply to real clients rather than to the proxy.
+   * Only enable when the hub is reachable solely through that proxy.
+   * Defaults to $CROSSTALK_TRUST_PROXY=1.
+   */
+  trustProxy?: boolean;
   /** HTTP agent sessions are dropped after this long without a request or poll. */
   sessionTtlMs?: number;
   hub?: HubOptions;
@@ -111,6 +119,20 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
       .filter(Boolean)
   );
   const loopbackOnly = SubnetGuard.isLoopbackHost(host);
+  const trustProxy = options.trustProxy ?? process.env.CROSSTALK_TRUST_PROXY === '1';
+
+  /** The client's IP: from the proxy's headers when trusted, else the socket. */
+  const clientIp = (req: http.IncomingMessage): string => {
+    if (trustProxy) {
+      const real = req.headers['x-real-ip'];
+      if (typeof real === 'string' && real.trim()) return real.trim();
+      const forwarded = req.headers['x-forwarded-for'];
+      // The proxy appends the address it saw, so the last entry is the trustworthy one.
+      const hops = typeof forwarded === 'string' ? forwarded.split(',').map(h => h.trim()).filter(Boolean) : [];
+      if (hops.length) return hops[hops.length - 1];
+    }
+    return req.socket.remoteAddress ?? '';
+  };
   const sessionTtlMs = options.sessionTtlMs ?? 10 * 60 * 1000;
   const log = options.quiet ? () => {} : (...args: unknown[]) => console.log('[crosstalk]', ...args);
 
@@ -126,7 +148,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
    *   or present the token. Non-browser agents send no Origin.
    */
   const admitted = (req: http.IncomingMessage, url: URL): 'ok' | 'subnet' | 'token' | 'origin' => {
-    if (!SubnetGuard.isAllowed(req.socket.remoteAddress ?? '', subnets)) return 'subnet';
+    if (!SubnetGuard.isAllowed(clientIp(req), subnets)) return 'subnet';
     if (loopbackOnly) {
       const hostname = (req.headers.host ?? '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
       if (hostname && !SubnetGuard.isLoopbackHost(hostname)) return 'origin';
@@ -153,7 +175,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     }
   };
 
-  const addressOf = (req: http.IncomingMessage) => SubnetGuard.normalizeIp(req.socket.remoteAddress ?? '') || 'unknown';
+  const addressOf = (req: http.IncomingMessage) => SubnetGuard.normalizeIp(clientIp(req)) || 'unknown';
 
   const json = (res: http.ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });

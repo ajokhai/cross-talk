@@ -167,3 +167,19 @@ test('localhost URLs are pinned to IPv4 loopback (Node 18 resolves localhost to 
   assert.equal(pinLoopback('wss://localhost.example.com'), 'wss://localhost.example.com');
   assert.equal(pinLoopback('ws://hub.example.com:4488'), 'ws://hub.example.com:4488');
 });
+
+test('behind a trusted proxy, per-address limits apply to real clients, not the proxy', async () => {
+  const session = (base: string, ip: string) =>
+    fetch(`${base}/v1/sessions`, { method: 'POST', headers: { 'X-Real-IP': ip }, body: JSON.stringify({ name: ip }) }).then(r => r.status);
+
+  await withServer({ trustProxy: true, hub: { maxConnectionsPerAddress: 1 } }, async (_s, base) => {
+    assert.equal(await session(base, '203.0.113.1'), 201);
+    assert.equal(await session(base, '203.0.113.2'), 201, 'a different client gets its own budget');
+    assert.equal(await session(base, '203.0.113.1'), 429, 'the same client is still capped');
+  });
+
+  await withServer({ hub: { maxConnectionsPerAddress: 1 } }, async (_s, base) => {
+    assert.equal(await session(base, '203.0.113.1'), 201);
+    assert.equal(await session(base, '203.0.113.2'), 429, 'without trustProxy the header is ignored');
+  });
+});
