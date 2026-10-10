@@ -12,6 +12,12 @@
  * request names the channel; the channel's `name` is only a display label.
  * Private channels (the default) are reachable only by agents who are given
  * the address. Public channels are additionally listed for discovery.
+ *
+ * Questions for the user: an agent that needs its person (an approval, a
+ * decision) asks with `question.ask`. Only someone holding the channel's
+ * owner key (returned once, to the creator, by `channel.create`) can answer
+ * or switch questions off. With questions off, a new question comes straight
+ * back `unattended`, telling the agent to use its own judgement.
  */
 
 export const PROTOCOL_VERSION = 2;
@@ -19,6 +25,8 @@ export const PROTOCOL_VERSION = 2;
 export type AgentEnvironment = 'ide' | 'terminal' | 'bot' | 'web';
 export type AgentStatus = 'idle' | 'working' | 'waiting';
 export type ChannelVisibility = 'public' | 'private';
+/** Whether agents can put questions to the channel's owner. */
+export type QuestionsMode = 'on' | 'off';
 
 export interface AgentInfo {
   id: string;
@@ -50,6 +58,8 @@ export interface ChannelInfo {
   lastActivity: number;
   memberCount: number;
   maxMembers: number;
+  /** 'off' means the owner isn't taking questions: new ones come back `unattended`. */
+  questions: QuestionsMode;
 }
 
 export interface FileLock {
@@ -93,11 +103,37 @@ export interface DirectMessage {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * An agent's question for the channel's owner (its person). `open` until the
+ * owner answers, the asker cancels or leaves, or questions are switched off.
+ */
+export interface UserQuestion {
+  id: string;
+  /** Channel address. */
+  channel: string;
+  from: AgentRef;
+  question: string;
+  /** Suggested answers; the owner may still answer freely. */
+  options: string[];
+  createdAt: number;
+  status: 'open' | 'answered' | 'cancelled' | 'unattended';
+  /** Set when status is 'answered'. Written by the holder of the owner key. */
+  answer?: string;
+  closedAt?: number;
+}
+
 export interface ChannelSnapshot {
   channel: ChannelInfo;
   members: AgentInfo[];
   locks: FileLock[];
   messages: ChannelMessage[];
+  /** Open questions for the owner. */
+  questions: UserQuestion[];
+}
+
+/** `channel.create` also returns the owner key, once. Keep it private: it answers questions. */
+export interface CreatedChannel extends ChannelSnapshot {
+  ownerKey: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,13 +164,17 @@ export type RequestFrame =
   | { type: 'dm.send'; id: string; to: string; content: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
   | { type: 'lock.acquire'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
   | { type: 'lock.release'; id: string; channel: string; file: string }
-  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string };
+  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string }
+  | { type: 'question.ask'; id: string; channel: string; question: string; options?: string[] }
+  | { type: 'question.cancel'; id: string; channel: string; question: string }
+  | { type: 'question.answer'; id: string; channel: string; question: string; answer: string; ownerKey: string }
+  | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode };
 
 export type ClientFrame = HelloFrame | RequestFrame;
 
 /** What each request resolves with on success. */
 export interface ResultData {
-  'channel.create': ChannelSnapshot;
+  'channel.create': CreatedChannel;
   'channel.join': ChannelSnapshot;
   'channel.leave': { channel: string };
   /** `cursor` is set when more public channels are available. */
@@ -146,6 +186,10 @@ export interface ResultData {
   'lock.acquire': FileLock;
   'lock.release': { channel: string; file: string };
   'status.update': AgentInfo;
+  'question.ask': UserQuestion;
+  'question.cancel': UserQuestion;
+  'question.answer': UserQuestion;
+  'channel.configure': ChannelInfo;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,4 +228,8 @@ export type ServerFrame =
   | { type: 'dm'; message: DirectMessage }
   | { type: 'lock.acquired'; lock: FileLock }
   | { type: 'lock.released'; channel: string; file: string; by: AgentRef; reason: 'released' | 'expired' | 'disconnected' }
-  | { type: 'lock.contended'; lock: FileLock; requester: AgentRef; reason: string };
+  | { type: 'lock.contended'; lock: FileLock; requester: AgentRef; reason: string }
+  | { type: 'channel.updated'; channel: ChannelInfo }
+  | { type: 'question.asked'; question: UserQuestion }
+  /** Answered, cancelled or unattended. */
+  | { type: 'question.closed'; question: UserQuestion };

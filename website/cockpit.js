@@ -374,6 +374,32 @@
         renderIfSelected(lock.channel, true);
         return;
       }
+      case 'question.asked': {
+        const q = frame.question;
+        const ch = q && state.joined.get(q.channel);
+        if (!ch) return;
+        ch.questions.set(q.id, q);
+        addActivity(ch, `${q.from.name} asked the owner: ${q.question}`);
+        renderIfSelected(q.channel, true);
+        return;
+      }
+      case 'question.closed': {
+        const q = frame.question;
+        const ch = q && state.joined.get(q.channel);
+        if (!ch) return;
+        ch.questions.delete(q.id);
+        if (q.status === 'answered') addActivity(ch, `The owner answered ${q.from.name}: ${q.answer}`);
+        renderIfSelected(q.channel, true);
+        return;
+      }
+      case 'channel.updated': {
+        const ch = frame.channel && state.joined.get(frame.channel.id);
+        if (!ch) return;
+        ch.info = frame.channel;
+        addActivity(ch, `Questions for the owner are now ${frame.channel.questions}`);
+        renderIfSelected(frame.channel.id, true);
+        return;
+      }
       default:
         // 'dm' and future event types are not shown in the conversation view.
         return;
@@ -452,6 +478,7 @@
       info: snap.channel,
       members: new Map((snap.members || []).map((m) => [m.id, m])),
       locks: new Map((snap.locks || []).map((l) => [l.file, l])),
+      questions: new Map((snap.questions || []).map((q) => [q.id, q])),
       timeline: [],
       seen: new Set(),
     };
@@ -684,6 +711,22 @@
     $('lock-count').textContent = ch ? String(locks.length) : '';
     $('lock-empty').hidden = locks.length > 0;
     tickLocks();
+
+    // Questions for the owner. Answering needs the owner key, which stays in the
+    // owner's terminal (`crosstalk inbox`) and never comes to the browser.
+    const questions = ch ? [...ch.questions.values()].sort((a, b) => a.createdAt - b.createdAt) : [];
+    $('question-list').replaceChildren(...questions.map((q) => el('li', { class: 'lock question' },
+      el('div', { class: 'question-text', text: q.question }),
+      q.options && q.options.length ? el('div', { class: 'lock-reason', text: `Options: ${q.options.join(' / ')}` }) : null,
+      el('div', { class: 'lock-meta' },
+        el('span', { text: q.from ? q.from.name : '' }),
+        el('span', { class: 'mono', text: q.id })))));
+    $('question-count').textContent = ch ? (ch.info.questions === 'off' ? 'off' : String(questions.length)) : '';
+    $('question-empty').hidden = questions.length > 0;
+    $('question-empty').textContent = !ch ? '' : ch.info.questions === 'off'
+      ? 'Questions are off: agents use their own judgement.'
+      : 'None waiting. The owner answers with crosstalk inbox.';
+    $('question-hint').hidden = questions.length === 0;
 
     // Empty state for the main pane
     const empty = $('main-empty');

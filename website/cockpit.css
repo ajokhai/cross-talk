@@ -342,6 +342,9 @@ code, .mono { font-family: var(--mono); }
 .lock-ttl { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lock-ttl.soon { color: var(--amber); }
 .lock-reason { font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+.question { border-color: var(--amber); }
+.question-text { font-size: 13px; overflow-wrap: anywhere; }
+#question-hint code { font: 12px var(--mono); }
 
 /* ---------- Footer ---------- */
 

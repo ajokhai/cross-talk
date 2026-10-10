@@ -9,7 +9,8 @@ import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
-import type { ChannelMessage, DirectMessage, ServerFrame } from '../protocol.js';
+import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
+import type { ChannelMessage, DirectMessage, ServerFrame, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 
 const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().username}@${os.hostname().split('.')[0]}`;
@@ -41,6 +42,56 @@ async function oneShot(address: string, opts: { name: string; url: string }) {
   await agent.open();
   const snapshot = await agent.request('channel.join', { channel: address });
   return { agent, channel: snapshot.channel.id, snapshot };
+}
+
+/** Keeps a new channel's owner key on this machine only (see keys.ts). */
+function saveKey(address: string, name: string, url: string, key: string | undefined) {
+  if (!key) return;
+  try {
+    saveOwnedChannel({ address, name, url, key });
+    console.log(dim(`Owner key saved to ${keyFile()}. Answer your agents' questions with \`crosstalk inbox\`.`));
+  } catch (err) {
+    console.error(yellow(`! Could not save the owner key (${(err as Error).message}); nobody will be able to answer questions here.`));
+  }
+}
+
+/** Joins every channel this machine owns on the hub at `url`, with their owner keys attached. */
+async function ownerSession(url: string, name: string): Promise<{ ct: CrossTalk; channels: Channel[] }> {
+  const owned = loadOwnedChannels().filter(c => sameHub(c.url, url));
+  if (!owned.length) {
+    fail(`No channels owned on this machine for ${url}. Channels you or your agents create here are recorded in ${keyFile()}.`);
+  }
+  const ct = await CrossTalk.connect({ name, role: 'owner', url, environment: 'terminal' });
+  const channels: Channel[] = [];
+  const gone: string[] = [];
+  for (const o of owned) {
+    try {
+      const ch = await ct.joinChannel(o.address);
+      ch.ownerKey = o.key;
+      channels.push(ch);
+    } catch (err) {
+      if (err instanceof CrossTalkError && err.code === 'not_found') gone.push(o.address);
+      else console.error(yellow(`! #${o.name} ${o.address}: ${(err as Error).message}`));
+    }
+  }
+  // The hub no longer has these (it restarted, or they sat empty); stop tracking them.
+  forgetOwnedChannels(gone);
+  return { ct, channels };
+}
+
+const ago = (ts: number) => {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
+};
+
+function formatQuestion(q: UserQuestion, channels: Channel[]): string {
+  const ch = channels.find(c => c.address === q.channel);
+  const lines = [
+    `${yellow('?')} ${dim('#' + (ch?.name ?? q.channel))} ${bold(cyan(q.from.name))} ${dim(`asked ${ago(q.createdAt)} · ${q.id}`)}`,
+    `  ${q.question}`
+  ];
+  if (q.options.length) lines.push('  ' + q.options.map((o, i) => `${bold(String(i + 1))}) ${o}`).join('   '));
+  return lines.join('\n');
 }
 
 function printShareHint(address: string) {
@@ -109,6 +160,7 @@ const createAction = async (label: string | undefined, opts: any) => {
       visibility: opts.public ? 'public' : 'private'
     });
     console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`));
+    saveKey(snap.channel.id, snap.channel.name, opts.url, snap.ownerKey);
     printShareHint(snap.channel.id);
   } catch (err) {
     fail(err);
@@ -142,6 +194,7 @@ program
     } catch (err) {
       return fail(err);
     }
+    if (ch.ownerKey) saveKey(ch.address, ch.name, opts.url, ch.ownerKey);
 
     console.log(green(`✔ ${bold(ct.agent.name)} is in #${ch.name}`) + dim(` (${ch.members.size} here)`));
     if (!address) printShareHint(ch.address);
@@ -203,6 +256,167 @@ program
       await ct.close();
       process.exit(0);
     });
+  });
+
+program
+  .command('inbox')
+  .description('Answer your agents\' questions from every channel you own, in one place')
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .option('-n, --name <name>', 'name shown in your channels', `${os.userInfo().username} (owner)`)
+  .option('--list', 'print open questions and exit')
+  .action(async opts => {
+    let session: { ct: CrossTalk; channels: Channel[] };
+    try {
+      session = await ownerSession(opts.url, opts.name);
+    } catch (err) {
+      return fail(err);
+    }
+    const { ct, channels } = session;
+    const queue: UserQuestion[] = channels.flatMap(c => [...c.questions.values()]).sort((a, b) => a.createdAt - b.createdAt);
+    const off = channels.filter(c => c.info.questions === 'off');
+
+    if (opts.list) {
+      if (!queue.length) console.log(dim(`No open questions in ${channels.length} channel${channels.length === 1 ? '' : 's'}.`));
+      for (const q of queue) console.log(formatQuestion(q, channels) + '\n');
+      await ct.close();
+      return;
+    }
+
+    console.log(green(`✔ Watching ${channels.length} channel${channels.length === 1 ? '' : 's'} for questions`) +
+      (off.length ? yellow(` (${off.length} with questions off)`) : ''));
+    console.log(dim('Type a number or an answer. Enter skips. /off or /on (this channel), /off all, /on all, /list, /quit'));
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
+    let current: UserQuestion | undefined;
+    let quitting = false;
+    const show = () => {
+      current = queue[0];
+      if (!current) {
+        rl.setPrompt(dim('(waiting for questions) > '));
+      } else {
+        console.log('\n' + formatQuestion(current, channels) + (queue.length > 1 ? dim(`   [1 of ${queue.length}]`) : ''));
+        rl.setPrompt('answer > ');
+      }
+      rl.prompt();
+    };
+    const print = (line: string) => {
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      console.log(line);
+    };
+
+    ct.on('question.asked', (q: UserQuestion) => {
+      queue.push(q);
+      process.stdout.write('\x07');
+      if (!current) {
+        print('');
+        show();
+      } else {
+        print(dim(`+ new question from ${q.from.name} (${queue.length} waiting)`));
+        rl.prompt(true);
+      }
+    });
+    ct.on('question.closed', (q: UserQuestion) => {
+      const i = queue.findIndex(x => x.id === q.id);
+      if (i === -1) return;
+      queue.splice(i, 1);
+      if (current?.id === q.id && q.status !== 'answered') {
+        print(dim(`  ${q.from.name} ${q.status === 'cancelled' ? 'withdrew that question' : 'no longer needs an answer'}`));
+        show();
+      }
+    });
+    ct.on('disconnected', () => quitting || print(red('disconnected, reconnecting…')));
+    ct.on('reconnected', () => {
+      // Rejoining refreshed each channel's open questions; rebuild the queue from them.
+      queue.splice(0, queue.length, ...channels.flatMap(c => [...c.questions.values()]).sort((a, b) => a.createdAt - b.createdAt));
+      print(green('reconnected'));
+      show();
+    });
+
+    const setMode = async (mode: 'on' | 'off', targets: Channel[]) => {
+      for (const ch of targets) {
+        await ch.setQuestions(mode);
+        print(mode === 'off' ? yellow(`questions off in #${ch.name}: agents will use their own judgement`) : green(`questions on in #${ch.name}`));
+      }
+    };
+
+    show();
+    rl.on('line', async line => {
+      const text = line.trim();
+      const here = current && channels.find(c => c.address === current!.channel);
+      try {
+        if (text === '/quit' || text === '/exit') return rl.close();
+        if (text === '/list') {
+          if (!queue.length) print(dim('No open questions.'));
+          for (const q of queue) print(formatQuestion(q, channels));
+        } else if (text === '/off all' || text === '/on all') {
+          await setMode(text === '/off all' ? 'off' : 'on', channels);
+        } else if (text === '/off' || text === '/on') {
+          if (!here) print(dim('No current question; use /off all or /on all.'));
+          else await setMode(text === '/off' ? 'off' : 'on', [here]);
+        } else if (!current) {
+          if (text) print(dim('Nothing to answer yet.'));
+        } else if (!text) {
+          queue.push(queue.shift()!);
+        } else {
+          const n = Number(text);
+          const answer = Number.isInteger(n) && n >= 1 && n <= current.options.length ? current.options[n - 1] : text;
+          const q = current;
+          queue.shift();
+          await here!.answer(q.id, answer);
+          print(green(`✔ answered ${q.from.name}: ${answer}`));
+        }
+      } catch (err) {
+        print(red(`✖ ${(err as Error).message}`));
+      }
+      show();
+    });
+    rl.on('close', async () => {
+      quitting = true;
+      await ct.close();
+      process.exit(0);
+    });
+  });
+
+program
+  .command('answer <questionId> <answer...>')
+  .description('Answer one of your agents\' questions (see `crosstalk inbox --list`)')
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (id: string, words: string[], opts) => {
+    try {
+      const { ct, channels } = await ownerSession(opts.url, `${os.userInfo().username} (owner)`);
+      const ch = channels.find(c => c.questions.has(id));
+      if (!ch) {
+        await ct.close();
+        return fail(`No open question ${id} in your channels. It may already be answered or withdrawn.`);
+      }
+      const q = await ch.answer(id, words.join(' '));
+      console.log(green(`✔ answered ${q.from.name} in #${ch.name}`));
+      await ct.close();
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('questions <mode> [address]')
+  .description('Turn agents\' questions on or off for one channel you own, or all of them. Off: agents get "unattended" and use their own judgement')
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (mode: string, address: string | undefined, opts) => {
+    if (mode !== 'on' && mode !== 'off') fail('mode must be "on" or "off"');
+    try {
+      const { ct, channels } = await ownerSession(opts.url, `${os.userInfo().username} (owner)`);
+      const targets = address ? channels.filter(c => c.address === address) : channels;
+      if (!targets.length) {
+        await ct.close();
+        return fail(`You don't own ${address} on this hub.`);
+      }
+      for (const ch of targets) await ch.setQuestions(mode as 'on' | 'off');
+      console.log(green(`✔ questions ${mode} in ${targets.map(c => '#' + c.name).join(', ')}`));
+      await ct.close();
+    } catch (err) {
+      fail(err);
+    }
   });
 
 program

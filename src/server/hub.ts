@@ -7,6 +7,7 @@ import {
   type ChannelMessage,
   type ChannelSnapshot,
   type ChannelVisibility,
+  type CreatedChannel,
   type DirectMessage,
   type ErrorCode,
   type FileLock,
@@ -14,7 +15,8 @@ import {
   type HubError,
   type RequestFrame,
   type ResultData,
-  type ServerFrame
+  type ServerFrame,
+  type UserQuestion
 } from '../protocol.js';
 import { LockManager, type LockManagerOptions } from './locks.js';
 import { DialectEngine } from '../dialect/engine.js';
@@ -40,6 +42,9 @@ export interface HubOptions {
   /** Simultaneous connections (WebSocket + HTTP sessions) from one network address. */
   maxConnectionsPerAddress?: number;
   maxMessageChars?: number;
+  /** Open questions one agent can have in one channel, and per channel in total. */
+  maxQuestionsPerAgent?: number;
+  maxQuestionsPerChannel?: number;
   /** How long an empty channel with history survives before it is deleted. */
   emptyChannelTtlMs?: number;
   /** Grace period for an empty channel nobody has written in yet (e.g. created, address shared, creator gone). */
@@ -74,6 +79,11 @@ interface Channel {
   members: Set<string>;
   history: ChannelMessage[];
   emptySince?: number;
+  /** SHA-256 of the owner key; the key itself is never stored. */
+  ownerKeyHash: Buffer;
+  questionsMode: 'on' | 'off';
+  /** Open questions by id. */
+  questions: Map<string, UserQuestion>;
 }
 
 export class Connection {
@@ -147,6 +157,8 @@ export class MeshHub {
       maxAgents: options.maxAgents ?? 10_000,
       maxConnectionsPerAddress: options.maxConnectionsPerAddress ?? 64,
       maxMessageChars: options.maxMessageChars ?? 16_000,
+      maxQuestionsPerAgent: options.maxQuestionsPerAgent ?? 5,
+      maxQuestionsPerChannel: options.maxQuestionsPerChannel ?? 200,
       emptyChannelTtlMs: options.emptyChannelTtlMs ?? 60 * 60 * 1000,
       unusedChannelTtlMs: options.unusedChannelTtlMs ?? 10 * 60 * 1000,
       rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 }
@@ -282,6 +294,10 @@ export class MeshHub {
       case 'lock.acquire': return this.acquireLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'lock.release': return this.releaseLock(conn, f.channel, f.file);
       case 'status.update': return this.updateStatus(conn, f.status, f.currentTask);
+      case 'question.ask': return this.askQuestion(conn, f.channel, f.question, f.options);
+      case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
+      case 'question.answer': return this.answerQuestion(conn, f.channel, f.question, f.answer, f.ownerKey);
+      case 'channel.configure': return this.configureChannel(conn, f.channel, f.ownerKey, f.questions);
       default: return fail('bad_request', `Unknown request type "${(f as { type: string }).type}"`);
     }
   }
@@ -295,7 +311,7 @@ export class MeshHub {
   }
 
   /** Creates a conversation with a fresh, unguessable address and joins the creator to it. */
-  private createChannel(conn: Connection, rawName: unknown, topic: unknown, visibility: unknown): ChannelSnapshot {
+  private createChannel(conn: Connection, rawName: unknown, topic: unknown, visibility: unknown): CreatedChannel {
     if (visibility !== undefined && visibility !== 'public' && visibility !== 'private') {
       fail('bad_request', 'visibility must be "public" or "private"');
     }
@@ -308,6 +324,7 @@ export class MeshHub {
     this.ensureRoom(conn);
 
     const now = this.now();
+    const ownerKey = `xk_${crypto.randomBytes(24).toString('base64url')}`;
     const channel: Channel = {
       id: `xt_${crypto.randomBytes(16).toString('base64url')}`,
       name: cleanText(rawName, 64) || 'untitled',
@@ -318,11 +335,14 @@ export class MeshHub {
       createdAt: now,
       lastActivity: now,
       members: new Set(),
-      history: []
+      history: [],
+      ownerKeyHash: MeshHub.hashKey(ownerKey),
+      questionsMode: 'on',
+      questions: new Map()
     };
     this.channels.set(channel.id, channel);
     this.addMember(conn, channel);
-    return this.snapshot(channel);
+    return { ...this.snapshot(channel), ownerKey };
   }
 
   private joinChannel(conn: Connection, address: unknown): ChannelSnapshot {
@@ -361,6 +381,10 @@ export class MeshHub {
     if (!channel) return;
     channel.members.delete(conn.agent!.id);
 
+    // Nobody is left to receive the answer.
+    for (const q of [...channel.questions.values()]) {
+      if (q.from.id === conn.agent!.id) this.closeQuestion(channel, q, 'cancelled');
+    }
     for (const lock of this.locks.releaseAllBy(conn.agent!.id, id)) {
       this.emit(channel, { type: 'lock.released', channel: id, file: lock.file, by: conn.ref, reason: 'disconnected' });
     }
@@ -391,7 +415,8 @@ export class MeshHub {
       createdAt: channel.createdAt,
       lastActivity: channel.lastActivity,
       memberCount: channel.members.size,
-      maxMembers: this.opts.maxMembersPerChannel
+      maxMembers: this.opts.maxMembersPerChannel,
+      questions: channel.questionsMode
     };
   }
 
@@ -400,7 +425,8 @@ export class MeshHub {
       channel: this.info(channel),
       members: [...channel.members].map(id => this.agents.get(id)?.agent).filter((a): a is AgentInfo => !!a),
       locks: this.locks.list(channel.id),
-      messages: channel.history.slice(-this.opts.historyLimit)
+      messages: channel.history.slice(-this.opts.historyLimit),
+      questions: [...channel.questions.values()]
     };
   }
 
@@ -606,6 +632,97 @@ export class MeshHub {
       if (channel) this.emit(channel, { type: 'member.updated', channel: name, agent }, agent.id);
     }
     return agent;
+  }
+
+  // -------------------------------------------------------------------------
+  // Questions for the owner
+  // -------------------------------------------------------------------------
+
+  static hashKey(key: string): Buffer {
+    return crypto.createHash('sha256').update(key).digest();
+  }
+
+  /** Constant-time check of an owner key against the channel's stored hash. */
+  private requireOwner(channel: Channel, ownerKey: unknown): void {
+    const ok = typeof ownerKey === 'string' && ownerKey.length <= 128 &&
+      crypto.timingSafeEqual(MeshHub.hashKey(ownerKey), channel.ownerKeyHash);
+    if (!ok) fail('forbidden', "That needs this channel's owner key");
+  }
+
+  private askQuestion(conn: Connection, address: unknown, question: unknown, options: unknown): UserQuestion {
+    const channel = this.memberChannel(conn, address);
+    const text = cleanText(question, 2000);
+    if (!text) fail('bad_request', 'question must be a non-empty string');
+    if (options !== undefined && (!Array.isArray(options) || options.length > 10)) {
+      fail('bad_request', 'options must be an array of at most 10 strings');
+    }
+    const choices = ((options as unknown[] | undefined) ?? []).map(o => cleanText(o, 200)).filter(Boolean);
+    const now = this.now();
+    const q: UserQuestion = {
+      id: newId('q'),
+      channel: channel.id,
+      from: conn.ref,
+      question: text,
+      options: choices,
+      createdAt: now,
+      status: 'open'
+    };
+    // The owner isn't taking questions: answer straight away, nothing is queued.
+    if (channel.questionsMode === 'off') return { ...q, status: 'unattended', closedAt: now };
+
+    const mine = [...channel.questions.values()].filter(x => x.from.id === conn.agent!.id).length;
+    if (mine >= this.opts.maxQuestionsPerAgent) {
+      fail('quota_exceeded', `At most ${this.opts.maxQuestionsPerAgent} open questions per agent; cancel one or wait for answers`);
+    }
+    if (channel.questions.size >= this.opts.maxQuestionsPerChannel) fail('quota_exceeded', 'This channel has too many open questions');
+    channel.questions.set(q.id, q);
+    channel.lastActivity = now;
+    this.emit(channel, { type: 'question.asked', question: q });
+    return q;
+  }
+
+  private openQuestion(channel: Channel, id: unknown): UserQuestion {
+    const q = typeof id === 'string' ? channel.questions.get(id) : undefined;
+    return q ?? fail('not_found', 'No open question with that id in this channel');
+  }
+
+  private cancelQuestion(conn: Connection, address: unknown, id: unknown): UserQuestion {
+    const channel = this.memberChannel(conn, address);
+    const q = this.openQuestion(channel, id);
+    if (q.from.id !== conn.agent!.id) fail('forbidden', 'Only the agent that asked can cancel a question');
+    return this.closeQuestion(channel, q, 'cancelled');
+  }
+
+  private answerQuestion(conn: Connection, address: unknown, id: unknown, answer: unknown, ownerKey: unknown): UserQuestion {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    const q = this.openQuestion(channel, id);
+    const text = cleanText(answer, 2000);
+    if (!text) fail('bad_request', 'answer must be a non-empty string');
+    return this.closeQuestion(channel, q, 'answered', text);
+  }
+
+  private configureChannel(conn: Connection, address: unknown, ownerKey: unknown, questions: unknown): ChannelInfo {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    if (questions !== undefined) {
+      if (questions !== 'on' && questions !== 'off') fail('bad_request', 'questions must be "on" or "off"');
+      channel.questionsMode = questions as 'on' | 'off';
+      // Switching off releases everyone already waiting.
+      if (questions === 'off') for (const q of [...channel.questions.values()]) this.closeQuestion(channel, q, 'unattended');
+    }
+    const info = this.info(channel);
+    this.emit(channel, { type: 'channel.updated', channel: info });
+    return info;
+  }
+
+  private closeQuestion(channel: Channel, q: UserQuestion, status: 'answered' | 'cancelled' | 'unattended', answer?: string): UserQuestion {
+    channel.questions.delete(q.id);
+    const closed: UserQuestion = { ...q, status, closedAt: this.now() };
+    if (answer !== undefined) closed.answer = answer;
+    channel.lastActivity = closed.closedAt!;
+    this.emit(channel, { type: 'question.closed', question: closed });
+    return closed;
   }
 
   // -------------------------------------------------------------------------
