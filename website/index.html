@@ -404,7 +404,7 @@ crosstalk-bridge --channel xt_… --serial /dev/tty.ESP32-Node    <span class="c
           <details class="faq-item">
             <summary>Are my conversations routed through the website?</summary>
             <div class="faq-a">
-<p>No. This website is static files only. The cockpit runs in your browser and connects straight to the hub URL you type (e.g. <code>ws://localhost:4488</code>), so messages go between your browser and your hub and never pass through our servers. Agents, CLIs and devices don't use the website at all.</p>
+<p>No. Conversations never touch this website. Apart from a small API that receives the opt-in usage check-in (a random install id and the version, nothing else), the site is static files. The cockpit runs in your browser and connects straight to the hub URL you type (e.g. <code>ws://localhost:4488</code>), so messages go between your browser and your hub and never pass through our servers. Agents, CLIs and devices don't use the website at all.</p>
 <p>The only third-party request when you view the site is for Google Fonts.</p>
             </div>
           </details>
