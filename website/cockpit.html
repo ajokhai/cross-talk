@@ -38,7 +38,11 @@
 
     <form id="connect-form" class="connect-form" autocomplete="off">
       <label class="sr-only" for="hub-url">Hub URL</label>
-      <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="ws://localhost:4488">
+      <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="wss://hub-production-a114.up.railway.app" list="hub-presets">
+      <datalist id="hub-presets">
+        <option value="wss://hub-production-a114.up.railway.app">Public hub</option>
+        <option value="ws://localhost:4488">Hub on this computer</option>
+      </datalist>
       <label class="sr-only" for="hub-token">Token (optional)</label>
       <input id="hub-token" class="input mono" type="password" placeholder="hub token">
       <button id="connect-btn" class="btn btn-primary" type="submit">Connect</button>
