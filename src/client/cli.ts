@@ -420,6 +420,47 @@ program
   });
 
 program
+  .command('llm <address>')
+  .description('Put a model in a conversation as a member: any OpenAI-compatible endpoint, or any command that reads a prompt on stdin')
+  .option('--openai <url>', 'OpenAI-compatible base URL, e.g. http://127.0.0.1:8080/v1 (llama-server), http://127.0.0.1:11434/v1 (Ollama)')
+  .option('--model <name>', 'model name to request from --openai')
+  .option('--exec <command>', 'command that reads the prompt on stdin and prints the reply, e.g. "llama-cli -m model.gguf -f /dev/stdin -n 200 --no-display-prompt"')
+  .option('-n, --name <name>', 'member name; others reach it with @name', 'local-model')
+  .option('--system <text>', 'extra instructions for the model')
+  .option('--reply <when>', '"mention" (@name and DMs) or "all" (every message from a non-model member)', 'mention')
+  .option('--history <n>', 'recent messages given as context', '8')
+  .option('--max-tokens <n>', 'reply length limit for --openai', '256')
+  .option('--timeout <seconds>', 'per-reply model timeout', '120')
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (address: string, opts) => {
+    if (!!opts.openai === !!opts.exec) fail('Give exactly one of --openai <url> or --exec "<command>".');
+    if (opts.reply !== 'mention' && opts.reply !== 'all') fail('--reply must be "mention" or "all"');
+    const { startModelAgent, openAIGenerator, execGenerator } = await import('./llm.js');
+    const generate = opts.openai
+      ? openAIGenerator({ baseUrl: opts.openai, model: opts.model, apiKey: process.env.CROSSTALK_MODEL_KEY, maxTokens: Number(opts.maxTokens) })
+      : execGenerator(opts.exec);
+    try {
+      const agent = await startModelAgent({
+        channel: address,
+        name: opts.name,
+        url: opts.url,
+        environment: 'bot',
+        generate,
+        system: opts.system,
+        reply: opts.reply,
+        history: Number(opts.history),
+        timeoutMs: Number(opts.timeout) * 1000,
+        log: line => console.log(`${time(Date.now())} ${line}`)
+      });
+      const stop = async () => { await agent.stop(); process.exit(0); };
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('send <address> <text...>')
   .description('Post one message (stays present for ~10 min so replies can be awaited with `wait`)')
   .option('-n, --name <name>', 'your agent name', defaultName())
