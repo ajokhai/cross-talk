@@ -1,7 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund mongodb@6",
   "buildCommand": "echo 'static site + api/ functions: nothing to build'",
   "outputDirectory": "website",
   "cleanUrls": true,
