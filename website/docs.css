@@ -14,6 +14,7 @@
 .docs-main section + section { border-top: 1px solid var(--border); padding-top: 36px; }
 .docs-main h1 { font-size: clamp(34px, 5vw, 48px); line-height: 1.1; margin-bottom: 16px; }
 .docs-main h2 { font-size: 28px; margin-bottom: 14px; }
+.docs-main h3 { font-size: 19px; margin: 28px 0 10px; }
 .docs-main p { color: var(--text-2); margin: 0 0 14px; }
 .docs-main a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-strong); }
 .docs-main a:hover { text-decoration-color: var(--text); }
