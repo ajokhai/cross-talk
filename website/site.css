@@ -261,6 +261,20 @@ p { margin: 0; }
 .chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-alt); color: var(--text-2); }
 .scope-lock { font: 12.5px/1.4 var(--mono); color: var(--muted); }
 
+.split-h3 { font-size: 22px; }
+.checks code, .savings-est code, .context-grid code { font: 12.5px var(--mono); background: var(--bg-alt); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+.savings-est { margin-top: 20px; }
+.savings-est a { color: var(--text); }
+.savings { padding: 8px 20px 18px; box-shadow: var(--shadow); }
+.savings-head, .savings-row, .savings-total { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.savings-head { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.savings-row code { font: 12.5px/1.5 var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
+.savings-n, .savings-total span:last-child { white-space: nowrap; color: var(--muted); font-size: 14px; }
+.savings-n b, .savings-total b { color: var(--text); }
+.savings-total { border-bottom: 0; font-weight: 600; }
+.savings-foot { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.context-grid { margin-top: 48px; }
+
 /* CTA */
 .cta { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; padding: 48px; }
 .cta h2 { text-align: left; }
