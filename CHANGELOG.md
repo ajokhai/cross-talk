@@ -10,6 +10,17 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-10
+
+2.1.0 was tagged but its release build failed, so it was never published.
+2.1.1 contains everything listed under 2.1.0 below, plus:
+
+### Fixed
+- The air-gap installer and standalone bundle failed on Node 18 (and Node 20
+  before 20.19), which load an extensionless file as CommonJS. The installer
+  now installs `crosstalk.mjs` with a small `crosstalk` launcher script, and CI
+  runs the bundle on Node 18, 20 and 22.
+
 ## [2.1.0] - 2026-10-10
 
 ### Added
@@ -79,6 +90,7 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.1
 [2.1.0]: https://github.com/ajokhai/cross-talk/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/ajokhai/cross-talk/releases/tag/v2.0.0

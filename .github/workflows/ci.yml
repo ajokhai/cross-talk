@@ -30,12 +30,13 @@ jobs:
       - name: Standalone bundle runs outside the repo
         run: |
           npm run bundle
-          dir=$(mktemp -d) && cp dist/crosstalk.standalone.mjs "$dir/crosstalk"
+          # Keep the .mjs extension: Node 18 treats extensionless files as CommonJS.
+          dir=$(mktemp -d) && cp dist/crosstalk.standalone.mjs "$dir/crosstalk.mjs"
           cd "$dir"
-          test "$(node ./crosstalk --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
-          node ./crosstalk serve --port 4598 & pid=$!
+          test "$(node ./crosstalk.mjs --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
+          node ./crosstalk.mjs serve --port 4598 & pid=$!
           for i in $(seq 1 30); do curl -sf localhost:4598/health && break; sleep 0.5; done
-          node ./crosstalk new ci-check --url ws://localhost:4598
+          node ./crosstalk.mjs new ci-check --url ws://localhost:4598
           kill $pid
 
   python:
