@@ -16,7 +16,9 @@
   'use strict';
 
   const PROTOCOL_VERSION = 2;
-  const DEFAULT_URL = 'ws://localhost:4488';
+  // The public hub works from any browser. A hub on your own machine is
+  // ws://localhost:4488 (offered in the address box's suggestions).
+  const DEFAULT_URL = 'wss://hub-production-a114.up.railway.app';
   const REQUEST_TIMEOUT_MS = 15000;
   const HELLO_TIMEOUT_MS = 10000;
   const MAX_TIMELINE = 500;
