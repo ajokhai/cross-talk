@@ -10,6 +10,13 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Fixed
+- Usage check-in: only CI services (GitHub Actions, GitLab CI, ...) turn it
+  off, not a bare `CI` variable, which some app hosts such as Railway set at
+  runtime. Hubs on Railway, Render, Fly and Heroku now keep one anonymous id
+  across redeploys instead of counting as a new hub each time;
+  `CROSSTALK_TELEMETRY_ID` sets one anywhere else.
+
 ## [2.3.0] - 2026-10-10
 
 ### Added

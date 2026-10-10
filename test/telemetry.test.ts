@@ -24,14 +24,16 @@ async function collector() {
   return { url: `http://127.0.0.1:${port}/api/ping`, bodies, close: () => new Promise(r => server.close(r)) };
 }
 
-test('telemetry is on by default; the flag, CROSSTALK_TELEMETRY, DO_NOT_TRACK and CI turn it off', () => {
+test('telemetry is on by default; the flag, CROSSTALK_TELEMETRY, DO_NOT_TRACK and CI services turn it off', () => {
   assert.equal(telemetryEnabled(undefined, {}), true);
   assert.equal(telemetryEnabled(false, {}), false);
   assert.equal(telemetryEnabled(undefined, { CROSSTALK_TELEMETRY: '0' }), false);
   assert.equal(telemetryEnabled(true, { CROSSTALK_TELEMETRY: 'off' }), false, 'the env var vetoes the flag');
   assert.equal(telemetryEnabled(undefined, { DO_NOT_TRACK: '1' }), false);
-  assert.equal(telemetryEnabled(undefined, { CI: 'true' }), false);
-  assert.equal(telemetryEnabled(undefined, { CI: 'true', CROSSTALK_TELEMETRY: '1' }), true, 'an explicit opt-in beats CI');
+  assert.equal(telemetryEnabled(undefined, { GITHUB_ACTIONS: 'true', CI: 'true' }), false);
+  assert.equal(telemetryEnabled(undefined, { GITLAB_CI: 'true' }), false);
+  assert.equal(telemetryEnabled(undefined, { CI: 'true' }), true, 'a bare CI (set by some app hosts) is not a CI service');
+  assert.equal(telemetryEnabled(undefined, { GITHUB_ACTIONS: 'true', CROSSTALK_TELEMETRY: '1' }), true, 'an explicit opt-in beats CI');
   assert.equal(telemetryEnabled(undefined, { DO_NOT_TRACK: '0' }), true);
 });
 
@@ -67,9 +69,19 @@ test('enabled telemetry sends only a random id, the version and the kind', async
   }
 });
 
+test('cloud hubs get a stable, hashed id that survives redeploys', () => {
+  const railway = { RAILWAY_SERVICE_ID: 'svc-123', RAILWAY_ENVIRONMENT_ID: 'env-1' };
+  const a = telemetryId(tmpFile(), railway);
+  assert.match(a, /^[0-9a-f]{32}$/);
+  assert.equal(telemetryId(tmpFile(), railway), a, 'a fresh disk gives the same id');
+  assert.notEqual(telemetryId(tmpFile(), { ...railway, RAILWAY_ENVIRONMENT_ID: 'env-2' }), a);
+  assert.equal(telemetryId(tmpFile(), { CROSSTALK_TELEMETRY_ID: 'my-hub' }), telemetryId(tmpFile(), { CROSSTALK_TELEMETRY_ID: 'my-hub' }));
+  assert.notEqual(telemetryId(tmpFile(), {}), telemetryId(tmpFile(), {}), 'otherwise each install is random');
+});
+
 test('the id is stable across runs and failures never throw', async () => {
   const file = tmpFile();
-  assert.equal(telemetryId(file), telemetryId(file));
+  assert.equal(telemetryId(file, {}), telemetryId(file, {}));
   assert.equal(await checkIn('http://127.0.0.1:9/nothing-listens-here', telemetryId(file)), false);
   // Without a configured endpoint, nothing is sent and the log says so.
   const lines: string[] = [];
