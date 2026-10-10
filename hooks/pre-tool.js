@@ -13,7 +13,9 @@
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const base = (process.env.CROSSTALK_URL || 'ws://localhost:4488').replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
+const base = (process.env.CROSSTALK_URL || 'ws://localhost:4488').replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '')
+  // Node 18 resolves localhost to ::1 first; the hub listens on 127.0.0.1.
+  .replace(/^(https?):\/\/localhost(?=[:/]|$)/i, '$1://127.0.0.1');
 const targets = (process.env.CROSSTALK_CHANNEL || '').split(',').map(s => s.trim()).filter(Boolean);
 const me = (process.env.CROSSTALK_AGENT_NAME || '').toLowerCase();
 

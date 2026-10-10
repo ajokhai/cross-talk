@@ -159,3 +159,11 @@ test('channel snapshots and lock checks are readable by address over HTTP', asyn
     }
   });
 });
+
+test('localhost URLs are pinned to IPv4 loopback (Node 18 resolves localhost to ::1 first)', async () => {
+  const { pinLoopback } = await import('../src/client/sdk.js');
+  assert.equal(pinLoopback('ws://localhost:4488'), 'ws://127.0.0.1:4488');
+  assert.equal(pinLoopback('http://LOCALHOST/x'), 'http://127.0.0.1/x');
+  assert.equal(pinLoopback('wss://localhost.example.com'), 'wss://localhost.example.com');
+  assert.equal(pinLoopback('ws://hub.example.com:4488'), 'ws://hub.example.com:4488');
+});
