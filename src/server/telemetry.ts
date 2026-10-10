@@ -8,7 +8,7 @@ import { VERSION } from '../version.js';
  * Anonymous usage check-in for `crosstalk serve`, feeding the site's usage map.
  *
  * On by default. Off with --no-telemetry, CROSSTALK_TELEMETRY=0, DO_NOT_TRACK=1,
- * or when CI is set. When on, the hub POSTs once at startup and then once a day:
+ * or on a CI service (GitHub Actions, GitLab CI, ...). When on, the hub POSTs once at startup and then once a day:
  *
  *   {"id": "<random 32 hex, kept in ~/.crosstalk/telemetry-id>", "v": "<version>", "kind": "hub"}
  *
@@ -40,12 +40,48 @@ export function telemetryEnabled(flag?: boolean, env: NodeJS.ProcessEnv = proces
   // General opt-outs: the DO_NOT_TRACK convention, and CI runs, which aren't real hubs.
   const dnt = (env.DO_NOT_TRACK ?? '').trim().toLowerCase();
   if (dnt && dnt !== '0' && dnt !== 'false') return false;
-  if ((env.CI ?? '').trim() && env.CI !== 'false') return false;
+  if (onCiService(env)) return false;
   return true;
 }
 
-/** Returns the stored anonymous id, creating it on first use. */
-export function telemetryId(file = path.join(os.homedir(), '.crosstalk', 'telemetry-id')): string {
+/**
+ * Variables set by CI services. A bare `CI` isn't enough: some app hosts set
+ * it at runtime too, and hubs there are real.
+ */
+const CI_SERVICE_VARS = [
+  'GITHUB_ACTIONS', 'GITLAB_CI', 'CIRCLECI', 'TRAVIS', 'BUILDKITE', 'JENKINS_URL', 'TF_BUILD',
+  'BITBUCKET_BUILD_NUMBER', 'DRONE', 'APPVEYOR', 'TEAMCITY_VERSION', 'CODEBUILD_BUILD_ID', 'SEMAPHORE', 'WOODPECKER'
+];
+
+function onCiService(env: NodeJS.ProcessEnv): boolean {
+  return CI_SERVICE_VARS.some(name => {
+    const value = (env[name] ?? '').trim().toLowerCase();
+    return value !== '' && value !== 'false' && value !== '0';
+  });
+}
+
+/**
+ * A stable id for hubs whose disk is replaced on every deploy, so a redeploy
+ * isn't counted as a new hub: CROSSTALK_TELEMETRY_ID, or the platform's own
+ * service id. Hashed, so the raw value is never sent.
+ */
+function platformId(env: NodeJS.ProcessEnv): string | undefined {
+  const source =
+    env.CROSSTALK_TELEMETRY_ID?.trim() ||
+    (env.RAILWAY_SERVICE_ID && `railway:${env.RAILWAY_SERVICE_ID}:${env.RAILWAY_ENVIRONMENT_ID ?? ''}`) ||
+    (env.RENDER_SERVICE_ID && `render:${env.RENDER_SERVICE_ID}`) ||
+    (env.FLY_APP_NAME && `fly:${env.FLY_APP_NAME}`) ||
+    (env.HEROKU_APP_ID && `heroku:${env.HEROKU_APP_ID}`);
+  return source ? crypto.createHash('sha256').update(`crosstalk-telemetry:${source}`).digest('hex').slice(0, 32) : undefined;
+}
+
+/**
+ * The anonymous id: a stable platform-derived one when available, otherwise a
+ * random one stored in `file`, created on first use.
+ */
+export function telemetryId(file = path.join(os.homedir(), '.crosstalk', 'telemetry-id'), env: NodeJS.ProcessEnv = process.env): string {
+  const fromPlatform = platformId(env);
+  if (fromPlatform) return fromPlatform;
   try {
     const existing = fs.readFileSync(file, 'utf8').trim();
     if (/^[0-9a-f]{32}$/.test(existing)) return existing;
@@ -93,7 +129,7 @@ export function startTelemetry(options: TelemetryOptions = {}): () => void {
   }
 
   const id = telemetryId(options.idFile);
-  log(`telemetry on: once a day sends {id: ${id.slice(0, 6)}… (random), version: ${VERSION}} to ${url}. Turn off with --no-telemetry or CROSSTALK_TELEMETRY=0`);
+  log(`telemetry on: once a day sends {id: ${id.slice(0, 6)}… (anonymous), version: ${VERSION}} to ${url}. Turn off with --no-telemetry or CROSSTALK_TELEMETRY=0`);
 
   void checkIn(url, id);
   const timer = setInterval(() => void checkIn(url, id), options.intervalMs ?? DAY_MS);
