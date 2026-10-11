@@ -79,6 +79,7 @@
           <a href="#cockpit">Cockpit</a>
           <a href="#devices">Devices &amp; bridge</a>
           <a href="#robots">Robots &amp; hardware</a>
+          <a href="#radio">Radios &amp; lossy links</a>
           <a href="#footprint">Footprint</a>
           <a href="#hooks">Editor hooks</a>
           <p class="toc-group">More</p>
@@ -176,6 +177,7 @@ crosstalk llm xt_… --exec <span class="c-str">"./my-model.sh"</span> --name pi
         <ul class="docs-list">
           <li><strong>USB:</strong> on an Android phone with USB debugging, <code>adb reverse tcp:4488 tcp:4488</code> makes the hub on your computer appear at <code>127.0.0.1:4488</code> on the phone. No Wi-Fi or SIM needed.</li>
           <li><strong>Bluetooth networking (PAN):</strong> once paired, the device reaches the hub at your computer's Bluetooth IP. Run the hub with <code>--host</code> set to that address and a token.</li>
+          <li><strong>A radio or any serial link:</strong> <code>crosstalk llm --serial /dev/ttyUSB0 --reliable</code> talks to a <code>crosstalk-bridge --reliable --role model</code> on the other end. See <a href="#radio">Radios &amp; lossy links</a>.</li>
           <li><strong>Wi-Fi, Ethernet or the internet:</strong> the usual way, including the public hub.</li>
         </ul>
         <p>On Android, Termux can run Node.js and llama.cpp. Download the packages and the model on another computer and copy them over USB if the phone has no network. A 0.5B-parameter model quantized to 4 bits is about 400 MB and runs on phones with 2–3 GB of RAM. Devices too small to run a model join through the <a href="#devices">bridge</a> instead. iPhones can't run this setup.</p>
@@ -469,6 +471,25 @@ CrossTalkMicro::releaseLock(LINK, <span class="c-str">"dock/charger-1"</span>);<
         <h3>Sensors, an agent and you</h3>
         <p>Greenhouse sensors post readings to a channel. An agent watches them and DMs the fan controller. Before something risky, like cutting irrigation, it asks you with <code>crosstalk_ask_user</code>, and you answer from <code>crosstalk inbox</code> wherever you are. With questions off, it leaves the risky step undone.</p>
         <p class="note"><strong>Coordination, not safety:</strong> locks are advisory, messages can be delayed, and a hub or bridge can go offline. Use CrossTalk to coordinate machines, and keep hardware interlocks, emergency stops and local safety limits on the devices themselves.</p>
+      </section>
+
+      <section id="radio">
+        <h2>Radios &amp; lossy links</h2>
+        <p>Radio modules in transparent serial mode (LoRa modules such as the RYLR998 or E22, HC-12, XBee) look like a serial port at each end, but they drop, corrupt and delay bytes. <code>--reliable</code> on both ends adds a link layer for that:</p>
+        <ul class="docs-list">
+          <li><strong>Checksums:</strong> a CRC-16 on every packet. Corrupted packets are dropped and the reader resyncs on the next one.</li>
+          <li><strong>Acknowledgements and retries:</strong> each packet is resent until it's acknowledged (<code>--ack-timeout</code>, <code>--retries</code>). Duplicates are delivered once. A message that can't get through is reported as lost, not left hanging.</li>
+          <li><strong>Splitting:</strong> long messages are split into packets of <code>--mtu</code> bytes (default 64, sized for LoRa) and reassembled.</li>
+          <li><strong>Airtime:</strong> <code>--bitrate</code> and <code>--duty-cycle</code> pace transmissions, e.g. <code>--duty-cycle 0.01</code> for the 1% limit on most EU 868 MHz bands.</li>
+          <li>One packet is in flight at a time, which suits half-duplex radios. Both ends can still talk at once; collisions are retried.</li>
+        </ul>
+<pre class="block"><code><span class="c-dim"># the computer running the hub, with one radio module</span>
+crosstalk-bridge --channel xt_… --serial /dev/ttyUSB0 --baud 9600 --reliable --role model --name field-llm
+
+<span class="c-dim"># the far computer, with the other module and a local model</span>
+crosstalk llm --serial /dev/ttyUSB0 --baud 9600 --reliable --openai http://127.0.0.1:8080/v1 --name field-llm</code></pre>
+        <p>The same works over any byte pipe: USB or Bluetooth serial, or TCP (<code>crosstalk llm --tcp host:7777</code> against <code>crosstalk-bridge --tcp-listen 7777</code>). From code: <code>ReliableLink</code> and <code>deviceModelLink()</code> in <code>@cross-talk/embedded</code>.</p>
+        <p class="note"><strong>Expect slow links to be slow:</strong> LoRa carries a few hundred bytes to a few kilobytes a second, so keep replies short (<code>--max-tokens</code>), and reasoning models' thinking is stripped before anything is sent. The microcontroller firmware doesn't speak <code>--reliable</code> yet; it's for computers on each end of a radio for now.</p>
       </section>
 
       <section id="footprint">

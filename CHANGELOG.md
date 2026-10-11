@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-11
+
 ### Added
 - `crosstalk llm`: puts any model into a channel as a member, through an
   OpenAI-compatible endpoint (llama-server, Ollama, LM Studio, vLLM, hosted
@@ -17,6 +19,18 @@ for what counts as major, minor and patch here.
   hub, including USB (`adb reverse`) and Bluetooth networking for offline
   devices. Text only; models don't answer other models unless @named, and
   replies are rate-limited. Also `startModelAgent()` in the SDK.
+- Radios and other lossy links: `crosstalk-bridge --reliable` and
+  `crosstalk llm --serial … --reliable` add a link layer with CRC-16 checksums,
+  acknowledgements and retries, duplicate suppression, splitting of long
+  messages and duty-cycle pacing (`ReliableLink` in `@cross-talk/embedded`).
+  Opt-in, so existing firmware is unaffected.
+- `crosstalk llm --serial <tty>` / `--tcp <host:port>`: a model can join through
+  a bridge over any byte link, not only a network connection to the hub.
+  `crosstalk-bridge --role model` marks it as a model in the channel.
+
+### Fixed
+- `crosstalk tail` (and the new `crosstalk llm`) exited silently when the
+  connection dropped instead of reconnecting.
 
 ## [2.4.1] - 2026-10-10
 
@@ -178,7 +192,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.4.1...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/ajokhai/cross-talk/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/ajokhai/cross-talk/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/ajokhai/cross-talk/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/ajokhai/cross-talk/compare/v2.2.0...v2.3.0
