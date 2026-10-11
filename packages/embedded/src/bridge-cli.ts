@@ -6,28 +6,19 @@
  *   crosstalk-bridge --channel xt_... --tcp-listen 7777          # one agent per TCP device
  *   crosstalk-bridge --channel xt_... --unix /tmp/device.sock
  *   crosstalk-bridge --channel xt_... --stdio                    # pipe frames through stdin/stdout
+ *   crosstalk-bridge --channel xt_... --serial /dev/ttyUSB0 --reliable   # radio or other lossy link
  *
  * Each device link becomes one agent in the channel (see DeviceBridge for the
  * frame profile). Hub: --url or $CROSSTALK_URL; token: $CROSSTALK_AUTH_TOKEN.
  */
-import fs from 'node:fs';
 import net from 'node:net';
 import { Duplex } from 'node:stream';
-import { execFileSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { DeviceBridge } from './bridge.js';
 import { ResyncingLink } from './transport/resync.js';
-
-function openSerial(path: string, baud: number): Duplex {
-  // Configure the tty without a native dependency: raw mode at the requested baud.
-  const flag = process.platform === 'darwin' ? '-f' : '-F';
-  execFileSync('stty', [flag, path, String(baud), 'raw', '-echo'], { stdio: 'inherit' });
-  const fd = fs.openSync(path, fs.constants.O_RDWR | fs.constants.O_NOCTTY);
-  return Duplex.from({
-    readable: fs.createReadStream('', { fd, autoClose: false }),
-    writable: fs.createWriteStream('', { fd })
-  });
-}
+import { ReliableLink } from './transport/reliable.js';
+import { openSerialPort } from './transport/serial.js';
+import type { ICrossTalkTransport } from './transport/interface.js';
 
 async function main() {
   const { values } = parseArgs({
@@ -43,7 +34,14 @@ async function main() {
       'max-devices': { type: 'string', default: '16' },
       unix: { type: 'string' },
       stdio: { type: 'boolean', default: false },
-      'max-frame': { type: 'string', default: '128' },
+      'max-frame': { type: 'string' },
+      role: { type: 'string', default: 'device' },
+      reliable: { type: 'boolean', default: false },
+      mtu: { type: 'string', default: '64' },
+      'ack-timeout': { type: 'string', default: '1500' },
+      retries: { type: 'string', default: '6' },
+      bitrate: { type: 'string', default: '9600' },
+      'duty-cycle': { type: 'string', default: '1' },
       help: { type: 'boolean', short: 'h' }
     }
   });
@@ -51,21 +49,35 @@ async function main() {
   const links = [values.serial, values['tcp-listen'], values.unix, values.stdio || undefined].filter(Boolean);
   if (values.help || !values.channel || links.length !== 1) {
     console.error(`Usage: crosstalk-bridge --channel <xt_address> (--serial <tty> [--baud 115200] | --tcp-listen <port> | --unix <path> | --stdio)
-                       [--name device] [--url ws://localhost:4488] [--max-frame 128]
-Each device link joins the channel as one agent. A device may send a REGISTER frame first to pick its name.`);
+                       [--name device] [--role device] [--url ws://localhost:4488] [--max-frame 128]
+                       [--reliable [--mtu 64] [--ack-timeout 1500] [--retries 6] [--bitrate 9600] [--duty-cycle 1]]
+Each device link joins the channel as one agent. A device may send a REGISTER frame first to pick its name.
+--reliable: for radios and other lossy links. Adds checksums, acknowledgements, retries and splitting of
+long messages; the device end must use a ReliableLink with the same settings. --role model for a model
+joining with \`crosstalk llm --serial\`.`);
     process.exit(values.help ? 0 : 1);
   }
   if (values.token) {
     console.error('[bridge] warning: --token is visible to other users in `ps`; prefer CROSSTALK_AUTH_TOKEN');
   }
 
-  const maxFrame = Number(values['max-frame']);
+  // Reliable links split long messages into packets, so frames can be much bigger than one packet.
+  const maxFrame = Number(values['max-frame'] ?? (values.reliable ? 2048 : 128));
+  const linkOver = (stream: Duplex): ICrossTalkTransport => values.reliable
+    ? new ReliableLink(stream, {
+      mtu: Number(values.mtu),
+      ackTimeoutMs: Number(values['ack-timeout']),
+      retries: Number(values.retries),
+      bitrate: Number(values.bitrate),
+      dutyCycle: Number(values['duty-cycle'])
+    })
+    : new ResyncingLink(stream, maxFrame);
   const hub = { url: values.url, token: values.token };
   // Logs go to stderr so --stdio keeps stdout for frames.
   const log = (...args: unknown[]) => console.error('[bridge]', ...args);
 
-  const bridge = async (link: ResyncingLink, name: string) => {
-    const b = new DeviceBridge({ transport: link, channel: values.channel!, name, hub, maxPayloadBytes: maxFrame - 10 });
+  const bridge = async (link: ICrossTalkTransport, name: string) => {
+    const b = new DeviceBridge({ transport: link, channel: values.channel!, name, hub, role: values.role, maxPayloadBytes: maxFrame - 10 });
     b.on('error', err => log(`${name}:`, err instanceof Error ? err.message : err));
     b.on('closed', () => log(`${name} disconnected`));
     const ch = await b.start();
@@ -74,13 +86,13 @@ Each device link joins the channel as one agent. A device may send a REGISTER fr
   };
 
   if (values.serial) {
-    await bridge(new ResyncingLink(openSerial(values.serial, Number(values.baud)), maxFrame), values.name!);
+    await bridge(linkOver(openSerialPort(values.serial, Number(values.baud))), values.name!);
   } else if (values.unix) {
     const socket = net.createConnection(values.unix);
     await new Promise((resolve, reject) => socket.once('connect', resolve).once('error', reject));
-    await bridge(new ResyncingLink(socket, maxFrame), values.name!);
+    await bridge(linkOver(socket), values.name!);
   } else if (values.stdio) {
-    await bridge(new ResyncingLink(Duplex.from({ readable: process.stdin, writable: process.stdout }), maxFrame), values.name!);
+    await bridge(linkOver(Duplex.from({ readable: process.stdin, writable: process.stdout })), values.name!);
   } else {
     const host = values['tcp-host']!;
     const maxDevices = Number(values['max-devices']);
@@ -97,7 +109,7 @@ Each device link joins the channel as one agent. A device may send a REGISTER fr
       active++;
       socket.once('close', () => active--);
       const name = `${values.name}-${++seq}`;
-      bridge(new ResyncingLink(socket, maxFrame), name).catch(err => {
+      bridge(linkOver(socket), name).catch(err => {
         log(`${name}:`, err.message);
         socket.destroy();
       });

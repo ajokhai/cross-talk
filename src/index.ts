@@ -12,4 +12,4 @@ export { LockManager, type LockManagerOptions, type AcquireResult } from './serv
 export { SubnetGuard } from './server/subnet.js';
 export { DIALECT_V1, type DialectDictionary, type DialectToken } from './dialect/dictionary.js';
 export { DialectEngine, type ParsedDialectMessage } from './dialect/engine.js';
-export { startModelAgent, openAIGenerator, execGenerator, type ModelAgentOptions, type Generate, type ChatTurn } from './client/llm.js';
+export { startModelAgent, openAIGenerator, execGenerator, type ModelAgentOptions, type ModelLink, type IncomingText, type Generate, type ChatTurn } from './client/llm.js';

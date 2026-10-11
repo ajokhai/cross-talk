@@ -88,6 +88,21 @@ await bridge.start();
 
 Events: `ready` (the joined `Channel`), `frame` (each decoded device frame), `error` and `closed`. The full opcode profile is in the header comment of `src/bridge.ts`.
 
+## Radios and other lossy links
+
+For radio modules in transparent serial mode (LoRa, HC-12, XBee) or any link that drops or corrupts bytes, add `--reliable` to the bridge and use a `ReliableLink` on the other end (`crosstalk llm --serial … --reliable` does this for models). Each message is split into packets:
+
+```
+[0xC7 0x5A][type][session][msg id][index][count][len][payload ≤ mtu][CRC-16/CCITT-FALSE]
+```
+
+DATA packets are acknowledged one at a time and resent until acknowledged; duplicates are delivered once; a message that can't get through is reported as lost. Options: `--mtu` (default 64), `--ack-timeout` (1500 ms), `--retries` (6), `--bitrate` (9600) and `--duty-cycle` (1; e.g. 0.01 for EU 868 MHz LoRa). With `--reliable`, frames can be up to 2,048 bytes (`--max-frame`). The C and MicroPython firmware don't speak it yet.
+
+```ts
+import { ReliableLink, deviceModelLink, openSerialPort } from '@cross-talk/embedded';
+const link = new ReliableLink(openSerialPort('/dev/ttyUSB0', 9600), { mtu: 64, dutyCycle: 0.01 });
+```
+
 ## Frame format
 
 Every frame has a 10-byte header followed by the payload. Multi-byte fields are big-endian.

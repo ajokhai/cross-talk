@@ -55,7 +55,7 @@ test('a model behind an OpenAI-compatible endpoint answers @mentions and DMs, no
     const dm = new Promise<DirectMessage>(r => human.once('dm', r));
     await human.dm('phone', 'are you offline?');
     assert.equal((await dm).content, 'echo: josh: are you offline?');
-    assert.equal(agent.channel.members.get(agent.client.agent.id)?.role, 'model');
+    assert.equal(agent.channel!.members.get(agent.client!.agent.id)?.role, 'model');
     await agent.stop();
   } finally {
     await human.close();

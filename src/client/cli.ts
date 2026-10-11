@@ -79,6 +79,15 @@ async function ownerSession(url: string, name: string): Promise<{ ct: CrossTalk;
   return { ct, channels };
 }
 
+/**
+ * Long-running commands must outlive a dropped connection: the SDK's reconnect
+ * timer doesn't hold the process open (so library users can exit), so these
+ * commands hold it open themselves until Ctrl-C.
+ */
+function stayAlive(): void {
+  setInterval(() => {}, 1 << 30);
+}
+
 const ago = (ts: number) => {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
   return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
@@ -420,8 +429,8 @@ program
   });
 
 program
-  .command('llm <address>')
-  .description('Put a model in a conversation as a member: any OpenAI-compatible endpoint, or any command that reads a prompt on stdin')
+  .command('llm [address]')
+  .description('Put a model in a conversation as a member: any OpenAI-compatible endpoint, or any command that reads a prompt on stdin. Joins a hub directly, or over a serial/radio/TCP link to a crosstalk-bridge')
   .option('--openai <url>', 'OpenAI-compatible base URL, e.g. http://127.0.0.1:8080/v1 (llama-server), http://127.0.0.1:11434/v1 (Ollama)')
   .option('--model <name>', 'model name to request from --openai')
   .option('--exec <command>', 'command that reads the prompt on stdin and prints the reply, e.g. "llama-cli -m model.gguf -f /dev/stdin -n 200 --no-display-prompt"')
@@ -432,16 +441,47 @@ program
   .option('--max-tokens <n>', 'reply length limit for --openai', '256')
   .option('--timeout <seconds>', 'per-reply model timeout', '120')
   .option('-u, --url <url>', 'hub URL', defaultUrl())
-  .action(async (address: string, opts) => {
+  .option('--serial <tty>', 'instead of a hub: talk to a crosstalk-bridge over this serial port (USB, UART, Bluetooth serial, radio module)')
+  .option('--baud <rate>', 'serial speed', '115200')
+  .option('--tcp <host:port>', 'instead of a hub: talk to a crosstalk-bridge --tcp-listen over TCP')
+  .option('--reliable', 'checksums, acks, retries and message splitting for lossy links (radios); the bridge needs --reliable too')
+  .option('--mtu <bytes>', 'with --reliable: payload bytes per radio packet', '64')
+  .option('--bitrate <bps>', 'with --reliable: link speed, for --duty-cycle', '9600')
+  .option('--duty-cycle <share>', 'with --reliable: most time spent transmitting, e.g. 0.01', '1')
+  .action(async (address: string | undefined, opts) => {
     if (!!opts.openai === !!opts.exec) fail('Give exactly one of --openai <url> or --exec "<command>".');
+    const viaDevice = !!(opts.serial || opts.tcp);
+    if (viaDevice && opts.serial && opts.tcp) fail('Give one of --serial or --tcp.');
+    if (!viaDevice && !address) fail('Give the channel address, or --serial / --tcp to reach one through a bridge.');
     if (opts.reply !== 'mention' && opts.reply !== 'all') fail('--reply must be "mention" or "all"');
     const { startModelAgent, openAIGenerator, execGenerator } = await import('./llm.js');
     const generate = opts.openai
       ? openAIGenerator({ baseUrl: opts.openai, model: opts.model, apiKey: process.env.CROSSTALK_MODEL_KEY, maxTokens: Number(opts.maxTokens) })
       : execGenerator(opts.exec);
+    let link: any;
+    if (viaDevice) {
+      // The device side lives in @cross-talk/embedded (packages/embedded in the repo).
+      const pkg = '@cross-talk/embedded';
+      const embedded: any = await import(pkg).catch(() => fail(`--serial and --tcp need ${pkg} (packages/embedded in the CrossTalk repo).`));
+      let stream: any;
+      if (opts.serial) {
+        stream = embedded.openSerialPort(opts.serial, Number(opts.baud));
+      } else {
+        const [host, port] = String(opts.tcp).split(/:(?=\d+$)/);
+        const net = await import('node:net');
+        stream = net.createConnection(Number(port), host || '127.0.0.1');
+        await new Promise((resolve, reject) => stream.once('connect', resolve).once('error', reject)).catch(fail);
+      }
+      const transport = opts.reliable
+        ? new embedded.ReliableLink(stream, { mtu: Number(opts.mtu), bitrate: Number(opts.bitrate), dutyCycle: Number(opts.dutyCycle) })
+        : new embedded.ResyncingLink(stream, 2048);
+      transport.on('error', (err: Error) => console.error(yellow(`! link: ${err.message}`)));
+      link = embedded.deviceModelLink(transport, { name: opts.name });
+    }
     try {
       const agent = await startModelAgent({
-        channel: address,
+        link,
+        channel: address ?? '',
         name: opts.name,
         url: opts.url,
         environment: 'bot',
@@ -452,6 +492,7 @@ program
         timeoutMs: Number(opts.timeout) * 1000,
         log: line => console.log(`${time(Date.now())} ${line}`)
       });
+      stayAlive();
       const stop = async () => { await agent.stop(); process.exit(0); };
       process.on('SIGINT', stop);
       process.on('SIGTERM', stop);
@@ -520,6 +561,9 @@ program
       ch.on('lock.released', e => console.log(dim(`🔓 ${e.file} unlocked (${e.reason})`)));
       ch.on('member.joined', a => console.log(dim(`→ ${a.name} joined`)));
       ch.on('member.left', a => console.log(dim(`← ${a.name} left`)));
+      ct.on('disconnected', () => console.log(red('disconnected, reconnecting…')));
+      ct.on('reconnected', () => console.log(green('reconnected')));
+      stayAlive();
     } catch (err) {
       fail(err);
     }

@@ -177,7 +177,7 @@ crosstalk llm xt_… --exec "./my-model.sh" --name pi-model
 - Two models can't talk each other into a loop: models don't answer other models unless @named, and each is capped at a few replies a minute.
 - `CROSSTALK_MODEL_KEY` is sent as the bearer token for hosted endpoints.
 
-**On an offline device** (an old phone, a Pi with no network): run the model and `crosstalk llm` on the device, and give it any link to a hub. Over USB, `adb reverse tcp:4488 tcp:4488` makes a hub on your computer appear at `127.0.0.1:4488` on an Android phone. Bluetooth networking (PAN) works the same way with the computer's Bluetooth IP. Devices too small for a model use the [bridge](#microcontrollers-and-other-devices) instead.
+**On an offline device** (an old phone, a Pi with no network): run the model and `crosstalk llm` on the device, and give it any link to a hub. Over USB, `adb reverse tcp:4488 tcp:4488` makes a hub on your computer appear at `127.0.0.1:4488` on an Android phone. Bluetooth networking (PAN) works the same way with the computer's Bluetooth IP. Over a radio (LoRa, HC-12, XBee) or any serial link, run `crosstalk llm --serial /dev/ttyUSB0 --reliable …` on the model's side and `crosstalk-bridge --serial … --reliable --role model` next to the hub: `--reliable` adds checksums, acknowledgements, retries and message splitting so lossy links still deliver every message whole, and `--duty-cycle` keeps radios within airtime limits. Devices too small for a model use the [bridge](#microcontrollers-and-other-devices) instead.
 
 ## Questions for you
 
@@ -351,7 +351,7 @@ npm run build
 
 ## Versions and releases
 
-Current version: **2.4.1** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
+Current version: **2.5.0** (wire protocol `2`, XDialect dictionary `1.0.0`). Check yours with `crosstalk --version`; a hub reports its version at `GET /health`.
 
 Every release is a tag on `main` with notes on the [Releases page](https://github.com/ajokhai/cross-talk/releases). To be notified, use **Watch → Custom → Releases** on GitHub. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version, and [RELEASING.md](RELEASING.md) explains how versions are numbered, including how the XDialect vocabulary can grow without breaking devices.
 
