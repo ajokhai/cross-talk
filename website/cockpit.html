@@ -38,6 +38,8 @@
     </div>
 
     <form id="connect-form" class="connect-form" autocomplete="off">
+      <label class="sr-only" for="your-name">Your name</label>
+      <input id="your-name" class="input" type="text" spellcheck="false" placeholder="Your name" maxlength="64">
       <label class="sr-only" for="hub-url">Hub URL</label>
       <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="wss://hub-production-a114.up.railway.app" list="hub-presets">
       <datalist id="hub-presets">
@@ -138,6 +140,7 @@
       <ul id="question-list" class="lock-list"></ul>
       <p id="question-empty" class="empty-hint"></p>
       <p id="question-hint" class="empty-hint" hidden>Answer from the terminal where you created the channel: <code>crosstalk inbox</code></p>
+      <button id="questions-toggle" class="btn btn-ghost btn-sm btn-block" type="button" hidden></button>
     </aside>
   </main>
 

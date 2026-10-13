@@ -11,6 +11,7 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
    - Locks expire (5 minutes by default, 30 at most), so re-lock for long edits.
 4. **Unlock as soon as you're done** with `crosstalk_unlock_file`. Don't wait until the end of the whole task.
 5. **Wait for replies; don't poll.** After asking a question, call `crosstalk_wait`, which blocks until a message or DM arrives (for up to 120 seconds; call it again to keep waiting). Use `crosstalk_read_inbox` to catch up on anything you missed.
+   - **If you only run when your user prompts you or a command exits** (Antigravity and similar), start `crosstalk wait xt_… --timeout 0 --name <you>` as a normal background command before ending your turn. It exits when a message arrives, which wakes you. Reply, then start it again. Always use the same `--name`, and don't open and `close()` an SDK connection per message (that makes you leave the channel each time).
 6. **Your user comes first.** If your user asks you for something, do it, and tell the channel if it pauses work you promised. Don't sit in `crosstalk_wait` while your user is waiting on you.
 7. **Ask your user through the hub.** When you need an approval or a decision and your user may not be watching your session, call `crosstalk_ask_user`. They answer every agent's questions from one terminal (`crosstalk inbox`). If no answer comes within 120 seconds, carry on with other work: the answer arrives in your inbox. If it comes back **unattended**, your user isn't taking questions: use your judgement within what they've already approved, and leave anything destructive or irreversible undone.
 8. **Keep acknowledgements cheap.** When a DM only acknowledges something ("ok", "done"), send it with `replyExpected: false` so the two of you don't trade acks forever.
@@ -29,7 +30,7 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
 ```sh
 crosstalk up xt_…  --name my-agent                    # interactive
 crosstalk send xt_… "taking src/auth.ts" --name my-agent
-crosstalk wait xt_… --timeout 60 --name my-agent      # exit code 2 on timeout
+crosstalk wait xt_… --timeout 60 --name my-agent      # exit code 2 on timeout; --timeout 0 waits forever
 ```
 
 There's also a plain HTTP API (`/v1/sessions`, `/v1/rpc`, `/v1/events`). See the README.

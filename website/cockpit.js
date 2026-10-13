@@ -26,6 +26,10 @@
   const ADDRESS = /^xt_[A-Za-z0-9_-]{16,}$/;
   const STORE_URL = 'crosstalk.cockpit.url';
   const STORE_TOKEN = 'crosstalk.cockpit.token';
+  const STORE_NAME = 'crosstalk.cockpit.name';
+  /** Owner keys of conversations started in this browser, by "hub|address". Never sent anywhere but that hub. */
+  const STORE_KEYS = 'crosstalk.cockpit.owner-keys';
+  const RECONNECT_MAX_MS = 15000;
 
   // ---------------------------------------------------------------------------
   // Storage (may be unavailable: private mode, blocked site data)
@@ -120,7 +124,30 @@
     joined: new Map(),
     /** Selected conversation address. */
     selected: null,
+    /** From the last welcome: lets a reconnect carry on as the same member. */
+    resumeToken: null,
+    /** Hub URL (as typed) of the current session, for owner keys and reconnects. */
+    hub: '',
+    reconnectTimer: null,
+    reconnectDelay: 1000,
   };
+
+  // ---------------------------------------------------------------------------
+  // Owner keys: the person who starts a conversation here answers its agents'
+  // questions here. Kept in this browser only.
+  // ---------------------------------------------------------------------------
+
+  function ownerKeys() {
+    try { return JSON.parse(load(STORE_KEYS) || '{}') || {}; } catch { return {}; }
+  }
+  function ownerKey(address) {
+    return ownerKeys()[`${state.hub}|${address}`] || null;
+  }
+  function saveOwnerKey(address, key) {
+    const keys = ownerKeys();
+    keys[`${state.hub}|${address}`] = key;
+    save(STORE_KEYS, JSON.stringify(keys));
+  }
 
   // ---------------------------------------------------------------------------
   // Connection
@@ -138,17 +165,27 @@
     return url.toString();
   }
 
-  function connect() {
+  /**
+   * Opens the hub connection. `resuming` is an automatic reconnect after a drop:
+   * conversations stay on screen and the hub is asked to resume our membership.
+   */
+  function connect(resuming) {
     const rawUrl = $('hub-url').value.trim() || DEFAULT_URL;
     const token = $('hub-token').value.trim();
+    const name = $('your-name').value.trim();
 
     let url;
     try { url = buildUrl(rawUrl, token); } catch (err) { showNotice(err.message); return; }
 
-    save(STORE_URL, rawUrl);
-    save(STORE_TOKEN, token);
-    disconnect();
-    hideNotice();
+    clearTimeout(state.reconnectTimer);
+    if (!resuming) {
+      save(STORE_URL, rawUrl);
+      save(STORE_TOKEN, token);
+      save(STORE_NAME, name);
+      disconnect();
+      hideNotice();
+      state.hub = rawUrl;
+    }
     setStatus('connecting');
 
     let ws;
@@ -172,7 +209,11 @@
       send({
         type: 'hello',
         protocol: PROTOCOL_VERSION,
-        agent: { name: `cockpit-${suffix}`, role: 'observer', environment: 'web', currentTask: 'Watching conversations' },
+        // A named person takes part; an anonymous tab is an observer.
+        agent: name
+          ? { name, role: 'person', environment: 'web', currentTask: 'In the cockpit' }
+          : { name: `cockpit-${suffix}`, role: 'observer', environment: 'web', currentTask: 'Watching conversations' },
+        resume: resuming && state.resumeToken ? state.resumeToken : undefined,
       });
     });
 
@@ -198,6 +239,13 @@
       clearTimeout(helloTimer);
       if (state.ws !== ws) return;
       const wasConnected = state.status === 'connected';
+      // Dropped (sleep, Wi-Fi, hub redeploy): keep everything on screen and reconnect.
+      if ((welcomed || resuming) && ev.code !== 1000) {
+        state.ws = null;
+        rejectPending();
+        scheduleReconnect();
+        return;
+      }
       resetSession();
       setStatus(welcomed || ev.wasClean ? 'disconnected' : 'error');
       if (!welcomed && $('notice').hidden) {
@@ -231,7 +279,33 @@
       `crosstalk serve --allow-origin ${origin}`];
   }
 
+  function scheduleReconnect() {
+    setStatus('reconnecting');
+    clearTimeout(state.reconnectTimer);
+    const delay = state.reconnectDelay;
+    state.reconnectDelay = Math.min(delay * 2, RECONNECT_MAX_MS);
+    state.reconnectTimer = setTimeout(() => connect(true), delay);
+  }
+
+  /** Coming back online or to the tab: retry now rather than at the end of the backoff. */
+  function reconnectSoon() {
+    if (state.status !== 'reconnecting') return;
+    state.reconnectDelay = 1000;
+    connect(true);
+  }
+
+  function rejectPending() {
+    for (const p of state.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error('Disconnected'));
+    }
+    state.pending.clear();
+  }
+
   function disconnect() {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectDelay = 1000;
+    state.resumeToken = null;
     const ws = state.ws;
     state.ws = null;
     resetSession();
@@ -242,11 +316,7 @@
 
   function resetSession() {
     state.ws = state.ws && state.ws.readyState <= WebSocket.OPEN ? state.ws : null;
-    for (const p of state.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error('Disconnected'));
-    }
-    state.pending.clear();
+    rejectPending();
     state.me = null;
     state.channels = [];
     state.directory = { loaded: false, channels: [], cursor: undefined, loading: false };
@@ -279,13 +349,26 @@
   }
 
   function onWelcome(frame) {
+    const rejoin = state.status === 'connecting' && state.joined.size > 0 && !frame.resumed;
     state.me = frame.agent;
     state.serverVersion = frame.serverVersion || '';
+    state.resumeToken = frame.resumeToken || null;
+    state.reconnectDelay = 1000;
     setStatus('connected');
     hideNotice();
     render();
     refreshChannels();
     if ($('directory').open) loadDirectory(true);
+    // Too late to resume (or an older hub): we are a new member, so join again.
+    if (rejoin) {
+      const selected = state.selected;
+      for (const address of [...state.joined.keys()]) {
+        request('channel.join', { channel: address })
+          .then((snap) => adoptSnapshot(snap, address === selected))
+          .catch(() => { state.joined.delete(address); render(); });
+      }
+      return;
+    }
 
     // Deep link: cockpit.html#xt_… joins that conversation.
     const fromHash = decodeURIComponent(location.hash.slice(1));
@@ -400,8 +483,18 @@
         renderIfSelected(frame.channel.id, true);
         return;
       }
+      case 'dm': {
+        // DMs belong to no conversation; show them where the person is looking.
+        const m = frame.message;
+        const address = state.selected || state.joined.keys().next().value;
+        const ch = m && address && state.joined.get(address);
+        if (!ch) return;
+        addActivity(ch, `Direct message from ${m.from.name}: ${m.content}`);
+        renderIfSelected(address, true);
+        return;
+      }
       default:
-        // 'dm' and future event types are not shown in the conversation view.
+        // Future event types are not shown in the conversation view.
         return;
     }
   }
@@ -472,7 +565,7 @@
     }
   }
 
-  function adoptSnapshot(snap) {
+  function adoptSnapshot(snap, focus = true) {
     const address = snap.channel.id;
     const ch = {
       info: snap.channel,
@@ -489,7 +582,8 @@
       ch.timeline.push({ kind: 'message', message: m, timestamp: m.timestamp });
     }
     state.joined.set(address, ch);
-    select(address);
+    if (focus) select(address);
+    else render();
   }
 
   function select(address) {
@@ -513,9 +607,20 @@
     if (name) params.name = name;
     if (topic) params.topic = topic;
     const snap = await request('channel.create', params);
+    if (snap.ownerKey) saveOwnerKey(snap.channel.id, snap.ownerKey);
     adoptSnapshot(snap);
     refreshChannels();
     if (visibility === 'public' && state.directory.loaded) loadDirectory(true);
+  }
+
+  async function answerQuestion(address, id, answer) {
+    await request('question.answer', { channel: address, question: id, answer, ownerKey: ownerKey(address) });
+  }
+
+  async function setQuestions(address, mode) {
+    const info = await request('channel.configure', { channel: address, ownerKey: ownerKey(address), questions: mode });
+    const ch = state.joined.get(address);
+    if (ch && info) { ch.info = info; renderIfSelected(address, false); }
   }
 
   async function leaveChannel(address) {
@@ -574,15 +679,17 @@
     $('conn-status-text').textContent = {
       connected: state.me ? `Connected as ${state.me.name}` : 'Connected',
       connecting: 'Connecting…',
+      reconnecting: 'Reconnecting…',
       error: 'Connection failed',
       disconnected: 'Disconnected',
     }[status];
     pill.title = status === 'connected' && state.serverVersion ? `Hub ${state.serverVersion}` : '';
 
-    const live = status === 'connected' || status === 'connecting';
+    const live = status === 'connected' || status === 'connecting' || status === 'reconnecting';
     $('connect-btn').textContent = live ? 'Disconnect' : 'Connect';
     $('hub-url').disabled = live;
     $('hub-token').disabled = live;
+    $('your-name').disabled = live;
 
     const ready = status === 'connected';
     $('refresh-channels').disabled = !ready;
@@ -714,19 +821,26 @@
 
     // Questions for the owner. Answering needs the owner key, which stays in the
     // owner's terminal (`crosstalk inbox`) and never comes to the browser.
+    // In a conversation started in this browser we hold the key, so answer here.
+    const owned = ch ? !!ownerKey(ch.info.id) : false;
     const questions = ch ? [...ch.questions.values()].sort((a, b) => a.createdAt - b.createdAt) : [];
     $('question-list').replaceChildren(...questions.map((q) => el('li', { class: 'lock question' },
       el('div', { class: 'question-text', text: q.question }),
-      q.options && q.options.length ? el('div', { class: 'lock-reason', text: `Options: ${q.options.join(' / ')}` }) : null,
+      q.options && q.options.length && !owned ? el('div', { class: 'lock-reason', text: `Options: ${q.options.join(' / ')}` }) : null,
       el('div', { class: 'lock-meta' },
         el('span', { text: q.from ? q.from.name : '' }),
-        el('span', { class: 'mono', text: q.id })))));
+        el('span', { class: 'mono', text: q.id })),
+      owned ? answerControls(ch.info.id, q) : null)));
     $('question-count').textContent = ch ? (ch.info.questions === 'off' ? 'off' : String(questions.length)) : '';
     $('question-empty').hidden = questions.length > 0;
     $('question-empty').textContent = !ch ? '' : ch.info.questions === 'off'
       ? 'Questions are off: agents use their own judgement.'
       : 'None waiting. The owner answers with crosstalk inbox.';
-    $('question-hint').hidden = questions.length === 0;
+    $('question-hint').hidden = questions.length === 0 || owned;
+    if (owned && ch.info.questions !== 'off') $('question-empty').textContent = 'None waiting. You started this conversation, so you answer here.';
+    const toggle = $('questions-toggle');
+    toggle.hidden = !owned;
+    if (owned) toggle.textContent = ch.info.questions === 'off' ? 'Turn questions on' : 'Turn questions off';
 
     // Empty state for the main pane
     const empty = $('main-empty');
@@ -738,6 +852,24 @@
         ? 'Every conversation has its own address. Start a new one and share its address with the agents you want in it, or paste an address to join.'
         : 'Enter a hub URL above and connect. Then open a conversation to follow the agents in it.';
     }
+  }
+
+  function answerControls(address, q) {
+    if (q.options && q.options.length) {
+      return el('div', { class: 'question-answer' }, ...q.options.map((o) => el('button', {
+        type: 'button', class: 'btn btn-ghost btn-sm', text: o,
+        onclick: (e) => attempt(e.currentTarget, () => answerQuestion(address, q.id, o)),
+      })));
+    }
+    const input = el('input', { class: 'input', type: 'text', placeholder: 'Your answer', maxlength: '2000', 'aria-label': 'Your answer' });
+    const form = el('form', { class: 'question-answer', autocomplete: 'off' }, input,
+      el('button', { type: 'submit', class: 'btn btn-primary btn-sm', text: 'Answer' }));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const answer = input.value.trim();
+      if (answer) attempt(e.submitter, () => answerQuestion(address, q.id, answer));
+    });
+    return form;
   }
 
   function renderMessages() {
@@ -787,10 +919,18 @@
   function init() {
     $('hub-url').value = load(STORE_URL) || DEFAULT_URL;
     $('hub-token').value = load(STORE_TOKEN) || '';
+    $('your-name').value = load(STORE_NAME) || '';
+
+    $('questions-toggle').addEventListener('click', (e) => {
+      const ch = state.selected && state.joined.get(state.selected);
+      if (ch) attempt(e.currentTarget, () => setQuestions(ch.info.id, ch.info.questions === 'off' ? 'on' : 'off'));
+    });
+    window.addEventListener('online', reconnectSoon);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reconnectSoon(); });
 
     $('connect-form').addEventListener('submit', (e) => {
       e.preventDefault();
-      if (state.status === 'connected' || state.status === 'connecting') disconnect();
+      if (state.status === 'connected' || state.status === 'connecting' || state.status === 'reconnecting') disconnect();
       else connect();
     });
 

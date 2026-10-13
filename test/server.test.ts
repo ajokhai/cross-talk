@@ -183,3 +183,68 @@ test('behind a trusted proxy, per-address limits apply to real clients, not the 
     assert.equal(await session(base, '203.0.113.2'), 429, 'without trustProxy the header is ignored');
   });
 });
+
+test('an SDK agent whose socket drops resumes as the same agent and gets what it missed', async () => {
+  await withServer({}, async ({ url }) => {
+    const alice = await CrossTalk.connect({ name: 'alice', url, reconnect: false });
+    const bob = await CrossTalk.connect({ name: 'bob', url });
+    try {
+      const ch = await alice.createChannel('auth');
+      await bob.joinChannel(ch.address);
+      const id = bob.agent.id;
+      let left = 0;
+      ch.on('member.left', () => left++);
+
+      const back = new Promise(resolve => bob.once('reconnected', resolve));
+      (bob as any).ws.terminate(); // a network drop, not close()
+      await new Promise(r => setTimeout(r, 100));
+      await ch.send('sent while bob was away');
+      await back;
+
+      assert.equal(bob.agent.id, id, 'same agent id after resume');
+      assert.equal((await bob.waitForMessage({ channel: ch.address, timeoutMs: 2000 }))?.content, 'sent while bob was away');
+      assert.equal(left, 0, 'alice never saw bob leave');
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+});
+
+test('remote MCP: /mcp serves the CrossTalk tools over Streamable HTTP', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  await withServer({ token: 's3cret' }, async ({ url }, base) => {
+    const refused = await fetch(`${base}/mcp`, { method: 'POST', body: '{}' });
+    assert.equal(refused.status, 401, '/mcp honours the hub token');
+
+    const alice = await CrossTalk.connect({ name: 'alice', url, token: 's3cret', reconnect: false });
+    const client = new Client({ name: 'test', version: '1' });
+    try {
+      const ch = await alice.createChannel('auth');
+      const joined = new Promise<any>(resolve => ch.once('member.joined', resolve));
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp?name=claude-web&token=s3cret&channel=${ch.address}`)));
+      const { tools } = await client.listTools();
+      assert.ok(tools.some(t => t.name === 'crosstalk_wait'));
+
+      const member = await joined;
+      assert.equal(member.name, 'claude-web');
+      assert.equal(member.environment, 'web');
+
+      const heard = new Promise<ChannelMessage>(resolve => ch.once('message', resolve));
+      await client.callTool({ name: 'crosstalk_send', arguments: { channel: ch.address, message: 'hello from claude.ai' } });
+      assert.equal((await heard).content, 'hello from claude.ai');
+
+      setTimeout(() => void ch.send('@claude-web your turn'), 100);
+      const waited: any = await client.callTool({ name: 'crosstalk_wait', arguments: { channel: ch.address, timeoutSeconds: 5 } });
+      assert.match(waited.content[0].text, /your turn/);
+
+      const created: any = await client.callTool({ name: 'crosstalk_create_channel', arguments: { name: 'remote' } });
+      assert.match(created.content[0].text, /Questions to your user are off/);
+      assert.doesNotMatch(created.content[0].text, /xk_|ownerKey/);
+    } finally {
+      await client.close();
+      await alice.close();
+    }
+  });
+});

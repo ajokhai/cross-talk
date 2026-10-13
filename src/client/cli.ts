@@ -193,7 +193,7 @@ program
   .option('-r, --role <role>', 'your role', 'human')
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .option('--label <label>', 'label for a new conversation')
-  .option('--no-start', 'do not start a local hub if none is running')
+  .option('--no-start', 'do not start a local hub if none is running (only ever happens for localhost URLs)')
   .action(async (address: string | undefined, opts) => {
     let ct: CrossTalk;
     let ch: Channel;
@@ -521,22 +521,51 @@ program
 program
   .command('wait <address>')
   .description('Block until a message or DM arrives, print it and exit (exit code 2 on timeout)')
-  .option('-t, --timeout <seconds>', 'give up after this long', '60')
+  .option('-t, --timeout <seconds>', 'give up after this long; 0 waits forever', '60')
+  .option('-m, --mentions', 'only wake for messages that @mention you (and DMs)')
+  .option('--on-message <command|url>', "don't exit: run the command (message JSON on stdin) or POST to the URL for each message")
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .option('--json', 'print raw JSON')
   .action(async (target: string, opts) => {
     try {
       const { agent, channel } = await oneShot(target, opts);
-      const deadline = Date.now() + Number(opts.timeout) * 1000;
+      const me = agent.agent!.id;
+      const seconds = Number(opts.timeout);
+      const deadline = seconds > 0 ? Date.now() + seconds * 1000 : Infinity;
+      // Every message on this session counts, whichever channel it is in: the
+      // hub hands each event out once, so skipping one here would lose it.
+      const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
+        f.type === 'dm' || (f.type === 'message' && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me)));
+      const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
+        opts.json ? JSON.stringify(f.message)
+          : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
+      let failures = 0;
       while (Date.now() < deadline) {
         const remaining = Math.ceil((deadline - Date.now()) / 1000);
-        const events = await agent.events(Math.min(remaining, 55));
-        const hits = events.filter((f): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
-          f.type === 'dm' || (f.type === 'message' && f.message.channel === channel));
-        if (hits.length) {
-          for (const f of hits) console.log(opts.json ? JSON.stringify(f.message) : formatMessage(f.message));
+        let events: ServerFrame[];
+        try {
+          events = await agent.events(Math.min(remaining, 55));
+          failures = 0;
+        } catch (err) {
+          // A long wait outlives network blips and hub restarts: retry, and
+          // re-register if the hub forgot the session.
+          if (++failures > 8) throw err;
+          await new Promise(r => setTimeout(r, Math.min(500 * 2 ** failures, 15_000)));
+          if (err instanceof CrossTalkError && err.code === 'not_registered') {
+            await agent.open().then(() => agent.request('channel.join', { channel })).catch(() => {});
+          }
+          continue;
+        }
+        const hits = events.filter(wanted);
+        if (!hits.length) continue;
+        if (!opts.onMessage) {
+          for (const f of hits) console.log(show(f));
           return;
+        }
+        for (const f of hits) {
+          console.log(show(f));
+          await deliver(opts.onMessage, f.message).catch(err => console.error(yellow(`! --on-message failed: ${err.message}`)));
         }
       }
       console.error(dim(`no messages after ${opts.timeout}s`));
@@ -546,15 +575,42 @@ program
     }
   });
 
+/** Hands one message to a --on-message target: POST to a URL, or a shell command with the JSON on stdin. */
+async function deliver(target: string, message: ChannelMessage | DirectMessage): Promise<void> {
+  const body = JSON.stringify(message);
+  if (/^https?:\/\//.test(target)) {
+    const res = await fetch(target, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return;
+  }
+  const { spawn } = await import('node:child_process');
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(target, {
+      shell: true,
+      stdio: ['pipe', 'inherit', 'inherit'],
+      env: {
+        ...process.env,
+        CROSSTALK_FROM: message.from.name,
+        CROSSTALK_CHANNEL: 'channel' in message ? message.channel : '',
+        CROSSTALK_TEXT: message.content
+      }
+    });
+    child.on('error', reject);
+    child.on('close', code => (code === 0 ? resolve() : reject(new Error(`exit code ${code}`))));
+    child.stdin.end(body);
+  });
+}
+
 program
   .command('tail <address>')
   .description('Stream a conversation to stdout')
   .option('-n, --name <name>', 'observer name', `${defaultName()}-tail`)
   .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .option('-s, --since <messageId>', 'only print history newer than this message')
   .action(async (target: string, opts) => {
     try {
       const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'observer', environment: 'terminal' });
-      const ch = await ct.joinChannel(target);
+      const ch = await ct.joinChannel(target, { since: opts.since });
       for (const m of ch.messages) console.log(formatMessage(m));
       ch.on('message', m => console.log(formatMessage(m)));
       ch.on('lock.acquired', l => console.log(yellow(`🔒 ${l.holder.name} locked ${l.file}: ${l.reason}`)));

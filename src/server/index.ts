@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type Peer } from './hub.js';
 import { SubnetGuard } from './subnet.js';
+import { CLIENT_HEADER, INTERNAL_HEADER } from './internal.js';
+import type { McpEndpoint } from './mcp-http.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { PROTOCOL_VERSION, type HelloFrame, type ServerFrame } from '../protocol.js';
 
@@ -138,6 +140,16 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
 
   const hub = new MeshHub(options.hub).start();
   const sessions = new Map<string, HttpSession>();
+  /** Shared only with this process's remote-MCP bridges (see mcp-http.ts). */
+  const internalSecret = crypto.randomBytes(24).toString('base64url');
+  let mcp: Promise<McpEndpoint> | undefined;
+  let boundPort = port;
+
+  /** A connection from one of this process's remote-MCP bridges, whose client was already admitted on /mcp. */
+  const isInternal = (req: http.IncomingMessage): boolean => {
+    const presented = req.headers[INTERNAL_HEADER];
+    return typeof presented === 'string' && safeEqual(presented, internalSecret);
+  };
 
   /**
    * Admission policy, applied to HTTP requests and WebSocket upgrades:
@@ -238,7 +250,8 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CrossTalk-Token, X-CrossTalk-Session');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CrossTalk-Token, X-CrossTalk-Session, Mcp-Session-Id, Mcp-Protocol-Version');
+      res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
     }
     if (req.method === 'OPTIONS') {
       res.writeHead(204).end();
@@ -260,6 +273,17 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     }
 
     try {
+      // --- Remote MCP (Streamable HTTP) --------------------------------------
+      if (url.pathname.replace(/\/+$/, '') === '/mcp') {
+        mcp ??= import('./mcp-http.js').then(m => {
+          // Bridges connect back to this hub on whatever interface it is bound to.
+          const self = host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '::1' : host;
+          const hubUrl = `ws://${self.includes(':') ? `[${self}]` : self}:${boundPort}`;
+          return m.createMcpEndpoint({ hubUrl, token: token || undefined, secret: internalSecret });
+        });
+        return await (await mcp).handle(req, res, url, addressOf(req));
+      }
+
       // --- Read-only observer API ------------------------------------------
       if (route === 'GET /api/dialect') return json(res, 200, DIALECT_V1);
       if (route === 'GET /api/channels') {
@@ -339,7 +363,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://hub.local');
-    const admission = admitted(req, url);
+    const admission = isInternal(req) ? 'ok' : admitted(req, url);
     if (admission !== 'ok') {
       socket.end(`HTTP/1.1 ${admission === 'token' ? '401 Unauthorized' : '403 Forbidden'}\r\nConnection: close\r\n\r\n`);
       return;
@@ -355,7 +379,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
         },
         close: (code, reason) => ws.close(code, reason)
-      }, addressOf(req));
+      }, isInternal(req) ? String(req.headers[CLIENT_HEADER] ?? 'unknown') : addressOf(req));
     } catch (err) {
       ws.close(1013, err instanceof HubFailure ? err.message : 'Hub unavailable');
       return;
@@ -376,9 +400,12 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
       }
       chain = chain.then(() => hub.receive(conn, data.toString())).catch(err => console.error('[crosstalk]', err));
     });
-    ws.on('close', () => {
+    ws.on('close', code => {
       clearTimeout(helloTimer);
-      hub.disconnect(conn);
+      // 1000 is a deliberate close (CrossTalk.close()); anything else may be a
+      // network blip, so the agent stays present for the grace period.
+      if (code === 1000) hub.disconnect(conn);
+      else hub.drop(conn);
     });
     ws.on('error', () => ws.terminate());
   });
@@ -404,7 +431,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   });
 
   const address = server.address();
-  const boundPort = typeof address === 'object' && address ? address.port : port;
+  boundPort = typeof address === 'object' && address ? address.port : port;
   const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
   const url = `ws://${displayHost}:${boundPort}`;
 
@@ -430,6 +457,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
       clearInterval(heartbeat);
       clearInterval(reaper);
       hub.stop();
+      await (await mcp)?.close();
       for (const session of sessions.values()) endSession(session);
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>(resolve => wss.close(() => resolve()));

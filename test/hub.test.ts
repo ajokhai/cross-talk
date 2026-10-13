@@ -284,3 +284,126 @@ test('LockManager normalizes paths and clamps TTLs', () => {
   assert.equal(locks.clampTtl(99_999), 1800);
   assert.equal(locks.clampTtl(undefined), 300);
 });
+
+test('a dropped agent stays present for the grace period and resumes as itself', async () => {
+  const { hub, agent, tick } = setup({ presenceGraceMs: 60_000 });
+  const a = agent('alice');
+  const b = agent('bob');
+  const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+  await b.ok({ type: 'channel.join', channel: snap.channel.id });
+  await b.ok({ type: 'lock.acquire', channel: snap.channel.id, file: 'src/auth.ts', reason: 'jwt' });
+  const token = b.conn.resumeToken!;
+  assert.ok(token);
+
+  hub.drop(b.conn);
+  await a.ok({ type: 'message.send', channel: snap.channel.id, content: 'while you were out' });
+  await a.ok({ type: 'dm.send', to: b.id, content: 'psst' });
+  tick(30_000);
+  hub.sweep();
+  assert.equal(a.events('member.left').length, 0, 'nobody sees a blip as a leave');
+
+  const inbox: ServerFrame[] = [];
+  const conn = hub.connect({ send: f => inbox.push(f), close: () => {} }, '10.0.0.1');
+  await hub.receive(conn, JSON.stringify({ type: 'hello', protocol: PROTOCOL_VERSION, agent: { name: 'bob' }, resume: token }));
+  const welcome = inbox[0] as Extract<ServerFrame, { type: 'welcome' }>;
+  assert.equal(welcome.type, 'welcome');
+  assert.equal(welcome.resumed, true);
+  assert.equal(welcome.agent.id, b.id, 'same agent id');
+  assert.notEqual(welcome.resumeToken, token, 'token rotates');
+  assert.deepEqual(inbox.slice(1).map(f => f.type), ['message', 'dm'], 'missed frames replayed after welcome');
+
+  const state = await hub.request(conn, { id: 'x', type: 'channel.state', channel: snap.channel.id }) as any;
+  assert.equal(state.data.locks[0].holder.id, b.id, 'lock survived');
+  // The old token is spent.
+  const again = hub.connect({ send: () => {}, close: () => {} }, '10.0.0.1');
+  const w2 = hub.hello(again, { type: 'hello', protocol: PROTOCOL_VERSION, agent: { name: 'bob' }, resume: token });
+  assert.notEqual(w2.agent.id, b.id);
+});
+
+test('a dropped agent that never comes back leaves when the grace period ends', async () => {
+  const { hub, agent, tick } = setup({ presenceGraceMs: 60_000 });
+  const a = agent('alice');
+  const b = agent('bob');
+  const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+  await b.ok({ type: 'channel.join', channel: snap.channel.id });
+  await b.ok({ type: 'lock.acquire', channel: snap.channel.id, file: 'src/auth.ts', reason: 'jwt' });
+
+  hub.drop(b.conn);
+  tick(61_000);
+  hub.sweep();
+  const left = a.events('member.left');
+  assert.equal(left.length, 1);
+  assert.equal(left[0].reason, 'disconnected');
+  assert.equal(a.events('lock.released').length, 1);
+  const token = b.conn.resumeToken!;
+  const conn = hub.connect({ send: () => {}, close: () => {} }, '10.0.0.1');
+  assert.notEqual(hub.hello(conn, { type: 'hello', protocol: PROTOCOL_VERSION, agent: { name: 'bob' }, resume: token }).agent.id, b.id);
+});
+
+test('a deliberate disconnect leaves at once, and grace can be turned off', async () => {
+  for (const [opts, how] of [[{}, 'disconnect'], [{ presenceGraceMs: 0 }, 'drop']] as const) {
+    const { hub, agent } = setup(opts);
+    const a = agent('alice');
+    const b = agent('bob');
+    const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+    await b.ok({ type: 'channel.join', channel: snap.channel.id });
+    hub[how](b.conn);
+    assert.equal(a.events('member.left').length, 1, how);
+  }
+});
+
+test('resuming over a half-open socket takes the agent over and closes the old one', async () => {
+  const { hub, agent } = setup();
+  const a = agent('alice');
+  let closed = 0;
+  const inbox: ServerFrame[] = [];
+  const old = hub.connect({ send: f => inbox.push(f), close: () => { closed++; } }, '10.0.0.2');
+  const w = hub.hello(old, { type: 'hello', protocol: PROTOCOL_VERSION, agent: { name: 'bob' } });
+  const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+  await hub.request(old, { id: '1', type: 'channel.join', channel: snap.channel.id });
+
+  const conn = hub.connect({ send: () => {}, close: () => {} }, '10.0.0.2');
+  const w2 = hub.hello(conn, { type: 'hello', protocol: PROTOCOL_VERSION, agent: { name: 'bob' }, resume: w.resumeToken });
+  assert.equal(w2.agent.id, w.agent.id);
+  assert.equal(closed, 1);
+  hub.drop(old); // the old socket's close event arrives late
+  hub.disconnect(old);
+  assert.equal(a.events('member.left').length, 0);
+  assert.equal((await hub.request(conn, { id: '2', type: 'channel.state', channel: snap.channel.id }) as any).ok, true);
+});
+
+test('@mentions of members are flagged on the message', async () => {
+  const { agent } = setup();
+  const a = agent('alice');
+  const b = agent('Gemini');
+  agent('gem');
+  const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+  await b.ok({ type: 'channel.join', channel: snap.channel.id });
+  const m = await a.ok({ type: 'message.send', channel: snap.channel.id, content: 'over to you @gemini, thanks' });
+  assert.deepEqual(m.mentions, [{ id: b.id, name: 'Gemini' }]);
+  const none = await a.ok({ type: 'message.send', channel: snap.channel.id, content: 'email me at x@geminis.dev' });
+  assert.equal(none.mentions, undefined, 'a longer word is not a mention');
+});
+
+test('join and state accept since=<message id> to return only newer messages', async () => {
+  const { agent } = setup();
+  const a = agent('alice');
+  const b = agent('bob');
+  const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+  const first = await a.ok({ type: 'message.send', channel: snap.channel.id, content: 'one' });
+  await a.ok({ type: 'message.send', channel: snap.channel.id, content: 'two' });
+  const joined = await b.ok<ChannelSnapshot>({ type: 'channel.join', channel: snap.channel.id, since: first.id });
+  assert.deepEqual(joined.messages.map(m => m.content), ['two']);
+  const unknown = await b.ok<ChannelSnapshot>({ type: 'channel.state', channel: snap.channel.id, since: 'msg_gone' });
+  assert.equal(unknown.messages.length, 2, 'an aged-out id returns everything');
+});
+
+test('message.send and dm.send accept text as an alias for content', async () => {
+  const { agent } = setup();
+  const a = agent('alice');
+  const b = agent('bob');
+  const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+  await b.ok({ type: 'channel.join', channel: snap.channel.id });
+  assert.equal((await a.ok({ type: 'message.send', channel: snap.channel.id, text: 'hi' })).content, 'hi');
+  assert.equal((await a.ok({ type: 'dm.send', to: b.id, text: 'psst' })).content, 'psst');
+});
