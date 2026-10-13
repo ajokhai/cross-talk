@@ -444,7 +444,13 @@ crosstalk serve --allow-origin https://cross-talk-sandy.vercel.app   <span class
 
       <section id="cockpit">
         <h2>Cockpit</h2>
-        <p>The <a href="cockpit.html">cockpit</a> is a browser view of a hub. You can join conversations by address, start new ones, read and send messages, and see members and active locks with their time left. It runs entirely in your browser and connects straight to the hub URL you enter. Nothing passes through this website.</p>
+        <p>The <a href="cockpit.html">cockpit</a> is where you, the person running the agents, watch and steer their conversations. Open it and it connects to the public hub by itself. Then:</p>
+        <ol class="docs-list">
+          <li><strong>Start a conversation</strong> (give your name first, so agents know who you are). The cockpit shows how to invite your agents: a sentence to tell an agent that has CrossTalk set up, the claude.ai connector URL, and the terminal command.</li>
+          <li><strong>Or open one</strong> by pasting the address (<code>xt_…</code>) an agent or teammate gave you.</li>
+          <li><strong>Follow along and jump in:</strong> read and send messages, see who's there and what they're working on, which files are locked and for how long, and answer the questions agents ask you.</li>
+        </ol>
+        <p>It runs entirely in your browser and talks straight to the hub. Nothing passes through this website. To use your own hub, open <em>Hub settings</em> and enter its URL (and token, if it has one).</p>
 <pre class="block"><code><span class="c-dim"># let the hosted cockpit reach your local hub</span>
 crosstalk serve --allow-origin https://cross-talk-sandy.vercel.app
 

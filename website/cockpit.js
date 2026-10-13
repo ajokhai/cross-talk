@@ -130,6 +130,10 @@
     hub: '',
     reconnectTimer: null,
     reconnectDelay: 1000,
+    /** Callers of ensureConnected() waiting for the next welcome (or failure). */
+    waiters: [],
+    /** Conversations whose "invite your agents" panel was dismissed. */
+    inviteHidden: new Set(),
   };
 
   // ---------------------------------------------------------------------------
@@ -175,7 +179,12 @@
     const name = $('your-name').value.trim();
 
     let url;
-    try { url = buildUrl(rawUrl, token); } catch (err) { showNotice(err.message); return; }
+    try { url = buildUrl(rawUrl, token); } catch (err) {
+      showNotice(err.message);
+      settleWaiters(err);
+      $('settings').open = true;
+      return;
+    }
 
     clearTimeout(state.reconnectTimer);
     if (!resuming) {
@@ -247,7 +256,9 @@
         return;
       }
       resetSession();
+      settleWaiters(new Error('Could not reach the hub. Check Hub settings.'));
       setStatus(welcomed || ev.wasClean ? 'disconnected' : 'error');
+      if (!welcomed) $('settings').open = true;
       if (!welcomed && $('notice').hidden) {
         showNotice(...connectionHint(rawUrl, token, ev));
       } else if (wasConnected && !ev.wasClean) {
@@ -273,10 +284,29 @@
       return ['Could not connect. This page is served over HTTPS, so the browser blocks plain ws:// to remote hosts. Use a wss:// URL.'];
     }
     const lead = `Could not connect to ${rawUrl}. Either the hub is not running, or it refused this page.`;
-    if (token) return [`${lead} Check that the token is right.`];
-    if (!origin) return [`${lead} Enter the hub's token above.`];
-    return [`${lead} Enter the hub's token above, or allow this page's origin when starting the hub:`,
+    if (token) return [`${lead} Check the token in Hub settings.`];
+    if (!origin) return [`${lead} Enter the hub's token in Hub settings.`];
+    return [`${lead} Enter the hub's token in Hub settings, or allow this page's origin when starting the hub:`,
       `crosstalk serve --allow-origin ${origin}`];
+  }
+
+  /**
+   * Resolves once connected, connecting first if needed, so starting or opening
+   * a conversation never needs a separate "connect" step. A name typed since we
+   * connected applies if we aren't in any conversation yet.
+   */
+  function ensureConnected() {
+    const name = $('your-name').value.trim();
+    const renamed = state.me && name && state.me.name !== name && state.joined.size === 0;
+    if (state.status === 'connected' && !renamed) return Promise.resolve();
+    const ready = new Promise((resolve, reject) => state.waiters.push({ resolve, reject }));
+    if (renamed || (state.status !== 'connecting' && state.status !== 'reconnecting')) connect(false);
+    return ready;
+  }
+
+  function settleWaiters(err) {
+    const waiters = state.waiters.splice(0);
+    for (const w of waiters) err ? w.reject(err) : w.resolve();
   }
 
   function scheduleReconnect() {
@@ -356,7 +386,9 @@
     state.reconnectDelay = 1000;
     setStatus('connected');
     hideNotice();
+    $('settings').open = false;
     render();
+    settleWaiters();
     refreshChannels();
     if ($('directory').open) loadDirectory(true);
     // Too late to resume (or an older hub): we are a new member, so join again.
@@ -462,7 +494,7 @@
         const ch = q && state.joined.get(q.channel);
         if (!ch) return;
         ch.questions.set(q.id, q);
-        addActivity(ch, `${q.from.name} asked the owner: ${q.question}`);
+        addActivity(ch, `${q.from.name} asked ${ownerKey(q.channel) ? 'you' : 'the owner'}: ${q.question}`);
         renderIfSelected(q.channel, true);
         return;
       }
@@ -471,7 +503,7 @@
         const ch = q && state.joined.get(q.channel);
         if (!ch) return;
         ch.questions.delete(q.id);
-        if (q.status === 'answered') addActivity(ch, `The owner answered ${q.from.name}: ${q.answer}`);
+        if (q.status === 'answered') addActivity(ch, `${ownerKey(q.channel) ? 'You' : 'The owner'} answered ${q.from.name}: ${q.answer}`);
         renderIfSelected(q.channel, true);
         return;
       }
@@ -680,8 +712,8 @@
       connected: state.me ? `Connected as ${state.me.name}` : 'Connected',
       connecting: 'Connecting…',
       reconnecting: 'Reconnecting…',
-      error: 'Connection failed',
-      disconnected: 'Disconnected',
+      error: 'Can\'t reach the hub',
+      disconnected: 'Offline',
     }[status];
     pill.title = status === 'connected' && state.serverVersion ? `Hub ${state.serverVersion}` : '';
 
@@ -689,11 +721,7 @@
     $('connect-btn').textContent = live ? 'Disconnect' : 'Connect';
     $('hub-url').disabled = live;
     $('hub-token').disabled = live;
-    $('your-name').disabled = live;
 
-    const ready = status === 'connected';
-    $('refresh-channels').disabled = !ready;
-    for (const b of document.querySelectorAll('#join-form button, #create-form button')) b.disabled = !ready;
   }
 
   /** Shows an error notice; an optional command is rendered as copyable code. */
@@ -753,9 +781,9 @@
 
     const empty = $('channel-empty');
     empty.hidden = channels.length > 0;
-    empty.textContent = connected
-      ? 'You are not in any conversation yet. Start one below, or paste an address to join one.'
-      : 'Connect to a hub to see your conversations.';
+    empty.textContent = connected || state.status !== 'error'
+      ? 'None yet. Start one, or open one by address.'
+      : 'Can\'t reach the hub. Check Hub settings.';
   }
 
   function renderDirectory() {
@@ -843,15 +871,41 @@
     if (owned) toggle.textContent = ch.info.questions === 'off' ? 'Turn questions on' : 'Turn questions off';
 
     // Empty state for the main pane
-    const empty = $('main-empty');
-    empty.hidden = !!ch;
-    if (!ch) {
-      const connected = state.status === 'connected';
-      $('main-empty-title').textContent = connected ? 'No conversation open' : 'Not connected';
-      $('main-empty-text').textContent = connected
-        ? 'Every conversation has its own address. Start a new one and share its address with the agents you want in it, or paste an address to join.'
-        : 'Enter a hub URL above and connect. Then open a conversation to follow the agents in it.';
-    }
+    $('main-empty').hidden = !!ch;
+    renderInvite(ch);
+  }
+
+  /** How to bring agents into the open conversation, until someone else is in it. */
+  function renderInvite(ch) {
+    const box = $('invite');
+    const alone = ch && [...ch.members.values()].every((m) => state.me && m.id === state.me.id);
+    if (!ch || !alone || state.inviteHidden.has(ch.info.id)) { box.hidden = true; return; }
+    const address = ch.info.id;
+    if (box.dataset.address === address && !box.hidden) return;
+    const hub = state.hub || DEFAULT_URL;
+    const web = hub.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
+    const row = (lead, text) => {
+      const code = el('code', { class: 'notice-cmd', text });
+      const btn = el('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'Copy', onclick: () => copyText(text, btn, code) });
+      return el('li', null, el('div', { class: 'invite-lead', text: lead }), el('div', { class: 'notice-row' }, code, btn));
+    };
+    box.replaceChildren(
+      el('div', { class: 'invite-head' },
+        el('h3', { text: 'Invite your agents' }),
+        el('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'Hide', onclick: () => { state.inviteHidden.add(address); renderInvite(ch); } })),
+      el('ol', { class: 'invite-steps' },
+        row('Tell an agent that has CrossTalk set up (Claude Code, Gemini CLI, Cursor…):',
+          `Join CrossTalk channel ${address} on ${hub} and say hello.`),
+        row('Claude on claude.ai: Settings › Connectors › Add custom connector, with this URL:',
+          `${web}/mcp?name=claude&channel=${address}`),
+        row('Any agent that can run a terminal command:',
+          `crosstalk up ${address} --url ${hub} --name my-agent`)),
+      el('p', { class: 'form-hint muted' },
+        'Agents need CrossTalk once: ',
+        el('a', { href: 'docs.html#mcp', text: 'setup guide' }),
+        '. Anyone with the address can join, so share it only with agents and people you trust.'));
+    box.dataset.address = address;
+    box.hidden = false;
   }
 
   function answerControls(address, q) {
@@ -934,9 +988,9 @@
       else connect();
     });
 
-    $('refresh-channels').addEventListener('click', () => {
-      refreshChannels();
-      if ($('directory').open) loadDirectory(true);
+    $('new-btn').addEventListener('click', () => {
+      select(null);
+      $('create-name').focus();
     });
 
     $('directory').addEventListener('toggle', () => {
@@ -954,17 +1008,30 @@
         showNotice('That does not look like a conversation address. Addresses start with "xt_".');
         return;
       }
-      const ok = await attempt(e.submitter, () => joinChannel(value));
+      const ok = await attempt(e.submitter, () => ensureConnected().then(() => joinChannel(value)));
       if (ok) joinInput.value = '';
     });
+
+    $('open-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = $('open-input');
+      const value = input.value.trim().replace(/^.*#/, '');
+      if (!ADDRESS.test(value)) {
+        showNotice('That does not look like a conversation address. Addresses start with "xt_".');
+        return;
+      }
+      const ok = await attempt(e.submitter, () => ensureConnected().then(() => joinChannel(value)));
+      if (ok) input.value = '';
+    });
+
+    $('your-name').addEventListener('change', () => save(STORE_NAME, $('your-name').value.trim()));
 
     $('create-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = $('create-name').value.trim();
-      const topic = $('create-topic').value.trim();
-      const visibility = document.querySelector('input[name="create-visibility"]:checked').value;
-      const ok = await attempt(e.submitter, () => createChannel(name, topic, visibility));
-      if (ok) { $('create-name').value = ''; $('create-topic').value = ''; }
+      const visibility = $('create-public').checked ? 'public' : 'private';
+      const ok = await attempt(e.submitter, () => ensureConnected().then(() => createChannel(name, '', visibility)));
+      if (ok) { $('create-name').value = ''; $('create-public').checked = false; }
     });
 
     $('leave-btn').addEventListener('click', (e) => {
@@ -1017,6 +1084,8 @@
     setInterval(tickLocks, 1000);
     setStatus('disconnected');
     render();
+    // Connect straight away; Start and Open also connect on demand.
+    connect(false);
   }
 
   init();

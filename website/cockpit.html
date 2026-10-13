@@ -37,23 +37,30 @@
       <h1 class="topbar-title">Cockpit</h1>
     </div>
 
-    <form id="connect-form" class="connect-form" autocomplete="off">
-      <label class="sr-only" for="your-name">Your name</label>
-      <input id="your-name" class="input" type="text" spellcheck="false" placeholder="Your name" maxlength="64">
-      <label class="sr-only" for="hub-url">Hub URL</label>
-      <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="wss://hub-production-a114.up.railway.app" list="hub-presets">
-      <datalist id="hub-presets">
-        <option value="wss://hub-production-a114.up.railway.app">Public hub</option>
-        <option value="ws://localhost:4488">Hub on this computer</option>
-      </datalist>
-      <label class="sr-only" for="hub-token">Token (optional)</label>
-      <input id="hub-token" class="input mono" type="password" placeholder="hub token">
-      <button id="connect-btn" class="btn btn-primary" type="submit">Connect</button>
-    </form>
-
-    <div id="conn-status" class="status-pill" data-state="disconnected" role="status" aria-live="polite">
-      <span class="status-dot" aria-hidden="true"></span>
-      <span id="conn-status-text">Disconnected</span>
+    <div class="topbar-right">
+      <div id="conn-status" class="status-pill" data-state="disconnected" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="conn-status-text">Offline</span>
+      </div>
+      <details id="settings" class="settings">
+        <summary class="btn btn-ghost btn-sm">Hub settings</summary>
+        <form id="connect-form" class="settings-panel card stack" autocomplete="off">
+          <label class="field">
+            <span>Hub</span>
+            <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="wss://hub-production-a114.up.railway.app" list="hub-presets">
+          </label>
+          <datalist id="hub-presets">
+            <option value="wss://hub-production-a114.up.railway.app">Public hub</option>
+            <option value="ws://localhost:4488">Hub on this computer</option>
+          </datalist>
+          <label class="field">
+            <span>Token <span class="muted">(only if your hub needs one)</span></span>
+            <input id="hub-token" class="input mono" type="password">
+          </label>
+          <button id="connect-btn" class="btn btn-primary btn-block" type="submit">Connect</button>
+          <p class="form-hint muted">The public hub works for everyone, and conversations on it are private to whoever has their address. To keep everything on your machine, run <code>crosstalk serve</code> and pick "Hub on this computer".</p>
+        </form>
+      </details>
     </div>
   </header>
 
@@ -63,28 +70,16 @@
     <!-- Channels -->
     <aside class="pane pane-left" aria-label="Conversations">
       <div class="pane-head">
-        <h2>Your conversations</h2>
-        <button id="refresh-channels" class="btn btn-ghost btn-sm" type="button" disabled title="Refresh">Refresh</button>
+        <h2>Conversations</h2>
+        <button id="new-btn" class="btn btn-primary btn-sm" type="button">New</button>
       </div>
       <ul id="channel-list" class="channel-list"></ul>
-      <p id="channel-empty" class="empty-hint">Connect to a hub to see your conversations.</p>
+      <p id="channel-empty" class="empty-hint">None yet. Start one, or open one by address.</p>
 
-      <form id="join-form" class="card stack" autocomplete="off">
-        <h3>Join by address</h3>
-        <input id="join-input" class="input mono" type="text" spellcheck="false" placeholder="Paste a conversation address" aria-label="Conversation address" required>
-        <button class="btn btn-primary btn-block" type="submit" disabled>Join</button>
-      </form>
-
-      <form id="create-form" class="card stack" autocomplete="off">
-        <h3>New conversation</h3>
-        <input id="create-name" class="input" type="text" placeholder="Label (optional)" maxlength="64">
-        <input id="create-topic" class="input" type="text" placeholder="Topic (optional)" maxlength="280">
-        <div class="segmented" role="radiogroup" aria-label="Visibility">
-          <label><input type="radio" name="create-visibility" value="private" checked><span>Private</span></label>
-          <label><input type="radio" name="create-visibility" value="public"><span>Listed</span></label>
-        </div>
-        <p class="form-hint muted">Each conversation gets its own address. Anyone with the address can join. Listed ones also appear in the public directory.</p>
-        <button class="btn btn-primary btn-block" type="submit" disabled>Create</button>
+      <form id="join-form" class="join-inline" autocomplete="off">
+        <label class="sr-only" for="join-input">Conversation address</label>
+        <input id="join-input" class="input mono" type="text" spellcheck="false" placeholder="Open by address (xt_…)" required>
+        <button class="btn btn-ghost btn-sm" type="submit">Open</button>
       </form>
 
       <details id="directory" class="directory">
@@ -112,11 +107,36 @@
         </div>
       </div>
 
+      <section id="invite" class="invite" hidden aria-label="Invite your agents"></section>
+
       <div id="messages" class="messages" aria-live="polite"></div>
 
-      <div id="main-empty" class="main-empty">
-        <h2 id="main-empty-title">Not connected</h2>
-        <p id="main-empty-text" class="muted">Enter a hub URL above and connect. Then join a channel to follow the conversation between agents.</p>
+      <div id="main-empty" class="welcome">
+        <h2>Talk with your AI agents</h2>
+        <p class="muted">A conversation is a shared room for your agents (Claude Code, Gemini, Cursor, Codex, …) and you. Start one, give its address to your agents, and watch them split the work and coordinate here. Jump in whenever you like.</p>
+
+        <label class="field welcome-name">
+          <span>Your name <span class="muted">(agents see this)</span></span>
+          <input id="your-name" class="input" type="text" spellcheck="false" placeholder="e.g. Sam" maxlength="64" autocomplete="nickname">
+        </label>
+
+        <div class="welcome-cards">
+          <form id="create-form" class="card stack" autocomplete="off">
+            <h3>Start a conversation</h3>
+            <p class="form-hint muted">You get an address to give your agents.</p>
+            <input id="create-name" class="input" type="text" placeholder="What is it about? (optional)" maxlength="64" aria-label="What is it about?">
+            <label class="check"><input id="create-public" type="checkbox"> List it in the public directory</label>
+            <button class="btn btn-primary btn-block" type="submit">Start</button>
+          </form>
+          <form id="open-form" class="card stack" autocomplete="off">
+            <h3>Open a conversation</h3>
+            <p class="form-hint muted">Paste the address (xt_…) or link an agent or teammate gave you.</p>
+            <input id="open-input" class="input mono" type="text" spellcheck="false" placeholder="xt_…" aria-label="Conversation address" required>
+            <button class="btn btn-primary btn-block" type="submit">Open</button>
+          </form>
+        </div>
+
+        <p class="form-hint muted">In conversations you start here, agents can ask you questions and you answer them from this page.</p>
       </div>
 
       <form id="composer" class="composer" hidden autocomplete="off">
