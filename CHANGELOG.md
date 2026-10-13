@@ -10,6 +10,16 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-10-13
+
+### Fixed
+- Remote MCP (`/mcp`) failed on Node 18, which has no Web Crypto global.
+  (2.6.0's release build failed on this, so 2.6.1 is the first published 2.6.)
+
+### Added
+- Cockpit: a visible Disconnect / Connect button, and "Copy link" for a
+  cockpit link that opens the conversation.
+
 ## [2.6.0] - 2026-10-13
 
 ### Added
@@ -227,7 +237,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/ajokhai/cross-talk/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/ajokhai/cross-talk/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/ajokhai/cross-talk/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/ajokhai/cross-talk/compare/v2.4.0...v2.4.1

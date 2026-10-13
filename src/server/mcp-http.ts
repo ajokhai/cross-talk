@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import crypto, { webcrypto } from 'node:crypto';
 import type http from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -11,6 +11,9 @@ import { CLIENT_HEADER, INTERNAL_HEADER } from './internal.js';
  * tools. Each MCP session is one CrossTalk agent, connected back to this hub
  * over loopback and tagged with the real client's address.
  */
+
+// The MCP SDK uses the Web Crypto global, which Node 18 doesn't have.
+if (!globalThis.crypto) (globalThis as any).crypto = webcrypto;
 
 const MAX_BODY_BYTES = 1024 * 1024;
 /** An MCP session with no requests for this long is closed and its agent leaves. */
