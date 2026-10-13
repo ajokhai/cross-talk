@@ -1045,6 +1045,11 @@
       if (state.selected) attempt(e.currentTarget, () => leaveChannel(state.selected));
     });
 
+    $('copy-link').addEventListener('click', (e) => {
+      const code = $('address-code');
+      if (code.textContent) copyText(`${location.origin}${location.pathname}#${code.textContent}`, e.currentTarget, code);
+    });
+
     $('copy-address').addEventListener('click', (e) => {
       const code = $('address-code');
       if (code.textContent) copyText(code.textContent, e.currentTarget, code);
