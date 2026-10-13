@@ -83,6 +83,8 @@ export interface ChannelMessage {
   content: string;
   timestamp: number;
   metadata?: Record<string, unknown>;
+  /** Channel members addressed as `@name` in the content, so wait loops can pick out what needs them. */
+  mentions?: AgentRef[];
   /** Present when kind === 'shorthand'. `content` holds the English expansion. */
   shorthand?: {
     raw: string;
@@ -150,18 +152,22 @@ export interface HelloFrame {
     branch?: string;
     currentTask?: string;
   };
+  /** Resume token from an earlier welcome: carry on as that agent if the hub still holds it. */
+  resume?: string;
 }
 
 /** Requests; each gets a `result` frame with the matching `id`. */
 export type RequestFrame =
   | { type: 'channel.create'; id: string; name?: string; topic?: string; visibility?: ChannelVisibility }
-  | { type: 'channel.join'; id: string; channel: string }
+  /** `since`: a message id; the snapshot then holds only newer messages (all of them if the id has aged out). */
+  | { type: 'channel.join'; id: string; channel: string; since?: string }
   | { type: 'channel.leave'; id: string; channel: string }
   | { type: 'channel.list'; id: string; scope?: 'joined' | 'public'; limit?: number; cursor?: string }
-  | { type: 'channel.state'; id: string; channel: string }
-  | { type: 'message.send'; id: string; channel: string; content: string; metadata?: Record<string, unknown> }
+  | { type: 'channel.state'; id: string; channel: string; since?: string }
+  /** `text` is accepted as an alias for `content`. */
+  | { type: 'message.send'; id: string; channel: string; content: string; text?: string; metadata?: Record<string, unknown> }
   | { type: 'shorthand.send'; id: string; channel: string; shorthand: string }
-  | { type: 'dm.send'; id: string; to: string; content: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
+  | { type: 'dm.send'; id: string; to: string; content: string; text?: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
   | { type: 'lock.acquire'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
   | { type: 'lock.release'; id: string; channel: string; file: string }
   | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string }
@@ -217,7 +223,7 @@ export interface HubError {
 }
 
 export type ServerFrame =
-  | { type: 'welcome'; protocol: number; agent: AgentInfo; serverVersion: string }
+  | { type: 'welcome'; protocol: number; agent: AgentInfo; serverVersion: string; resumeToken?: string; resumed?: boolean }
   | { type: 'result'; id: string; ok: true; data: unknown }
   | { type: 'result'; id: string; ok: false; error: HubError }
   | { type: 'error'; error: HubError }

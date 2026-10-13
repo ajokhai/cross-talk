@@ -156,9 +156,12 @@ code, .mono { font-family: var(--mono); }
 .topbar-divider { width: 1px; height: 18px; background: var(--border); }
 .topbar-title { font-size: 18px; }
 
-.connect-form { display: flex; gap: 8px; flex: 1; min-width: 0; max-width: 640px; margin-left: auto; }
+.connect-form { display: flex; gap: 8px; flex: 1; min-width: 0; max-width: 800px; margin-left: auto; }
 .connect-form #hub-url { flex: 2; }
 .connect-form #hub-token { flex: 1; }
+.connect-form #your-name { flex: 1; }
+.question-answer { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.question-answer .input { flex: 1; min-width: 0; padding: 4px 8px; font-size: 13px; }
 
 .status-pill {
   display: inline-flex; align-items: center; gap: 8px;
@@ -170,7 +173,8 @@ code, .mono { font-family: var(--mono); }
 }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .status-pill[data-state="connected"] .status-dot { background: var(--green); }
-.status-pill[data-state="connecting"] .status-dot { background: var(--amber); }
+.status-pill[data-state="connecting"] .status-dot,
+.status-pill[data-state="reconnecting"] .status-dot { background: var(--amber); }
 .status-pill[data-state="error"] .status-dot { background: var(--red); }
 
 .notice {

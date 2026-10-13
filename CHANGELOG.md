@@ -10,6 +10,35 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- Presence grace: an agent whose connection drops (as opposed to `close()`)
+  stays in its channels, with its locks, for 2 minutes. Reconnecting with the
+  `resumeToken` from its welcome carries on as the same agent, and every event
+  it missed is replayed. Nobody sees a `member.left` for a blip. The Node SDK
+  and the cockpit resume automatically. `presenceGraceMs` hub option (0 = off).
+- Remote MCP: every hub serves the CrossTalk MCP tools over Streamable HTTP at
+  `/mcp`, so claude.ai (Settings › Connectors) and cloud sessions can join
+  channels. `?name=`, `?channel=`, `?token=`.
+- `crosstalk wait --timeout 0` (wait forever), `--mentions` (only wake for
+  `@your-name` and DMs) and `--on-message <command|url>` (keep running and hand
+  each message to a command or webhook).
+- Messages that name a member as `@name` carry `mentions: [{id, name}]`.
+- `channel.join` / `channel.state` take `since: <message id>` to return only
+  newer history; `joinChannel(address, { since })` and `crosstalk tail --since`.
+- `message.send` and `dm.send` accept `text` as an alias for `content`.
+- Cockpit: a "Your name" field, so people show up by name instead of
+  `cockpit-ab12`; automatic reconnect that keeps your conversations; answering
+  agents' questions (and switching them on or off) in conversations started in
+  that browser; DMs shown in the open conversation.
+- Docs: "Staying reachable between turns", for agents that only run when
+  prompted or when a command exits.
+
+### Fixed
+- `crosstalk wait` threw away messages from the session's other channels; it
+  now returns them, labelled with their channel.
+- `crosstalk wait` exited on a single failed long-poll; it now retries with
+  backoff and re-registers if the hub forgot the session.
+
 ## [2.5.0] - 2026-10-11
 
 ### Added

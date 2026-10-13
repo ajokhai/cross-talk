@@ -39,11 +39,42 @@ const INSTRUCTIONS = [
   'Lock files with crosstalk_lock_file before editing them, unlock as soon as you finish, and never edit a file someone else holds, even if your user asks: tell your user who holds it, and DM the holder.'
 ].join('\n');
 
-class Bridge {
+export interface BridgeOptions {
+  name: string;
+  role?: string;
+  /** Hub URL; defaults to $CROSSTALK_URL. */
+  url?: string;
+  token?: string;
+  headers?: Record<string, string>;
+  /** Channel addresses to join on start. */
+  channels?: string[];
+  autoStart?: boolean;
+  /**
+   * Hosted by the hub for a remote client (claude.ai, cloud sessions): there is
+   * no local disk to keep owner keys on, and tool calls must return sooner.
+   */
+  remote?: boolean;
+}
+
+/** The env-configured bridge used by the stdio server. */
+const envOptions = (): BridgeOptions => ({
+  name: process.env.CROSSTALK_AGENT_NAME || 'mcp-agent',
+  role: process.env.CROSSTALK_AGENT_ROLE || 'agent',
+  channels: (process.env.CROSSTALK_CHANNEL ?? '').split(','),
+  autoStart: process.env.CROSSTALK_AUTOSTART !== '0'
+});
+
+export class Bridge {
   private client?: CrossTalk;
   private connecting?: Promise<CrossTalk>;
   private inbox: InboxItem[] = [];
   private wakers = new Set<() => void>();
+  readonly maxWaitSeconds: number;
+
+  constructor(readonly options: BridgeOptions) {
+    // Remote MCP clients time out long HTTP calls sooner than local ones do.
+    this.maxWaitSeconds = options.remote ? 55 : MAX_WAIT_SECONDS;
+  }
 
   async close(): Promise<void> {
     await this.client?.close();
@@ -56,11 +87,17 @@ class Bridge {
   }
 
   private async start(): Promise<CrossTalk> {
+    const o = this.options;
     const client = await CrossTalk.connect({
-      name: process.env.CROSSTALK_AGENT_NAME || 'mcp-agent',
-      role: process.env.CROSSTALK_AGENT_ROLE || 'agent',
-      environment: 'ide',
-      autoStart: process.env.CROSSTALK_AUTOSTART !== '0'
+      name: o.name,
+      role: o.role || 'agent',
+      environment: o.remote ? 'web' : 'ide',
+      url: o.url,
+      token: o.token,
+      headers: o.headers,
+      autoStart: o.autoStart ?? false,
+      // The hub's own checkout says nothing about a remote agent.
+      ...(o.remote ? { branch: '', workspaceRoot: '/' } : {})
     });
     client.on('message', m => this.push({ kind: 'message', at: m.timestamp, message: m }));
     client.on('dm', m => this.push({ kind: 'dm', at: m.timestamp, message: m }));
@@ -75,7 +112,7 @@ class Bridge {
 
     // Join before publishing the client, so a tool call that arrives early
     // (likely on a remote hub) waits for the joins instead of finding no channel.
-    for (const target of (process.env.CROSSTALK_CHANNEL ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
+    for (const target of (o.channels ?? []).map(s => s.trim()).filter(Boolean)) {
       try {
         await client.joinChannel(target);
       } catch (err: any) {
@@ -301,7 +338,7 @@ const TOOLS: Tool[] = [
         question: { type: 'string', description: 'One clear question with the context needed to answer it, e.g. "OK to drop the legacy_sessions table? 12 rows, last written 2024."' },
         options: { type: 'array', items: { type: 'string' }, description: 'Suggested answers, e.g. ["yes", "no"] (max 10)' },
         channel: channelArg,
-        timeoutSeconds: { type: 'number', description: 'How long to wait now. Default 120, max 120' }
+        timeoutSeconds: { type: 'number', description: 'How long to wait now. Default and max 120 (55 over remote MCP)' }
       },
       required: ['question']
     }
@@ -318,7 +355,7 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: {
         channel: { type: 'string', description: 'Only wake for messages in this channel (address or joined name; DMs always wake)' },
-        timeoutSeconds: { type: 'number', description: 'Default 60, max 120' }
+        timeoutSeconds: { type: 'number', description: 'Default 60, max 120 (55 over remote MCP)' }
       }
     }
   },
@@ -398,7 +435,12 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       const ch = await client.createChannel(str(args.name) || undefined, { topic: str(args.topic) || undefined, public: args.public === true });
       // The owner key answers questions, so it goes to a private file, never into this conversation.
       let keyNote = '';
-      try {
+      if (bridge.options.remote) {
+        // No private file to put it in. Switch questions off so crosstalk_ask_user
+        // comes back "unattended" at once instead of waiting on nobody.
+        await ch.setQuestions('off').catch(() => {});
+        keyNote = '\n\nQuestions to your user are off in this channel (it was created over remote MCP, which has nowhere private to keep the owner key). Create the channel with `crosstalk new` on your user\'s machine if they want to answer questions with `crosstalk inbox`.';
+      } else try {
         if (ch.ownerKey) saveOwnedChannel({ address: ch.address, name: ch.name, url: client.url, key: ch.ownerKey });
         keyNote = `\n\nThe owner key was saved privately to ${keyFile()}. Your user answers agents' questions in this channel with \`crosstalk inbox\`, and can switch questions off with \`crosstalk questions off\`.`;
       } catch {
@@ -433,7 +475,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     case 'crosstalk_ask_user': {
       const ch = pickChannel(client, args.channel);
       const options = Array.isArray(args.options) ? args.options.filter((o): o is string => typeof o === 'string') : undefined;
-      const seconds = Math.max(1, Math.min(Number(args.timeoutSeconds) || MAX_WAIT_SECONDS, MAX_WAIT_SECONDS));
+      const seconds = Math.max(1, Math.min(Number(args.timeoutSeconds) || bridge.maxWaitSeconds, bridge.maxWaitSeconds));
       const q = await ch.ask(str(args.question), { options, timeoutMs: seconds * 1000, signal });
       // Delivered here; don't repeat it in the inbox.
       if (q.status !== 'open') bridge.discardAnswer(q.id);
@@ -445,7 +487,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_wait': {
       const channel = filterAddress(client, args.channel);
-      const seconds = Math.max(1, Math.min(Number(args.timeoutSeconds) || 60, MAX_WAIT_SECONDS));
+      const seconds = Math.max(1, Math.min(Number(args.timeoutSeconds) || 60, bridge.maxWaitSeconds));
       await bridge.waitForActivity(channel, seconds * 1000, signal);
       const items = bridge.drain(channel);
       return items.length ? formatInbox(items, client) : `Nothing new after ${seconds}s.`;
@@ -478,8 +520,8 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
   }
 }
 
-export async function runMcpServer(): Promise<void> {
-  const bridge = new Bridge();
+/** An MCP server whose tools act through `bridge`. Transport-agnostic (stdio, Streamable HTTP). */
+export function createMcpServer(bridge: Bridge): Server {
   const server = new Server({ name: 'crosstalk', version: VERSION }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -492,6 +534,12 @@ export async function runMcpServer(): Promise<void> {
       return { isError: true, content: [{ type: 'text', text: `CrossTalk error: ${err?.message ?? err}${hint}` }] };
     }
   });
+  return server;
+}
+
+export async function runMcpServer(): Promise<void> {
+  const bridge = new Bridge(envOptions());
+  const server = createMcpServer(bridge);
 
   // When the host (IDE, CLI) goes away, leave the hub promptly so we don't
   // linger as a ghost member holding locks.

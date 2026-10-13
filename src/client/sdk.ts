@@ -50,6 +50,8 @@ export interface ConnectOptions {
   requestTimeoutMs?: number;
   /** Start an in-process hub if nothing is listening on a localhost URL. Default false. */
   autoStart?: boolean;
+  /** Extra headers for the WebSocket handshake. */
+  headers?: Record<string, string>;
 }
 
 export class CrossTalkError extends Error {
@@ -266,6 +268,8 @@ export class CrossTalk extends EventEmitter {
   private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask'>> & Pick<ConnectOptions, 'branch' | 'currentTask'>;
   private closed = false;
   private reconnectDelay = 500;
+  /** Lets a reconnect carry on as the same agent (same id, channels, locks) within the hub's grace period. */
+  private resumeToken?: string;
   /** Messages and DMs not yet consumed by waitForMessage(), so nothing arriving between calls is lost. */
   private unread: Array<ChannelMessage | DirectMessage> = [];
   private readonly wakeWaiters = new Set<() => void>();
@@ -283,6 +287,7 @@ export class CrossTalk extends EventEmitter {
       reconnect: options.reconnect ?? true,
       requestTimeoutMs: options.requestTimeoutMs ?? 10_000,
       autoStart: options.autoStart ?? false,
+      headers: options.headers ?? {},
       name: options.name,
       branch: options.branch ?? git(['rev-parse', '--abbrev-ref', 'HEAD']),
       currentTask: options.currentTask
@@ -321,7 +326,7 @@ export class CrossTalk extends EventEmitter {
   private open(): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = new URL(pinLoopback(this.options.url));
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = { ...this.options.headers };
       if (this.options.token) {
         headers.Authorization = `Bearer ${this.options.token}`;
         const loopback = /^(localhost|127\.|\[::1\])/.test(url.hostname);
@@ -347,7 +352,8 @@ export class CrossTalk extends EventEmitter {
             environment: this.options.environment,
             branch: this.options.branch,
             currentTask: this.options.currentTask
-          }
+          },
+          resume: this.resumeToken
         }));
       });
 
@@ -364,6 +370,7 @@ export class CrossTalk extends EventEmitter {
             clearTimeout(giveUp);
             this.ws = ws;
             this.agent = frame.agent;
+            this.resumeToken = frame.resumeToken;
             this.reconnectDelay = 500;
             resolve();
           } else if (frame.type === 'error') {
@@ -413,7 +420,9 @@ export class CrossTalk extends EventEmitter {
       if (this.closed) return;
       try {
         await this.open();
-        // A reconnect gets a new agent id; rejoin everything and drop stale locks.
+        // Resumed within the grace period: same agent, and missed frames were
+        // replayed. Otherwise this is a new agent id. Either way, rejoining
+        // (a no-op for channels we're still in) refreshes every snapshot.
         for (const channel of [...this.channels.values()]) {
           try {
             channel.apply(await this.request('channel.join', { channel: channel.address }));
@@ -559,8 +568,9 @@ export class CrossTalk extends EventEmitter {
   }
 
   /** Joins a conversation by its address (`xt_...`). */
-  async joinChannel(address: string): Promise<Channel> {
-    return this.track(await this.request('channel.join', { channel: address.trim() }));
+  /** `since`: a message id you already have; the snapshot then holds only newer messages. */
+  async joinChannel(address: string, options: { since?: string } = {}): Promise<Channel> {
+    return this.track(await this.request('channel.join', { channel: address.trim(), since: options.since }));
   }
 
   static isAddress(value: string): boolean {

@@ -49,6 +49,12 @@ export interface HubOptions {
   emptyChannelTtlMs?: number;
   /** Grace period for an empty channel nobody has written in yet (e.g. created, address shared, creator gone). */
   unusedChannelTtlMs?: number;
+  /**
+   * How long an agent whose transport dropped (not a deliberate leave) stays
+   * present, holding its channels and locks, so it can reconnect with its
+   * resume token and pick up the frames it missed. 0 disables.
+   */
+  presenceGraceMs?: number;
   /** Token bucket per connection: burst size and refill per second. */
   rateLimit?: { burst: number; perSecond: number };
   locks?: LockManagerOptions;
@@ -86,15 +92,21 @@ interface Channel {
   questions: Map<string, UserQuestion>;
 }
 
+/** Frames kept for a dropped agent before it is evicted instead of resumed. */
+const REPLAY_LIMIT = 1000;
+
 export class Connection {
   agent?: AgentInfo;
   readonly channels = new Set<string>();
   /** @internal */ released = false;
+  /** @internal Secret that lets a reconnecting client take over this agent. */ resumeToken?: string;
+  /** @internal Set while the transport is gone but the agent is still present. */ droppedAt?: number;
+  /** @internal Frames to send right after a resumed client's welcome. */ replay?: ServerFrame[];
   private tokens: number;
   private refilledAt: number;
 
   constructor(
-    readonly peer: Peer,
+    public peer: Peer,
     readonly address: string,
     private readonly limit: { burst: number; perSecond: number },
     now: number
@@ -139,6 +151,7 @@ export class MeshHub {
   private readonly channels = new Map<string, Channel>(); // address -> channel
   private readonly agents = new Map<string, Connection>(); // agent id -> connection
   private readonly perAddress = new Map<string, number>(); // address -> open connections
+  private readonly resumable = new Map<string, Connection>(); // resume token -> connection (live or dropped)
   private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now'>>;
   private readonly onMessage?: (message: ChannelMessage) => void;
   private readonly now: () => number;
@@ -161,6 +174,7 @@ export class MeshHub {
       maxQuestionsPerChannel: options.maxQuestionsPerChannel ?? 200,
       emptyChannelTtlMs: options.emptyChannelTtlMs ?? 60 * 60 * 1000,
       unusedChannelTtlMs: options.unusedChannelTtlMs ?? 10 * 60 * 1000,
+      presenceGraceMs: options.presenceGraceMs ?? 2 * 60 * 1000,
       rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 }
     };
   }
@@ -209,6 +223,7 @@ export class MeshHub {
     if (frame.type === 'hello') {
       try {
         conn.peer.send(this.hello(conn, frame as unknown as HelloFrame));
+        for (const missed of conn.replay?.splice(0) ?? []) conn.peer.send(missed);
       } catch (err) {
         conn.peer.send({ type: 'error', error: this.toHubError(err) });
       }
@@ -222,6 +237,11 @@ export class MeshHub {
     if (conn.released) fail('not_registered', 'Connection is closed');
     if (frame.protocol !== PROTOCOL_VERSION) {
       fail('bad_request', `Unsupported protocol ${frame.protocol}; this hub speaks ${PROTOCOL_VERSION}`);
+    }
+    const previous = typeof frame.resume === 'string' ? this.resumable.get(frame.resume) : undefined;
+    if (previous?.agent) {
+      const agent = this.takeOver(conn, previous);
+      return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION, resumeToken: this.issueResumeToken(conn), resumed: true };
     }
     const raw: Record<string, unknown> = isPlainObject(frame.agent) ? frame.agent : {};
     const name = cleanText(raw.name, 64);
@@ -241,19 +261,86 @@ export class MeshHub {
     };
     conn.agent = agent;
     this.agents.set(agent.id, conn);
-    return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION };
+    return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION, resumeToken: this.issueResumeToken(conn) };
+  }
+
+  private issueResumeToken(conn: Connection): string {
+    const token = crypto.randomBytes(24).toString('base64url');
+    conn.resumeToken = token;
+    this.resumable.set(token, conn);
+    return token;
+  }
+
+  /**
+   * Moves an agent (id, channels, locks) from `previous` onto the new
+   * connection and queues the frames it missed. Nobody sees it leave.
+   */
+  private takeOver(conn: Connection, previous: Connection): AgentInfo {
+    this.resumable.delete(previous.resumeToken!);
+    const agent = previous.agent!;
+    const replay = previous.replay ?? [];
+    if (!previous.released) {
+      // The old socket is half-open (the client noticed the drop before we did).
+      this.release(previous);
+      previous.peer.close(4001, 'resumed on another connection');
+    }
+    for (const id of previous.channels) conn.channels.add(id);
+    previous.channels.clear();
+    previous.agent = undefined;
+    previous.replay = undefined;
+    agent.lastSeen = this.now();
+    conn.agent = agent;
+    conn.replay = replay;
+    this.agents.set(agent.id, conn);
+    return agent;
   }
 
   /** Removes the agent from every channel, releasing its locks. Safe to call twice. */
   disconnect(conn: Connection): void {
     if (conn.released) return;
+    this.release(conn);
+    this.evict(conn);
+  }
+
+  /**
+   * The transport dropped without a deliberate close. Keeps the agent present
+   * for `presenceGraceMs`, buffering what it misses, so a reconnect that
+   * presents its resume token carries on as if nothing happened.
+   */
+  drop(conn: Connection): void {
+    if (conn.released) return;
+    if (!conn.agent || !conn.resumeToken || this.opts.presenceGraceMs <= 0) return this.disconnect(conn);
+    this.release(conn);
+    conn.droppedAt = this.now();
+    const replay: ServerFrame[] = (conn.replay = []);
+    conn.peer = {
+      send: frame => {
+        if (frame.type === 'result' || conn.droppedAt === undefined) return;
+        replay.push(frame);
+        // Too much to replay faithfully: treat it as a real disconnect.
+        if (replay.length === REPLAY_LIMIT) queueMicrotask(() => this.evict(conn));
+      },
+      close: () => {}
+    };
+  }
+
+  /** Frees the connection's per-address slot. */
+  private release(conn: Connection): void {
     conn.released = true;
     const open = (this.perAddress.get(conn.address) ?? 1) - 1;
     if (open > 0) this.perAddress.set(conn.address, open);
     else this.perAddress.delete(conn.address);
+  }
+
+  /** Takes the agent out of every channel (they see it leave) and forgets it. */
+  private evict(conn: Connection): void {
+    if (conn.resumeToken && this.resumable.get(conn.resumeToken) === conn) this.resumable.delete(conn.resumeToken);
+    conn.droppedAt = undefined;
+    conn.replay = undefined;
     if (!conn.agent) return;
     for (const name of [...conn.channels]) this.removeMember(conn, name, 'disconnected');
     this.agents.delete(conn.agent.id);
+    conn.agent = undefined;
   }
 
   /** Dispatches one request frame and returns its `result` frame. */
@@ -284,13 +371,13 @@ export class MeshHub {
   private async dispatch(conn: Connection, f: RequestFrame): Promise<unknown> {
     switch (f.type) {
       case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility);
-      case 'channel.join': return this.joinChannel(conn, f.channel);
+      case 'channel.join': return this.joinChannel(conn, f.channel, f.since);
       case 'channel.leave': return this.leaveChannel(conn, f.channel);
       case 'channel.list': return this.listChannels(conn, f.scope ?? 'joined', f.limit, f.cursor);
-      case 'channel.state': return this.snapshot(this.memberChannel(conn, f.channel));
-      case 'message.send': return this.postMessage(conn, f.channel, f.content, f.metadata);
+      case 'channel.state': return this.snapshot(this.memberChannel(conn, f.channel), f.since);
+      case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata);
       case 'shorthand.send': return this.postShorthand(conn, f.channel, f.shorthand);
-      case 'dm.send': return this.sendDirect(conn, f.to, f.content, f.replyExpected, f.metadata);
+      case 'dm.send': return this.sendDirect(conn, f.to, f.content ?? f.text, f.replyExpected, f.metadata);
       case 'lock.acquire': return this.acquireLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'lock.release': return this.releaseLock(conn, f.channel, f.file);
       case 'status.update': return this.updateStatus(conn, f.status, f.currentTask);
@@ -345,7 +432,7 @@ export class MeshHub {
     return { ...this.snapshot(channel), ownerKey };
   }
 
-  private joinChannel(conn: Connection, address: unknown): ChannelSnapshot {
+  private joinChannel(conn: Connection, address: unknown, since?: unknown): ChannelSnapshot {
     const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
     if (!channel) return fail('not_found', 'No conversation at that address');
     if (!channel.members.has(conn.agent!.id)) {
@@ -353,7 +440,7 @@ export class MeshHub {
       this.ensureRoom(conn);
       this.addMember(conn, channel);
     }
-    return this.snapshot(channel);
+    return this.snapshot(channel, since);
   }
 
   private leaveChannel(conn: Connection, address: unknown): { channel: string } {
@@ -392,6 +479,25 @@ export class MeshHub {
     if (channel.members.size === 0) channel.emptySince = this.now();
   }
 
+  /** Members named as `@name` (any case, ending at a non-name character). */
+  private mentioned(channel: Channel, text: string): AgentRef[] {
+    if (!text.includes('@')) return [];
+    const lower = text.toLowerCase();
+    const out: AgentRef[] = [];
+    for (const id of channel.members) {
+      const agent = this.agents.get(id)?.agent;
+      if (!agent) continue;
+      const tag = '@' + agent.name.toLowerCase();
+      for (let at = lower.indexOf(tag); at >= 0; at = lower.indexOf(tag, at + 1)) {
+        if (!/[\p{L}\p{N}_-]/u.test(lower[at + tag.length] ?? '')) {
+          out.push({ id: agent.id, name: agent.name });
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
   private deleteChannel(channel: Channel): void {
     this.channels.delete(channel.id);
     this.locks.releaseChannel(channel.id);
@@ -420,12 +526,14 @@ export class MeshHub {
     };
   }
 
-  private snapshot(channel: Channel): ChannelSnapshot {
+  private snapshot(channel: Channel, since?: unknown): ChannelSnapshot {
+    const history = channel.history.slice(-this.opts.historyLimit);
+    const seen = typeof since === 'string' ? history.findIndex(m => m.id === since) : -1;
     return {
       channel: this.info(channel),
       members: [...channel.members].map(id => this.agents.get(id)?.agent).filter((a): a is AgentInfo => !!a),
       locks: this.locks.list(channel.id),
-      messages: channel.history.slice(-this.opts.historyLimit),
+      messages: seen >= 0 ? history.slice(seen + 1) : history,
       questions: [...channel.questions.values()]
     };
   }
@@ -492,6 +600,8 @@ export class MeshHub {
   }
 
   private record(channel: Channel, message: ChannelMessage, sender: Connection): ChannelMessage {
+    const mentions = this.mentioned(channel, message.shorthand?.raw ?? message.content);
+    if (mentions.length) message.mentions = mentions;
     channel.history.push(message);
     if (channel.history.length > this.opts.historyLimit) channel.history.shift();
     channel.lastActivity = message.timestamp;
@@ -744,6 +854,9 @@ export class MeshHub {
       }
     }
     const now = this.now();
+    for (const conn of [...this.resumable.values()]) {
+      if (conn.droppedAt !== undefined && conn.droppedAt + this.opts.presenceGraceMs <= now) this.evict(conn);
+    }
     for (const channel of [...this.channels.values()]) {
       if (channel.members.size > 0 || channel.emptySince === undefined) continue;
       const ttl = channel.history.length ? this.opts.emptyChannelTtlMs : this.opts.unusedChannelTtlMs;
