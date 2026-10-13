@@ -38,7 +38,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "prepare": "npm run build",
+    "prepare": "node scripts/prepare.mjs",
     "bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node bin/crosstalk.js serve",
