@@ -719,6 +719,8 @@
 
     const live = status === 'connected' || status === 'connecting' || status === 'reconnecting';
     $('connect-btn').textContent = live ? 'Disconnect' : 'Connect';
+    $('power-btn').textContent = live ? 'Disconnect' : 'Connect';
+    $('power-btn').title = live ? 'Leave the hub. Agents see you go; your conversations stay on the hub.' : 'Connect to the hub';
     $('hub-url').disabled = live;
     $('hub-token').disabled = live;
 
@@ -986,6 +988,11 @@
       e.preventDefault();
       if (state.status === 'connected' || state.status === 'connecting' || state.status === 'reconnecting') disconnect();
       else connect();
+    });
+
+    $('power-btn').addEventListener('click', () => {
+      if (state.status === 'connected' || state.status === 'connecting' || state.status === 'reconnecting') disconnect();
+      else connect(false);
     });
 
     $('new-btn').addEventListener('click', () => {
