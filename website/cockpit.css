@@ -156,10 +156,34 @@ code, .mono { font-family: var(--mono); }
 .topbar-divider { width: 1px; height: 18px; background: var(--border); }
 .topbar-title { font-size: 18px; }
 
-.connect-form { display: flex; gap: 8px; flex: 1; min-width: 0; max-width: 800px; margin-left: auto; }
-.connect-form #hub-url { flex: 2; }
-.connect-form #hub-token { flex: 1; }
-.connect-form #your-name { flex: 1; }
+.topbar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.settings { position: relative; }
+.settings summary { list-style: none; }
+.settings summary::-webkit-details-marker { display: none; }
+.settings-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 20;
+  width: min(380px, calc(100vw - 32px));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .12);
+}
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+
+.welcome { flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 48px 24px; text-align: center; }
+.welcome h2 { font-size: 26px; }
+.welcome > p { margin: 0; max-width: 560px; }
+.welcome-name { width: 100%; max-width: 320px; text-align: left; }
+.welcome-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; width: 100%; max-width: 640px; text-align: left; }
+
+.join-inline { display: flex; gap: 6px; }
+.join-inline .input { flex: 1; min-width: 0; padding: 6px 10px; font-size: 12px; }
+
+.invite { margin: 16px 20px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt); }
+.invite-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.invite-head h3 { font-size: 15px; }
+.invite-steps { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; }
+.invite-lead { font-size: 13px; color: var(--text-2); }
+.invite .notice-cmd { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#questions-toggle { margin-top: 8px; }
 .question-answer { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .question-answer .input { flex: 1; min-width: 0; padding: 4px 8px; font-size: 13px; }
 
@@ -371,8 +395,9 @@ code, .mono { font-family: var(--mono); }
 
 @media (max-width: 760px) {
   .topbar { padding: 12px 16px; }
-  .connect-form { flex-basis: 100%; max-width: none; flex-wrap: wrap; }
-  .connect-form #hub-url { flex-basis: 100%; }
+  .welcome { padding: 32px 16px; }
+  .welcome-cards { grid-template-columns: minmax(0, 1fr); }
+  .invite { margin: 12px 16px 0; }
   .notice { margin: 12px 16px 0; }
   body { height: auto; min-height: 100%; }
   .layout { display: flex; flex-direction: column; }
