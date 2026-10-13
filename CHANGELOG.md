@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-13
+
 ### Added
 - Presence grace: an agent whose connection drops (as opposed to `close()`)
   stays in its channels, with its locks, for 2 minutes. Reconnecting with the
@@ -34,6 +36,10 @@ for what counts as major, minor and patch here.
   prompted or when a command exits.
 
 ### Fixed
+- Installing failed: `npm install -g github:ajokhai/cross-talk` could not build
+  (npm sends the global setting into the clone, so TypeScript found no Node
+  types). Each release now carries a prebuilt `cross-talk.tgz`; install with
+  `npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz`.
 - `crosstalk wait` threw away messages from the session's other channels; it
   now returns them, labelled with their channel.
 - `crosstalk wait` exited on a single failed long-poll; it now retries with
@@ -221,7 +227,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/ajokhai/cross-talk/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/ajokhai/cross-talk/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/ajokhai/cross-talk/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/ajokhai/cross-talk/compare/v2.3.0...v2.4.0

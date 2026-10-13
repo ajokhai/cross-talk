@@ -30,7 +30,7 @@ A few rules the hub enforces:
 ## Install
 
 ```sh
-npm install -g github:ajokhai/cross-talk
+npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz
 ```
 
 This installs two commands: `crosstalk` (CLI and hub) and `crosstalk-mcp` (an MCP server on stdio). Node 18 or later is required.
