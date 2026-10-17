@@ -34,6 +34,11 @@ export interface DeviceBridgeOptions {
   maxPayloadBytes?: number;
   /** Forward other agents' lock activity to the device as XDialect frames. Default true. */
   forwardLockEvents?: boolean;
+  /**
+   * While the link is up, tell the hub this often that the device is still
+   * reading, so a quiet channel doesn't make it look idle. Default 60000 ms.
+   */
+  attentionIntervalMs?: number;
 }
 
 const encoder = new TextEncoder();
@@ -173,14 +178,24 @@ export class DeviceBridge extends EventEmitter {
     const channel = client.channel(this.options.channel) ?? (await client.joinChannel(this.options.channel));
     this.channel = channel;
 
-    const onMessage = (m: ChannelMessage) =>
-      this.toDevice(BinaryOpcode.BROADCAST, this.attributed(m.from.name, m.kind === 'shorthand' && m.shorthand ? m.shorthand.raw : m.content));
+    // A device handles frames as they arrive, so handing one over is reading it.
+    // Over a dead link nothing is sent, and the hub sees the device fall behind.
+    const onMessage = (m: ChannelMessage) => {
+      if (this.toDevice(BinaryOpcode.BROADCAST, this.attributed(m.from.name, m.kind === 'shorthand' && m.shorthand ? m.shorthand.raw : m.content))) {
+        channel.markRead(m.id).catch(() => {});
+      }
+    };
     const onDm = (m: DirectMessage) => this.toDevice(BinaryOpcode.DIRECT_MSG, this.attributed(m.from.name, m.content));
     const onEvent = (f: ServerFrame) => this.toDeviceEvent(f);
     channel.on('message', onMessage);
     client.on('dm', onDm);
     client.on('event', onEvent);
+    const attending = setInterval(() => {
+      if (this.options.transport.isConnected) channel.markRead().catch(() => {});
+    }, this.options.attentionIntervalMs ?? 60_000);
+    attending.unref?.();
     this.detach.push(() => {
+      clearInterval(attending);
       channel.off('message', onMessage);
       client.off('dm', onDm);
       client.off('event', onEvent);
@@ -364,13 +379,15 @@ export class DeviceBridge extends EventEmitter {
     this.toDevice(opcode, payload, { isResponse: true });
   }
 
-  private toDevice(opcode: BinaryOpcode, payload: Buffer, flags: BinaryFrame['flags'] = {}): void {
-    if (this.stopped || !this.options.transport.isConnected) return;
+  /** Returns whether the frame went out. */
+  private toDevice(opcode: BinaryOpcode, payload: Buffer, flags: BinaryFrame['flags'] = {}): boolean {
+    if (this.stopped || !this.options.transport.isConnected) return false;
     if (payload.length > this.maxPayload) {
       // Callers size payloads to fit; this only guards against a bug turning into a malformed frame.
       this.report(new Error(`Refused to send a ${payload.length}-byte payload (device limit ${this.maxPayload})`));
-      return;
+      return false;
     }
     this.options.transport.send(BinaryCodec.encode({ opcode, flags, timestamp: Date.now(), payload }));
+    return true;
   }
 }

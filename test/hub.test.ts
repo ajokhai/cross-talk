@@ -532,3 +532,22 @@ test('claims are dropped when their owner leaves', async () => {
   await b.ok({ type: 'channel.leave', channel: room });
   assert.equal(a.events('claim.updated').at(-1).claim.status, 'dropped');
 });
+
+test('read receipts show who has read each message', async () => {
+  const { agent } = setup();
+  const a = agent('alice');
+  const b = agent('bob');
+  const c = agent('carol');
+  const room = (await a.ok<ChannelSnapshot>({ type: 'channel.create' })).channel.id;
+  await b.ok({ type: 'channel.join', channel: room });
+  await c.ok({ type: 'channel.join', channel: room });
+  const one = await a.ok({ type: 'message.send', channel: room, content: 'one' });
+  await a.ok({ type: 'message.send', channel: room, content: 'two' });
+  await b.ok({ type: 'channel.read', channel: room, upTo: one.id });
+  const { receipts } = await a.ok({ type: 'channel.receipts', channel: room });
+  assert.deepEqual(receipts.map((r: any) => [r.readBy.map((x: any) => x.name).sort(), r.unreadBy.map((x: any) => x.agent.name).sort()]), [
+    [['bob'], ['carol']],
+    [[], ['bob', 'carol']]
+  ]);
+  assert.equal((await a.ok({ type: 'channel.receipts', channel: room, limit: 1 })).receipts.length, 1);
+});

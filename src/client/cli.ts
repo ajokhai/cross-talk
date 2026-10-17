@@ -4,14 +4,14 @@ import readline from 'node:readline';
 import { Command } from 'commander';
 import { bold, cyan, dim, green, magenta, red, yellow } from 'colorette';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
-import { HttpAgent } from './http.js';
+import { HttpAgent, httpBase } from './http.js';
 import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
-import type { ChannelMessage, DirectMessage, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
+import type { ChannelMessage, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 
 const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().username}@${os.hostname().split('.')[0]}`;
@@ -159,6 +159,51 @@ channel
       if (!channels.length) return console.log(dim('No public channels. Conversations are private unless created with --public.'));
       for (const c of channels) {
         console.log(`${bold('#' + c.name)} ${c.id} ${dim(`${c.memberCount}/${c.maxMembers}`)}${c.topic ? `  ${c.topic}` : ''}`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+channel
+  .command('status <address>')
+  .description('Who is really attending: last read and unread per member, claims, and who hasn\'t read each recent message. Read-only: does not join')
+  .option('-m, --messages <n>', 'recent messages to show receipts for', '10')
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .option('--json', 'print raw JSON')
+  .action(async (address: string, opts) => {
+    try {
+      const base = `${httpBase(opts.url)}/api/channels/${encodeURIComponent(address.trim())}`;
+      const headers: Record<string, string> = process.env.CROSSTALK_AUTH_TOKEN ? { 'X-CrossTalk-Token': process.env.CROSSTALK_AUTH_TOKEN } : {};
+      const get = async (path: string) => {
+        const res = await fetch(base + path, { headers });
+        const data: any = await res.json().catch(() => ({}));
+        if (!res.ok) throw new CrossTalkError(data?.error?.code ?? 'internal', data?.error?.message ?? `HTTP ${res.status}`);
+        return data;
+      };
+      const snap: ChannelSnapshot = await get('');
+      const { receipts }: { receipts: MessageReceipt[] } = await get(`/receipts?limit=${Number(opts.messages) || 10}`);
+      if (opts.json) return console.log(JSON.stringify({ ...snap, receipts }, null, 2));
+
+      const c = snap.channel;
+      console.log(`${bold('#' + c.name)}${c.topic ? `  ${c.topic}` : ''} ${dim(`${c.memberCount}/${c.maxMembers} members, questions ${c.questions}`)}`);
+      const att = new Map((snap.attention ?? []).map(a => [a.agent.id, a]));
+      for (const m of snap.members) {
+        const a = att.get(m.id);
+        const read = a ? `${a.connected ? 'connected' : red('disconnected')}, last read ${ago(a.lastReadAt)}${a.unread ? `, ${a.unread} unread` : ''}` : '';
+        console.log(`  ${bold(cyan(m.name))} ${dim(m.status + (m.currentTask ? `: ${m.currentTask}` : ''))}  ${read}${a?.idle ? ' ' + yellow('IDLE') : ''}`);
+      }
+      for (const cl of snap.claims ?? []) {
+        const line = `"${cl.task}" by ${cl.owner.name}, last update ${ago(cl.lastHeartbeat)} (every ${Math.round(cl.everyMs / 60_000)}m)`;
+        console.log(cl.status === 'stalled' ? `  ${yellow('⚠ stalled')} ${line}` : `  ${green('◆ claim')} ${line}`);
+      }
+      const byId = new Map(snap.messages.map(m => [m.id, m]));
+      if (receipts.length) console.log(dim('Recent messages:'));
+      for (const r of receipts) {
+        const m = byId.get(r.message);
+        const text = m ? (m.content.length > 70 ? m.content.slice(0, 69) + '…' : m.content) : '';
+        const unread = r.unreadBy.map(u => (u.connected ? u.agent.name : `${u.agent.name} (offline)`));
+        console.log(`  ${time(r.timestamp)} ${bold(r.from.name)}: ${text}  ${unread.length ? yellow(`unread by ${unread.join(', ')}`) : dim('read by all')}`);
       }
     } catch (err) {
       fail(err);

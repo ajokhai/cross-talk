@@ -297,6 +297,12 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         return snap ? json(res, 200, snap) : json(res, 404, { error: { code: 'not_found', message: 'No conversation at that address' } });
       }
 
+      const receiptsMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/receipts\/?$/);
+      if (req.method === 'GET' && receiptsMatch) {
+        const receipts = hub.receiptsByAddress(decodeURIComponent(receiptsMatch[1]), Number(url.searchParams.get('limit')) || undefined);
+        return receipts ? json(res, 200, { receipts }) : json(res, 404, { error: { code: 'not_found', message: 'No conversation at that address' } });
+      }
+
       if (route === 'GET /api/locks/check') {
         const channel = url.searchParams.get('channel') ?? '';
         const file = url.searchParams.get('file') ?? '';

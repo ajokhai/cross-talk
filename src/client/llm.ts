@@ -154,17 +154,25 @@ async function hubLink(options: ModelAgentOptions): Promise<{ link: ModelLink; c
   client.on('error', () => {});
   const channel = await client.joinChannel(options.channel);
   const me = () => client.agent.id;
+  // Always listening: keep the hub from showing the model as idle in a quiet channel.
+  const attending = setInterval(() => channel.markRead().catch(() => {}), 60_000);
+  attending.unref?.();
   const link: ModelLink = {
     channelName: channel.name,
     history: channel.messages.map(m => ({ from: m.from.name, text: m.content, mine: m.from.id === me() })),
     onMessage: cb => channel.on('message', (m: ChannelMessage) => {
+      // The model sees every message as it arrives (it keeps them as context), so it is reading.
+      channel.markRead(m.id).catch(() => {});
       if (m.from.id !== me()) cb({ from: m.from.name, fromId: m.from.id, text: m.content, fromModel: channel.members.get(m.from.id)?.role === MODEL_ROLE });
     }),
     onDirect: cb => client.on('dm', (m: DirectMessage) => cb({ from: m.from.name, fromId: m.from.id, text: m.content, fromModel: false, replyExpected: m.replyExpected })),
     send: async text => { await channel.send(text); },
     dm: async (to, text) => { await client.dm(to, text, { replyExpected: false }); },
     status: async (state, task) => { await client.setStatus(state, task); },
-    close: () => client.close()
+    close: () => {
+      clearInterval(attending);
+      return client.close();
+    }
   };
   return { link, client, channel };
 }

@@ -157,6 +157,16 @@ export interface MemberAttention {
   idle: boolean;
 }
 
+/** Who has and hasn't read one message. */
+export interface MessageReceipt {
+  message: string;
+  from: AgentRef;
+  timestamp: number;
+  readBy: AgentRef[];
+  /** `connected: false`: the transport is gone, so it hasn't even been delivered yet. */
+  unreadBy: Array<{ agent: AgentRef; connected: boolean }>;
+}
+
 /** A task an agent has taken on, with heartbeats so a silent "on it" shows up as stalled. */
 export interface TaskClaim {
   id: string;
@@ -236,6 +246,8 @@ export type RequestFrame =
   | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode }
   /** Marks the channel read, up to message `upTo` (default: everything so far). */
   | { type: 'channel.read'; id: string; channel: string; upTo?: string }
+  /** Read receipts for the newest `limit` messages (default 20, max 100). */
+  | { type: 'channel.receipts'; id: string; channel: string; limit?: number }
   /** Takes on a task. `everySeconds`: how often you'll post progress (default 600, 60 to 7200). */
   | { type: 'claim.create'; id: string; channel: string; task: string; everySeconds?: number; paths?: string[] }
   /**
@@ -269,6 +281,7 @@ export interface ResultData {
   'channel.configure': ChannelInfo;
   'channel.read': MemberAttention;
   'channel.close': { channel: string };
+  'channel.receipts': { receipts: MessageReceipt[] };
   'claim.create': TaskClaim;
   'claim.update': { claims: TaskClaim[] };
 }

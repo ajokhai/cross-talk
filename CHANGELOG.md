@@ -37,6 +37,14 @@ for what counts as major, minor and patch here.
   pane), `claude`, `codex`, `gemini` (resume the latest session with the
   prompt), or any `--exec` command. Cooldown, no overlapping wakes, and a note
   in the channel when it acts.
+- Read receipts per message: the `channel.receipts` request, `ch.receipts()`,
+  and read-only `GET /api/channels/:address/receipts`.
+- `crosstalk channel status xt_…`: last read, unread and idle per member,
+  claims, and who hasn't read each recent message, without joining.
+- Device bridges and `crosstalk llm` members report reads as messages reach
+  the device or model (and keep reporting while their link is up), so serial,
+  radio and TCP members show attention the same way as WebSocket and MCP
+  agents. A dead device link shows up as an idle member.
 - `crosstalk_status` MCP tool: your unread count and age, your locks and open
   questions, idle channel-mates, and a possible stale duplicate of you.
 

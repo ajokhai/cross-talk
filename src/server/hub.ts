@@ -14,6 +14,7 @@ import {
   type HelloFrame,
   type HubError,
   type MemberAttention,
+  type MessageReceipt,
   type RequestFrame,
   type ResultData,
   type ServerFrame,
@@ -395,6 +396,7 @@ export class MeshHub {
       }
       case 'channel.read': return this.readChannel(conn, f.channel, f.upTo);
       case 'channel.close': return this.closeChannel(conn, f.channel, f.ownerKey);
+      case 'channel.receipts': return { receipts: this.receipts(this.memberChannel(conn, f.channel), f.limit) };
       case 'claim.create': return this.createClaim(conn, f.channel, f.task, f.everySeconds, f.paths);
       case 'claim.update': return this.updateClaims(conn, f.channel, f.claim, f.note, f.status);
       case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata);
@@ -616,6 +618,31 @@ export class MeshHub {
       const channel = this.channels.get(id);
       if (channel) this.markRead(channel, conn.agent.id);
     }
+  }
+
+  /** Per message: which members have read it. Newest last. */
+  private receipts(channel: Channel, limit?: unknown): MessageReceipt[] {
+    const size = Math.max(1, Math.min(typeof limit === 'number' ? Math.floor(limit) : 20, 100));
+    const first = channel.posted - channel.history.length + 1;
+    const start = Math.max(0, channel.history.length - size);
+    return channel.history.slice(start).map((m, i) => {
+      const seq = first + start + i;
+      const receipt: MessageReceipt = { message: m.id, from: m.from, timestamp: m.timestamp, readBy: [], unreadBy: [] };
+      for (const [id, read] of channel.reads) {
+        const conn = this.agents.get(id);
+        if (!conn?.agent || id === m.from.id) continue;
+        const ref = { id, name: conn.agent.name };
+        if (read.seq >= seq) receipt.readBy.push(ref);
+        else receipt.unreadBy.push({ agent: ref, connected: conn.droppedAt === undefined });
+      }
+      return receipt;
+    });
+  }
+
+  /** Read-only receipts for HTTP observers. Knowing the address is the capability. */
+  receiptsByAddress(address: string, limit?: number): MessageReceipt[] | undefined {
+    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    return channel ? this.receipts(channel, limit) : undefined;
   }
 
   private attention(channel: Channel, agentId: string): MemberAttention | undefined {

@@ -209,3 +209,33 @@ test('ResyncingLink recovers from line noise and closes once', () => {
   link.close();
   setImmediate(() => assert.equal(closes, 1));
 });
+
+test('attention over a device link: a live link reads, a dead one falls behind and is reported idle', async () => {
+  const hub = await startServer({ port: 0, quiet: true, hub: { idleAfterMs: 300 } });
+  const agent = await CrossTalk.connect({ name: 'laptop', url: hub.url, reconnect: false });
+  const ch = await agent.createChannel('hardware');
+  const link = new FakeLink();
+  const bridge = new DeviceBridge({ transport: link, channel: ch.address, name: 'pico', hub: { url: hub.url, reconnect: false }, registerWindowMs: 0, attentionIntervalMs: 50 });
+  try {
+    await bridge.start();
+    // A quiet channel doesn't make a listening device look idle.
+    await new Promise(r => setTimeout(r, 400));
+    assert.equal((await ch.send('@pico report')).idleMentions, undefined);
+    await link.next(f => f.opcode === BinaryOpcode.BROADCAST);
+    await new Promise(r => setTimeout(r, 50));
+    const [first] = (await ch.receipts(1));
+    assert.deepEqual(first.readBy.map(a => a.name), ['pico']);
+
+    // The serial cable is pulled: the hub can't tell, but the device stops reading.
+    link.isConnected = false;
+    await new Promise(r => setTimeout(r, 400));
+    const sent = await ch.send('@pico report again');
+    assert.equal(sent.idleMentions?.[0].agent.name, 'pico');
+    const [last] = await ch.receipts(1);
+    assert.deepEqual(last.unreadBy.map(u => u.agent.name), ['pico']);
+  } finally {
+    await bridge.stop();
+    await agent.close();
+    await hub.close();
+  }
+});

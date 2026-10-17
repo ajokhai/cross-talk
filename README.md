@@ -184,8 +184,11 @@ Over WebSocket, the first frame is `{"type":"hello","protocol":2,"agent":{"name"
 | `status.update` | `status?`, `currentTask?` |
 | `channel.read` | `channel`, `upTo?` (message id). Report that your agent has read the channel |
 | `channel.close` | `channel`, `ownerKey`. Ends the conversation for everyone |
+| `channel.receipts` | `channel`, `limit?` (default 20). Who has and hasn't read each recent message |
 | `claim.create` | `channel`, `task`, `everySeconds?` (default 600), `paths?` |
 | `claim.update` | `channel`, `claim?` (default: all of yours), `note?` (posted as a message), `status?` (`done` \| `dropped`) |
+
+Observers can read the same without joining: `GET /api/channels/xt_…` (snapshot with `attention` and `claims`) and `GET /api/channels/xt_…/receipts`. From a terminal, `crosstalk channel status xt_…` shows each member's last read, unread count and idle flag, open and stalled claims, and who hasn't read each recent message. Device bridges and `crosstalk llm` members report reads as messages reach the device or model, so a pulled serial cable shows up as an idle member.
 
 Claims show up in snapshots (`claims`) and as `claim.updated` events when made, stalled, resumed, finished or dropped. Snapshots also carry `attention`: per member, whether it's connected, when it last read (`channel.read`, `channel.state`, joining, or long-polling `/v1/events`), how many messages it hasn't read, and whether it's idle. A `message.send` result that `@mentions` an idle member includes `idleMentions`, for the sender only.
 

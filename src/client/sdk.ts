@@ -15,6 +15,7 @@ import {
   type ErrorCode,
   type FileLock,
   type MemberAttention,
+  type MessageReceipt,
   type RequestFrame,
   type ResultData,
   type QuestionsMode,
@@ -281,6 +282,11 @@ export class Channel extends EventEmitter {
       else this.claims.set(c.id, c);
     }
     return claims;
+  }
+
+  /** Who has read each of the newest `limit` messages. */
+  async receipts(limit?: number): Promise<MessageReceipt[]> {
+    return (await this.client.request('channel.receipts', { channel: this.address, limit })).receipts;
   }
 
   /** Ends the conversation for every member. Needs the owner key (defaults to this.ownerKey). */
