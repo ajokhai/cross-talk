@@ -13,6 +13,7 @@ import {
   type FileLock,
   type HelloFrame,
   type HubError,
+  type MemberAttention,
   type RequestFrame,
   type ResultData,
   type ServerFrame,
@@ -55,6 +56,8 @@ export interface HubOptions {
    * resume token and pick up the frames it missed. 0 disables.
    */
   presenceGraceMs?: number;
+  /** A member that hasn't read a channel for this long is shown as idle, and senders who @mention it are warned. */
+  idleAfterMs?: number;
   /** Token bucket per connection: burst size and refill per second. */
   rateLimit?: { burst: number; perSecond: number };
   locks?: LockManagerOptions;
@@ -90,6 +93,10 @@ interface Channel {
   questionsMode: 'on' | 'off';
   /** Open questions by id. */
   questions: Map<string, UserQuestion>;
+  /** Messages ever posted here; a message's sequence number is its position in that count. */
+  posted: number;
+  /** Per member: when it last read, and the sequence number it had read up to. */
+  reads: Map<string, { at: number; seq: number }>;
 }
 
 /** Frames kept for a dropped agent before it is evicted instead of resumed. */
@@ -175,6 +182,7 @@ export class MeshHub {
       emptyChannelTtlMs: options.emptyChannelTtlMs ?? 60 * 60 * 1000,
       unusedChannelTtlMs: options.unusedChannelTtlMs ?? 10 * 60 * 1000,
       presenceGraceMs: options.presenceGraceMs ?? 2 * 60 * 1000,
+      idleAfterMs: options.idleAfterMs ?? 5 * 60 * 1000,
       rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 }
     };
   }
@@ -374,7 +382,13 @@ export class MeshHub {
       case 'channel.join': return this.joinChannel(conn, f.channel, f.since);
       case 'channel.leave': return this.leaveChannel(conn, f.channel);
       case 'channel.list': return this.listChannels(conn, f.scope ?? 'joined', f.limit, f.cursor);
-      case 'channel.state': return this.snapshot(this.memberChannel(conn, f.channel), f.since);
+      case 'channel.state': {
+        const channel = this.memberChannel(conn, f.channel);
+        this.markRead(channel, conn.agent!.id);
+        return this.snapshot(channel, f.since);
+      }
+      case 'channel.read': return this.readChannel(conn, f.channel, f.upTo);
+      case 'channel.close': return this.closeChannel(conn, f.channel, f.ownerKey);
       case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata);
       case 'shorthand.send': return this.postShorthand(conn, f.channel, f.shorthand);
       case 'dm.send': return this.sendDirect(conn, f.to, f.content ?? f.text, f.replyExpected, f.metadata);
@@ -425,7 +439,9 @@ export class MeshHub {
       history: [],
       ownerKeyHash: MeshHub.hashKey(ownerKey),
       questionsMode: 'on',
-      questions: new Map()
+      questions: new Map(),
+      posted: 0,
+      reads: new Map()
     };
     this.channels.set(channel.id, channel);
     this.addMember(conn, channel);
@@ -440,12 +456,25 @@ export class MeshHub {
       this.ensureRoom(conn);
       this.addMember(conn, channel);
     }
+    this.markRead(channel, conn.agent!.id);
     return this.snapshot(channel, since);
   }
 
   private leaveChannel(conn: Connection, address: unknown): { channel: string } {
     const channel = this.memberChannel(conn, address);
     this.removeMember(conn, channel.id, 'left');
+    return { channel: channel.id };
+  }
+
+  /** Ends the conversation for everyone. Members are told, then removed; locks and open questions go with it. */
+  private closeChannel(conn: Connection, address: unknown, ownerKey: unknown): { channel: string } {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    for (const q of [...channel.questions.values()]) this.closeQuestion(channel, q, 'cancelled');
+    this.emit(channel, { type: 'channel.closed', channel: channel.id, by: conn.ref });
+    for (const id of channel.members) this.agents.get(id)?.channels.delete(channel.id);
+    channel.members.clear();
+    this.deleteChannel(channel);
     return { channel: channel.id };
   }
 
@@ -457,6 +486,7 @@ export class MeshHub {
 
   private addMember(conn: Connection, channel: Channel): void {
     channel.members.add(conn.agent!.id);
+    channel.reads.set(conn.agent!.id, { at: this.now(), seq: channel.posted });
     channel.emptySince = undefined;
     conn.channels.add(channel.id);
     this.emit(channel, { type: 'member.joined', channel: channel.id, agent: conn.agent! }, conn.agent!.id);
@@ -467,6 +497,7 @@ export class MeshHub {
     conn.channels.delete(id);
     if (!channel) return;
     channel.members.delete(conn.agent!.id);
+    channel.reads.delete(conn.agent!.id);
 
     // Nobody is left to receive the answer.
     for (const q of [...channel.questions.values()]) {
@@ -533,9 +564,62 @@ export class MeshHub {
       channel: this.info(channel),
       members: [...channel.members].map(id => this.agents.get(id)?.agent).filter((a): a is AgentInfo => !!a),
       locks: this.locks.list(channel.id),
+      attention: [...channel.members].map(id => this.attention(channel, id)).filter((a): a is MemberAttention => !!a),
       messages: seen >= 0 ? history.slice(seen + 1) : history,
       questions: [...channel.questions.values()]
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Attention: who is actually reading, not just connected
+  // -------------------------------------------------------------------------
+
+  /** Records that a member has seen the channel, up to message `upTo` or everything so far. */
+  private markRead(channel: Channel, agentId: string, upTo?: unknown): void {
+    const read = channel.reads.get(agentId);
+    if (!read) return;
+    let seq = channel.posted;
+    if (typeof upTo === 'string') {
+      const at = channel.history.findIndex(m => m.id === upTo);
+      if (at >= 0) seq = channel.posted - channel.history.length + 1 + at;
+    }
+    read.at = this.now();
+    read.seq = Math.max(read.seq, seq);
+  }
+
+  private readChannel(conn: Connection, address: unknown, upTo: unknown): MemberAttention {
+    const channel = this.memberChannel(conn, address);
+    this.markRead(channel, conn.agent!.id, upTo);
+    return this.attention(channel, conn.agent!.id)!;
+  }
+
+  /**
+   * An HTTP session long-polling for events is a process that is reading
+   * (a `crosstalk wait`, a curl loop): it counts as reading all its channels.
+   */
+  polled(conn: Connection): void {
+    if (!conn.agent) return;
+    for (const id of conn.channels) {
+      const channel = this.channels.get(id);
+      if (channel) this.markRead(channel, conn.agent.id);
+    }
+  }
+
+  private attention(channel: Channel, agentId: string): MemberAttention | undefined {
+    const conn = this.agents.get(agentId);
+    const read = channel.reads.get(agentId);
+    if (!conn?.agent || !read) return undefined;
+    const first = channel.posted - channel.history.length + 1;
+    const pending = channel.history.filter((m, i) => first + i > read.seq && m.from.id !== agentId);
+    const out: MemberAttention = {
+      agent: { id: agentId, name: conn.agent.name },
+      connected: conn.droppedAt === undefined,
+      lastReadAt: read.at,
+      unread: pending.length,
+      idle: this.now() - read.at >= this.opts.idleAfterMs
+    };
+    if (pending.length) out.oldestUnreadAt = pending[0].timestamp;
+    return out;
   }
 
   /**
@@ -602,6 +686,7 @@ export class MeshHub {
   private record(channel: Channel, message: ChannelMessage, sender: Connection): ChannelMessage {
     const mentions = this.mentioned(channel, message.shorthand?.raw ?? message.content);
     if (mentions.length) message.mentions = mentions;
+    channel.posted++;
     channel.history.push(message);
     if (channel.history.length > this.opts.historyLimit) channel.history.shift();
     channel.lastActivity = message.timestamp;
@@ -611,7 +696,11 @@ export class MeshHub {
     } catch (err) {
       console.error('[crosstalk] onMessage hook failed:', err);
     }
-    return message;
+    const idle = (mentions ?? [])
+      .map(m => this.attention(channel, m.id))
+      .filter((a): a is MemberAttention => !!a && (a.idle || !a.connected));
+    // A copy, so the warning goes back to the sender only and never into history.
+    return idle.length ? { ...message, idleMentions: idle } : message;
   }
 
   private postMessage(conn: Connection, address: unknown, content: unknown, metadata: unknown): ChannelMessage {

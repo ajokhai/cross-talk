@@ -407,3 +407,78 @@ test('message.send and dm.send accept text as an alias for content', async () =>
   assert.equal((await a.ok({ type: 'message.send', channel: snap.channel.id, text: 'hi' })).content, 'hi');
   assert.equal((await a.ok({ type: 'dm.send', to: b.id, text: 'psst' })).content, 'psst');
 });
+
+test('attention: members who stop reading fall behind, and senders who @mention them are warned', async () => {
+  const { agent, tick } = setup({ idleAfterMs: 5 * 60_000 });
+  const a = agent('alice');
+  const g = agent('gemini');
+  const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
+  const room = snap.channel.id;
+  await g.ok({ type: 'channel.join', channel: room });
+
+  // Gemini says "on it", then never reads again.
+  await g.ok({ type: 'message.send', channel: room, content: 'on it' });
+  const fresh = await a.ok({ type: 'message.send', channel: room, content: '@gemini first step?' });
+  assert.equal(fresh.idleMentions, undefined, 'a member that read recently is not idle');
+
+  tick(6 * 60_000);
+  await a.ok({ type: 'channel.read', channel: room });
+  const nudge = await a.ok({ type: 'message.send', channel: room, content: '@gemini status?' });
+  assert.equal(nudge.idleMentions.length, 1);
+  assert.equal(nudge.idleMentions[0].agent.name, 'gemini');
+  assert.equal(nudge.idleMentions[0].unread, 2);
+  assert.equal(nudge.idleMentions[0].idle, true);
+  assert.equal(g.events('message').at(-1).message.idleMentions, undefined, 'the warning goes to the sender only');
+
+  const state = await a.ok<ChannelSnapshot>({ type: 'channel.state', channel: room });
+  const ga = state.attention.find(x => x.agent.id === g.id)!;
+  assert.equal(ga.unread, 2);
+  assert.equal(ga.idle, true);
+  assert.equal(ga.connected, true);
+  assert.equal(state.attention.find(x => x.agent.id === a.id)!.unread, 0, 'own messages never count as unread');
+
+  // Reading part-way, then all the way.
+  const mid = await g.ok({ type: 'channel.read', channel: room, upTo: fresh.id });
+  assert.equal(mid.unread, 1);
+  assert.equal(mid.idle, false);
+  assert.equal((await g.ok({ type: 'channel.read', channel: room })).unread, 0);
+  assert.equal((await a.ok({ type: 'message.send', channel: room, content: '@gemini thanks' })).idleMentions, undefined);
+});
+
+test('an HTTP-style poll counts as reading every joined channel', async () => {
+  const { hub, agent, tick } = setup({ idleAfterMs: 60_000 });
+  const a = agent('alice');
+  const b = agent('bob');
+  const room = (await a.ok<ChannelSnapshot>({ type: 'channel.create' })).channel.id;
+  await b.ok({ type: 'channel.join', channel: room });
+  await a.ok({ type: 'message.send', channel: room, content: 'hi' });
+  tick(120_000);
+  hub.polled(b.conn);
+  const state = await a.ok<ChannelSnapshot>({ type: 'channel.state', channel: room });
+  const ba = state.attention.find(x => x.agent.id === b.id)!;
+  assert.equal(ba.unread, 0);
+  assert.equal(ba.idle, false);
+});
+
+test('the owner can close a channel for everyone', async () => {
+  const { agent } = setup();
+  const a = agent('alice');
+  const b = agent('bob');
+  const created = await a.ok({ type: 'channel.create', name: 'auth' });
+  const room = created.channel.id;
+  await b.ok({ type: 'channel.join', channel: room });
+  await b.ok({ type: 'lock.acquire', channel: room, file: 'src/a.ts', reason: 'x' });
+  await b.ok({ type: 'question.ask', channel: room, question: 'ok?' });
+
+  assert.equal((await b.err({ type: 'channel.close', channel: room, ownerKey: 'xk_wrong' })).code, 'forbidden');
+  await a.ok({ type: 'channel.close', channel: room, ownerKey: created.ownerKey });
+
+  const closed = b.events('channel.closed');
+  assert.equal(closed.length, 1);
+  assert.equal(closed[0].by.name, 'alice');
+  assert.equal(b.events('question.closed')[0].question.status, 'cancelled');
+  assert.equal(b.conn.channels.size, 0);
+  assert.equal(a.conn.channels.size, 0);
+  assert.equal((await b.err({ type: 'channel.state', channel: room })).code, 'not_member');
+  assert.equal((await b.err({ type: 'channel.join', channel: room })).code, 'not_found');
+});

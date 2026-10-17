@@ -18,6 +18,12 @@
  * owner key (returned once, to the creator, by `channel.create`) can answer
  * or switch questions off. With questions off, a new question comes straight
  * back `unattended`, telling the agent to use its own judgement.
+ *
+ * Attention: being connected is not the same as reading. A client reports
+ * that its agent has actually seen the channel with `channel.read` (joining
+ * and `channel.state` count too). The hub tracks each member's last read and
+ * unread count, shows them in snapshots as `attention`, and warns a sender
+ * when an `@mention` names someone who hasn't read in a while.
  */
 
 export const PROTOCOL_VERSION = 2;
@@ -85,6 +91,12 @@ export interface ChannelMessage {
   metadata?: Record<string, unknown>;
   /** Channel members addressed as `@name` in the content, so wait loops can pick out what needs them. */
   mentions?: AgentRef[];
+  /**
+   * Only on the sender's own `message.send` / `shorthand.send` result, never
+   * broadcast: mentioned members who haven't read the channel recently and
+   * may not see this soon.
+   */
+  idleMentions?: MemberAttention[];
   /** Present when kind === 'shorthand'. `content` holds the English expansion. */
   shorthand?: {
     raw: string;
@@ -124,9 +136,26 @@ export interface UserQuestion {
   closedAt?: number;
 }
 
+/** Whether a member is actually reading a channel, not just connected to it. */
+export interface MemberAttention {
+  agent: AgentRef;
+  /** False while the transport is gone and the hub is holding the member's place for a reconnect. */
+  connected: boolean;
+  /** When the member last read this channel (`channel.read`, `channel.state`, joining, or polling for events). */
+  lastReadAt: number;
+  /** Messages from others posted since that read. */
+  unread: number;
+  /** Timestamp of the oldest of those. */
+  oldestUnreadAt?: number;
+  /** Hasn't read for longer than the hub's idle threshold. */
+  idle: boolean;
+}
+
 export interface ChannelSnapshot {
   channel: ChannelInfo;
   members: AgentInfo[];
+  /** One entry per member: who is reading and who has fallen behind. */
+  attention: MemberAttention[];
   locks: FileLock[];
   messages: ChannelMessage[];
   /** Open questions for the owner. */
@@ -174,7 +203,11 @@ export type RequestFrame =
   | { type: 'question.ask'; id: string; channel: string; question: string; options?: string[] }
   | { type: 'question.cancel'; id: string; channel: string; question: string }
   | { type: 'question.answer'; id: string; channel: string; question: string; answer: string; ownerKey: string }
-  | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode };
+  | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode }
+  /** Marks the channel read, up to message `upTo` (default: everything so far). */
+  | { type: 'channel.read'; id: string; channel: string; upTo?: string }
+  /** Ends the conversation for everyone: members are removed, locks and open questions dropped. Needs the owner key. */
+  | { type: 'channel.close'; id: string; channel: string; ownerKey: string };
 
 export type ClientFrame = HelloFrame | RequestFrame;
 
@@ -196,6 +229,8 @@ export interface ResultData {
   'question.cancel': UserQuestion;
   'question.answer': UserQuestion;
   'channel.configure': ChannelInfo;
+  'channel.read': MemberAttention;
+  'channel.close': { channel: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +271,8 @@ export type ServerFrame =
   | { type: 'lock.released'; channel: string; file: string; by: AgentRef; reason: 'released' | 'expired' | 'disconnected' }
   | { type: 'lock.contended'; lock: FileLock; requester: AgentRef; reason: string }
   | { type: 'channel.updated'; channel: ChannelInfo }
+  /** The owner closed the channel; you are no longer in it. */
+  | { type: 'channel.closed'; channel: string; by: AgentRef }
   | { type: 'question.asked'; question: UserQuestion }
   /** Answered, cancelled or unattended. */
   | { type: 'question.closed'; question: UserQuestion };

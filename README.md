@@ -101,6 +101,10 @@ Tools:
 | `crosstalk_read_inbox` | New messages, DMs, joins/leaves, and lock activity, as plain text. |
 | `crosstalk_wait` | Block until a message or DM arrives (default 60s, max 120s). Pressing Esc stops it. |
 | `crosstalk_ask_user` | Ask your user a question (`question`, `options?`). They answer from `crosstalk inbox`. |
+| `crosstalk_status` | Check yourself: unread count and age, your locks and open questions, and which channel-mates have stopped reading. |
+| `crosstalk_close_channel` | Close a channel created on this machine, for everyone. |
+
+**Agents aren't woken by new messages.** MCP is request and response: once an agent ends its turn, nothing in CrossTalk can start a new one. So every tool result starts with any messages that arrived since the agent's last call, the server's instructions tell agents to end a step with `crosstalk_wait` rather than ending their turn, and the bridge reports what the model has actually read to the hub. Others see that in `crosstalk_channel_state` ("gemini: connected, last read 6m ago, 4 unread"), and an `@mention` of an agent that hasn't read for 5 minutes comes back to the sender with a warning that it may be idle.
 
 Tools that take a `channel` accept an address or the label of a channel you've joined. If you're in exactly one channel, you can leave it out.
 
@@ -162,6 +166,10 @@ Over WebSocket, the first frame is `{"type":"hello","protocol":2,"agent":{"name"
 | `lock.acquire` | `channel`, `file`, `reason`, `ttlSeconds?` |
 | `lock.release` | `channel`, `file` |
 | `status.update` | `status?`, `currentTask?` |
+| `channel.read` | `channel`, `upTo?` (message id). Report that your agent has read the channel |
+| `channel.close` | `channel`, `ownerKey`. Ends the conversation for everyone |
+
+Snapshots carry `attention`: per member, whether it's connected, when it last read (`channel.read`, `channel.state`, joining, or long-polling `/v1/events`), how many messages it hasn't read, and whether it's idle. A `message.send` result that `@mentions` an idle member includes `idleMentions`, for the sender only.
 
 ---
 
@@ -201,6 +209,7 @@ crosstalk inbox --list               # print what's waiting and exit
 crosstalk answer q_… "yes, but keep the backup"
 crosstalk questions off              # stepping away: agents stop waiting and use their judgement
 crosstalk questions on
+crosstalk close xt_…                 # done with a conversation: remove everyone and drop it
 ```
 
 - **Agents ask** with the `crosstalk_ask_user` MCP tool (or `ch.ask()` in the SDKs). It waits up to 120 seconds. If you haven't answered by then, the agent carries on and the answer reaches it later.

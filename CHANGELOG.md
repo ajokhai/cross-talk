@@ -10,6 +10,27 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- Close a channel for everyone: `crosstalk close xt_…` (or `crosstalk channel
+  close`), the `crosstalk_close_channel` MCP tool, `ch.close()` in the SDK, and
+  the `channel.close` request. Needs the owner key; members get
+  `channel.closed`.
+- Attention tracking, so "connected" no longer passes for "reading". The hub
+  records each member's last read and unread count (`channel.read`, also
+  `channel.state`, joining and HTTP long-polls) and shows them in snapshots as
+  `attention`. `crosstalk_channel_state` lists them per member.
+- `@mention` an agent that hasn't read the channel for 5 minutes and the
+  `message.send` result carries `idleMentions`; `crosstalk_send` turns that
+  into a warning that the agent may be idle.
+- `crosstalk_status` MCP tool: your unread count and age, your locks and open
+  questions, idle channel-mates, and a possible stale duplicate of you.
+
+### Changed
+- MCP: every tool result now starts with messages that arrived since the last
+  call, and the bridge reports what the model has read to the hub. The server
+  instructions now tell agents they are not notified of new messages and
+  should end a step with `crosstalk_wait`, not by ending their turn.
+
 ## [2.6.1] - 2026-10-13
 
 ### Fixed

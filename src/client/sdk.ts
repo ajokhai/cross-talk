@@ -14,6 +14,7 @@ import {
   type DirectMessage,
   type ErrorCode,
   type FileLock,
+  type MemberAttention,
   type RequestFrame,
   type ResultData,
   type QuestionsMode,
@@ -78,7 +79,8 @@ function git(args: string[]): string | undefined {
  *
  * Events: 'message', 'member.joined', 'member.left', 'member.updated',
  * 'lock.acquired', 'lock.released', 'lock.contended', 'question.asked',
- * 'question.closed', 'updated' (channel settings changed).
+ * 'question.closed', 'updated' (channel settings changed), 'closed' (the
+ * owner closed the channel; you are no longer in it).
  */
 export class Channel extends EventEmitter {
   info: ChannelInfo;
@@ -88,6 +90,8 @@ export class Channel extends EventEmitter {
   readonly messages: ChannelMessage[] = [];
   /** Open questions for the owner, by id. */
   readonly questions = new Map<string, UserQuestion>();
+  /** Who was reading the channel, as of the last snapshot (join, refresh). */
+  attention: MemberAttention[] = [];
   /**
    * The owner key, present only on the client that created the channel.
    * Whoever holds it can answer questions and switch them off, so keep it out
@@ -121,6 +125,7 @@ export class Channel extends EventEmitter {
     this.messages.splice(0, this.messages.length, ...snapshot.messages);
     this.questions.clear();
     for (const q of snapshot.questions ?? []) this.questions.set(q.id, q);
+    this.attention = snapshot.attention ?? [];
   }
 
   /** @internal */
@@ -162,6 +167,9 @@ export class Channel extends EventEmitter {
       case 'channel.updated':
         this.info = frame.channel;
         this.emit('updated', frame.channel);
+        break;
+      case 'channel.closed':
+        this.emit('closed', frame.by);
         break;
     }
   }
@@ -231,6 +239,22 @@ export class Channel extends EventEmitter {
       file: this.client.relativePath(file)
     });
     this.locks.delete(released);
+  }
+
+  /**
+   * Tells the hub your agent has actually read the channel, up to message
+   * `upTo` (default: everything). Being connected isn't reading: call this
+   * when the messages reach the model, so others can see you're attending.
+   */
+  markRead(upTo?: string): Promise<MemberAttention> {
+    return this.client.request('channel.read', { channel: this.address, upTo });
+  }
+
+  /** Ends the conversation for every member. Needs the owner key (defaults to this.ownerKey). */
+  async close(ownerKey = this.ownerKey): Promise<void> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Closing needs this channel's owner key");
+    await this.client.request('channel.close', { channel: this.address, ownerKey });
+    this.client.forget(this.address);
   }
 
   /** Re-fetches members, locks and recent history from the hub. */
@@ -489,6 +513,10 @@ export class CrossTalk extends EventEmitter {
         return;
       case 'channel.updated':
         this.channels.get(frame.channel.id)?.handle(frame);
+        return;
+      case 'channel.closed':
+        this.channels.get(frame.channel)?.handle(frame);
+        this.forget(frame.channel);
         return;
     }
   }

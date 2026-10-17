@@ -345,7 +345,10 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         if (route === 'GET /v1/events') {
           const wait = Math.max(0, Math.min(Number(url.searchParams.get('wait') ?? 0) || 0, MAX_POLL_SECONDS));
           req.socket.setTimeout(0);
+          // A process blocked here is listening; when it returns, it has the events.
+          hub.polled(session.conn);
           const events = await session.poll(wait);
+          hub.polled(session.conn);
           if (!res.writableEnded) json(res, 200, { events });
           return;
         }

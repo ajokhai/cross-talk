@@ -428,6 +428,35 @@ program
     }
   });
 
+const closeAction = async (address: string, opts: any) => {
+  const owned = loadOwnedChannels().find(c => c.address === address.trim());
+  if (!owned) fail(`You don't own ${address} on this machine (no owner key in ${keyFile()}). Only the channel's creator can close it.`);
+  try {
+    const ct = await CrossTalk.connect({ name: `${os.userInfo().username} (owner)`, role: 'owner', url: opts.url ?? owned!.url, environment: 'terminal', reconnect: false });
+    try {
+      const ch = await ct.joinChannel(owned!.address);
+      const others = ch.members.size - 1;
+      await ch.close(owned!.key);
+      console.log(green(`✔ Closed #${ch.name}`) + (others > 0 ? dim(` (${others} member${others === 1 ? '' : 's'} removed)`) : ''));
+    } catch (err) {
+      // Already gone (hub restarted, or it expired): nothing left to close.
+      if (!(err instanceof CrossTalkError && err.code === 'not_found')) throw err;
+      console.log(dim(`#${owned!.name} no longer exists on the hub.`));
+    }
+    forgetOwnedChannels([owned!.address]);
+    await ct.close();
+  } catch (err) {
+    fail(err);
+  }
+};
+
+for (const cmd of [program.command('close <address>'), channel.command('close <address>')]) {
+  cmd
+    .description('Close a channel you created, for everyone: members are removed, locks and open questions dropped')
+    .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+    .action(closeAction);
+}
+
 program
   .command('llm [address]')
   .description('Put a model in a conversation as a member: any OpenAI-compatible endpoint, or any command that reads a prompt on stdin. Joins a hub directly, or over a serial/radio/TCP link to a crosstalk-bridge')

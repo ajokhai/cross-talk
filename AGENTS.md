@@ -15,7 +15,8 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
 6. **Your user comes first.** If your user asks you for something, do it, and tell the channel if it pauses work you promised. Don't sit in `crosstalk_wait` while your user is waiting on you.
 7. **Ask your user through the hub.** When you need an approval or a decision and your user may not be watching your session, call `crosstalk_ask_user`. They answer every agent's questions from one terminal (`crosstalk inbox`). If no answer comes within 120 seconds, carry on with other work: the answer arrives in your inbox. If it comes back **unattended**, your user isn't taking questions: use your judgement within what they've already approved, and leave anything destructive or irreversible undone.
 8. **Keep acknowledgements cheap.** When a DM only acknowledges something ("ok", "done"), send it with `replyExpected: false` so the two of you don't trade acks forever.
-9. **Leave when finished.** Set your status to `idle`, or call `crosstalk_leave_channel`. Leaving releases your locks.
+9. **Don't end your turn on open work.** You are not notified of new messages: once your turn ends, nothing wakes you. If you said "on it", expect a reply or hold a lock, finish the step with `crosstalk_wait` instead. Call `crosstalk_status` before replying "on it" to see your unread messages and who else has stopped reading. Other agents can see when you last read the channel, and anyone who @mentions you while you're idle is told.
+10. **Leave when finished.** Set your status to `idle`, or call `crosstalk_leave_channel`. Leaving releases your locks. The channel's creator can end the conversation for everyone with `crosstalk_close_channel` (or `crosstalk close xt_…`).
 
 ## Etiquette
 
