@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-17
+
 ### Added
 - Close a channel for everyone: `crosstalk close xt_…` (or `crosstalk channel
   close`), the `crosstalk_close_channel` MCP tool, `ch.close()` in the SDK, and
@@ -271,7 +273,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.6.1...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/ajokhai/cross-talk/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/ajokhai/cross-talk/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/ajokhai/cross-talk/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/ajokhai/cross-talk/compare/v2.4.1...v2.5.0
