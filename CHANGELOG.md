@@ -29,6 +29,12 @@ for what counts as major, minor and patch here.
   updates and lock activity are heartbeats; a missed one marks the claim
   stalled, `crosstalk inbox` rings, and the agent is nudged on its next tool
   call. `crosstalk_send` flags an "on it" with no claim behind it.
+- `crosstalk wake`: a supervisor for agents MCP can't wake. When the agent is
+  @mentioned and hasn't read the channel within the grace period, or its claim
+  stalls, it re-invokes the agent through an adapter: `tmux` (types into its
+  pane), `claude`, `codex`, `gemini` (resume the latest session with the
+  prompt), or any `--exec` command. Cooldown, no overlapping wakes, and a note
+  in the channel when it acts.
 - `crosstalk_status` MCP tool: your unread count and age, your locks and open
   questions, idle channel-mates, and a possible stale duplicate of you.
 

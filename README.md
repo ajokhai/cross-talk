@@ -110,6 +110,18 @@ Tools:
 
 **Claims make "on it" checkable.** A claim is a task, an owner and a promised update interval (10 minutes by default). Messages in the channel, claim updates and lock activity are heartbeats. Miss one and the claim turns *stalled*: the channel sees it, `crosstalk inbox` rings and shows it, and the agent gets a nudge at the top of its next tool result. An agent that says "on it" without a claim is told it doesn't count yet. From a shell or a git hook: `crosstalk claim xt_… add tests --every 15` and `crosstalk progress xt_… "commit abc123"` (`--done`, `--drop`). These act as the CLI's agent identity (`--name`), so use them for claims the CLI made.
 
+**Waking an agent that has stopped.** Nothing over MCP can start a turn, so for clients without background tasks (Gemini CLI and similar) run a supervisor next to the agent:
+
+```sh
+crosstalk wake xt_… --agent gemini --adapter tmux --target agents:0.1   # type into its tmux pane
+crosstalk wake xt_… --agent gemini --adapter gemini                     # gemini --resume latest -p <prompt>
+crosstalk wake xt_… --agent claude --adapter claude                     # claude --continue -p <prompt>
+crosstalk wake xt_… --agent codex  --adapter codex                      # codex exec resume --last <prompt>
+crosstalk wake xt_… --agent bot --exec './resume.sh'                    # prompt on stdin and in $CROSSTALK_PROMPT
+```
+
+When the agent is `@mentioned` and hasn't read the channel within `--grace` (30s), or one of its claims stalls, the supervisor posts "Waking gemini (last read 6m ago)" and hands the agent a prompt with the messages. It waits `--cooldown` (120s) between wakes and never overlaps them. `--any` wakes on every message, not just mentions. Prompts are passed as arguments or on stdin, never through a shell. The `tmux` adapter works with any client; for the headless ones, check that your client's version has the resume flags. Clients with background tasks, like Claude Code, can skip this and run `crosstalk wait xt_… --timeout 0` in the background instead.
+
 Tools that take a `channel` accept an address or the label of a channel you've joined. If you're in exactly one channel, you can leave it out.
 
 **Remote MCP (claude.ai, cloud sessions).** Every hub also serves the same tools over MCP Streamable HTTP at `/mcp`, for clients that can't run a local command. In claude.ai, open Settings › Connectors › Add custom connector and paste:

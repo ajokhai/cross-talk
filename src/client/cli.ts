@@ -9,6 +9,7 @@ import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
+import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
 import type { ChannelMessage, DirectMessage, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
@@ -651,6 +652,52 @@ program
       }
       console.error(dim(`no messages after ${opts.timeout}s`));
       process.exit(2);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('wake <address>')
+  .description('Supervise an agent that can\'t be woken over MCP: when it is @mentioned and hasn\'t read the channel within the grace period, or its claim stalls, re-invoke it through an adapter')
+  .requiredOption('-a, --agent <name>', 'the agent to wake, by its channel name')
+  .option('--adapter <name>', `built-in adapter: ${Object.keys(ADAPTERS).join(', ')}`)
+  .option('--target <pane>', 'tmux pane for --adapter tmux, e.g. "agents:0.1"')
+  .option('--exec <command>', 'custom command; the prompt is on stdin and in $CROSSTALK_PROMPT')
+  .option('-g, --grace <seconds>', 'how long the agent gets to notice on its own', '30')
+  .option('--cooldown <seconds>', 'minimum time between wakes', '120')
+  .option('--any', 'wake on any message from others, not only @mentions')
+  .option('-q, --quiet', "don't post a note in the channel when waking")
+  .option('-n, --name <name>', 'supervisor name', `${defaultName()}-wake`)
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, opts) => {
+    if (!!opts.adapter === !!opts.exec) {
+      fail(`Give exactly one of --adapter <name> or --exec "<command>". Adapters:\n${Object.entries(ADAPTERS).map(([k, v]) => `  ${k}: ${v.describe}`).join('\n')}`);
+    }
+    let adapter: WakeAdapter;
+    try {
+      if (opts.exec) adapter = execAdapter(opts.exec);
+      else if (!ADAPTERS[opts.adapter]) return fail(`Unknown adapter "${opts.adapter}". Pick one of: ${Object.keys(ADAPTERS).join(', ')}`);
+      else adapter = ADAPTERS[opts.adapter].make(opts.target);
+    } catch (err) {
+      return fail(err);
+    }
+    try {
+      const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'supervisor', environment: 'terminal' });
+      const ch = await ct.joinChannel(target);
+      new WakeSupervisor(ch, ct, {
+        agent: opts.agent,
+        adapter: adapter!,
+        graceMs: Number(opts.grace) * 1000,
+        cooldownMs: Number(opts.cooldown) * 1000,
+        anyMessage: !!opts.any,
+        announce: !opts.quiet,
+        log: line => console.log(`${time(Date.now())} ${line}`)
+      });
+      console.log(green(`✔ Watching #${ch.name} for ${opts.agent}`) + dim(` (grace ${opts.grace}s, cooldown ${opts.cooldown}s)`));
+      ct.on('disconnected', () => console.log(red('disconnected, reconnecting…')));
+      ct.on('reconnected', () => console.log(green('reconnected')));
+      stayAlive();
     } catch (err) {
       fail(err);
     }
