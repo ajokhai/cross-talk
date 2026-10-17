@@ -482,3 +482,53 @@ test('the owner can close a channel for everyone', async () => {
   assert.equal((await b.err({ type: 'channel.state', channel: room })).code, 'not_member');
   assert.equal((await b.err({ type: 'channel.join', channel: room })).code, 'not_found');
 });
+
+test('claims: "on it" becomes a promise with a heartbeat that stalls when missed', async () => {
+  const { hub, agent, tick } = setup();
+  const owner = agent('alice');
+  const g = agent('gemini');
+  const room = (await owner.ok<ChannelSnapshot>({ type: 'channel.create' })).channel.id;
+  await g.ok({ type: 'channel.join', channel: room });
+
+  const claim = await g.ok({ type: 'claim.create', channel: room, task: 'add tests', everySeconds: 120, paths: ['src/auth.ts'] });
+  assert.equal(claim.status, 'active');
+  assert.deepEqual(claim.paths, ['src/auth.ts']);
+  assert.equal(owner.events('claim.updated').at(-1).claim.id, claim.id);
+  assert.equal((await owner.err({ type: 'claim.update', channel: room, claim: claim.id, note: 'mine now' })).code, 'forbidden');
+
+  // A progress post is a heartbeat.
+  tick(100_000);
+  await g.ok({ type: 'message.send', channel: room, content: 'halfway' });
+  tick(100_000);
+  hub.sweep();
+  assert.equal((await owner.ok<ChannelSnapshot>({ type: 'channel.state', channel: room })).claims[0].status, 'active');
+
+  // Silence past the promised interval: stalled, and both sides are told.
+  tick(30_000);
+  hub.sweep();
+  assert.equal(owner.events('claim.updated').at(-1).claim.status, 'stalled');
+  assert.equal(g.events('claim.updated').at(-1).claim.status, 'stalled');
+  hub.sweep();
+  assert.equal(owner.events('claim.updated').filter(e => e.claim.status === 'stalled').length, 1, 'told once');
+
+  // A note brings it back, and is posted to the channel.
+  const { claims } = await g.ok({ type: 'claim.update', channel: room, note: 'back on it' });
+  assert.equal(claims[0].status, 'active');
+  assert.equal(owner.events('claim.updated').at(-1).claim.status, 'active');
+  assert.equal(owner.events('message').at(-1).message.content, 'back on it');
+
+  const done = await g.ok({ type: 'claim.update', channel: room, claim: claim.id, status: 'done' });
+  assert.equal(done.claims[0].status, 'done');
+  assert.equal((await owner.ok<ChannelSnapshot>({ type: 'channel.state', channel: room })).claims.length, 0);
+});
+
+test('claims are dropped when their owner leaves', async () => {
+  const { agent } = setup();
+  const a = agent('alice');
+  const b = agent('bob');
+  const room = (await a.ok<ChannelSnapshot>({ type: 'channel.create' })).channel.id;
+  await b.ok({ type: 'channel.join', channel: room });
+  await b.ok({ type: 'claim.create', channel: room, task: 'x' });
+  await b.ok({ type: 'channel.leave', channel: room });
+  assert.equal(a.events('claim.updated').at(-1).claim.status, 'dropped');
+});

@@ -80,3 +80,30 @@ test('MCP: a channel created on this machine can be closed with its saved owner 
     delete process.env.CROSSTALK_KEYS_FILE;
   }
 });
+
+test('MCP: an unclaimed "on it" is flagged, and a stalled claim nudges its agent on the next call', async () => {
+  let skew = 0;
+  const server = await startServer({ port: 0, quiet: true, hub: { now: () => Date.now() + skew } });
+  const human = await CrossTalk.connect({ name: 'alice', url: server.url, reconnect: false });
+  const gemini = await mcpAgent('gemini', server.url);
+  try {
+    const ch = await human.createChannel('auth');
+    await gemini.call('crosstalk_join_channel', { channel: ch.address });
+    assert.match(await gemini.call('crosstalk_send', { message: 'on it' }), /hold no claim/);
+    assert.match(await gemini.call('crosstalk_claim', { task: 'add tests', everyMinutes: 1 }), /Claimed in #auth/);
+    assert.doesNotMatch(await gemini.call('crosstalk_send', { message: "I'm on it" }), /hold no claim/);
+
+    const stalled = new Promise(r => ch.on('claim.updated', c => c.status === 'stalled' && r(c)));
+    // Run the hub's sweep as if the promised minute had passed.
+    const claim = [...ch.claims.values()][0];
+    skew = 2 * 60_000;
+    server.hub.sweep();
+    assert.equal(((await stalled) as any).id, claim.id);
+    await new Promise(r => setTimeout(r, 50));
+    assert.match(await gemini.call('crosstalk_list_channels'), /^New since your last call:[\s\S]*Your claim cl_\w+ \("add tests"\) is stalled/);
+  } finally {
+    await gemini.close();
+    await human.close();
+    await server.close();
+  }
+});

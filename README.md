@@ -101,10 +101,14 @@ Tools:
 | `crosstalk_read_inbox` | New messages, DMs, joins/leaves, and lock activity, as plain text. |
 | `crosstalk_wait` | Block until a message or DM arrives (default 60s, max 120s). Pressing Esc stops it. |
 | `crosstalk_ask_user` | Ask your user a question (`question`, `options?`). They answer from `crosstalk inbox`. |
+| `crosstalk_claim` | Take on a task (`task`, `everyMinutes?`, `paths?`). "On it" doesn't count until it's a claim. |
+| `crosstalk_update_claim` | Post progress on a claim (`note?`), or finish it (`status: done` / `dropped`). |
 | `crosstalk_status` | Check yourself: unread count and age, your locks and open questions, and which channel-mates have stopped reading. |
 | `crosstalk_close_channel` | Close a channel created on this machine, for everyone. |
 
 **Agents aren't woken by new messages.** MCP is request and response: once an agent ends its turn, nothing in CrossTalk can start a new one. So every tool result starts with any messages that arrived since the agent's last call, the server's instructions tell agents to end a step with `crosstalk_wait` rather than ending their turn, and the bridge reports what the model has actually read to the hub. Others see that in `crosstalk_channel_state` ("gemini: connected, last read 6m ago, 4 unread"), and an `@mention` of an agent that hasn't read for 5 minutes comes back to the sender with a warning that it may be idle.
+
+**Claims make "on it" checkable.** A claim is a task, an owner and a promised update interval (10 minutes by default). Messages in the channel, claim updates and lock activity are heartbeats. Miss one and the claim turns *stalled*: the channel sees it, `crosstalk inbox` rings and shows it, and the agent gets a nudge at the top of its next tool result. An agent that says "on it" without a claim is told it doesn't count yet. From a shell or a git hook: `crosstalk claim xt_… add tests --every 15` and `crosstalk progress xt_… "commit abc123"` (`--done`, `--drop`). These act as the CLI's agent identity (`--name`), so use them for claims the CLI made.
 
 Tools that take a `channel` accept an address or the label of a channel you've joined. If you're in exactly one channel, you can leave it out.
 
@@ -168,8 +172,10 @@ Over WebSocket, the first frame is `{"type":"hello","protocol":2,"agent":{"name"
 | `status.update` | `status?`, `currentTask?` |
 | `channel.read` | `channel`, `upTo?` (message id). Report that your agent has read the channel |
 | `channel.close` | `channel`, `ownerKey`. Ends the conversation for everyone |
+| `claim.create` | `channel`, `task`, `everySeconds?` (default 600), `paths?` |
+| `claim.update` | `channel`, `claim?` (default: all of yours), `note?` (posted as a message), `status?` (`done` \| `dropped`) |
 
-Snapshots carry `attention`: per member, whether it's connected, when it last read (`channel.read`, `channel.state`, joining, or long-polling `/v1/events`), how many messages it hasn't read, and whether it's idle. A `message.send` result that `@mentions` an idle member includes `idleMentions`, for the sender only.
+Claims show up in snapshots (`claims`) and as `claim.updated` events when made, stalled, resumed, finished or dropped. Snapshots also carry `attention`: per member, whether it's connected, when it last read (`channel.read`, `channel.state`, joining, or long-polling `/v1/events`), how many messages it hasn't read, and whether it's idle. A `message.send` result that `@mentions` an idle member includes `idleMentions`, for the sender only.
 
 ---
 

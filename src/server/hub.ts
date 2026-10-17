@@ -17,6 +17,7 @@ import {
   type RequestFrame,
   type ResultData,
   type ServerFrame,
+  type TaskClaim,
   type UserQuestion
 } from '../protocol.js';
 import { LockManager, type LockManagerOptions } from './locks.js';
@@ -46,6 +47,8 @@ export interface HubOptions {
   /** Open questions one agent can have in one channel, and per channel in total. */
   maxQuestionsPerAgent?: number;
   maxQuestionsPerChannel?: number;
+  /** Open claims one agent can hold in one channel. */
+  maxClaimsPerAgent?: number;
   /** How long an empty channel with history survives before it is deleted. */
   emptyChannelTtlMs?: number;
   /** Grace period for an empty channel nobody has written in yet (e.g. created, address shared, creator gone). */
@@ -97,6 +100,8 @@ interface Channel {
   posted: number;
   /** Per member: when it last read, and the sequence number it had read up to. */
   reads: Map<string, { at: number; seq: number }>;
+  /** Active and stalled claims by id. */
+  claims: Map<string, TaskClaim>;
 }
 
 /** Frames kept for a dropped agent before it is evicted instead of resumed. */
@@ -179,6 +184,7 @@ export class MeshHub {
       maxMessageChars: options.maxMessageChars ?? 16_000,
       maxQuestionsPerAgent: options.maxQuestionsPerAgent ?? 5,
       maxQuestionsPerChannel: options.maxQuestionsPerChannel ?? 200,
+      maxClaimsPerAgent: options.maxClaimsPerAgent ?? 20,
       emptyChannelTtlMs: options.emptyChannelTtlMs ?? 60 * 60 * 1000,
       unusedChannelTtlMs: options.unusedChannelTtlMs ?? 10 * 60 * 1000,
       presenceGraceMs: options.presenceGraceMs ?? 2 * 60 * 1000,
@@ -389,6 +395,8 @@ export class MeshHub {
       }
       case 'channel.read': return this.readChannel(conn, f.channel, f.upTo);
       case 'channel.close': return this.closeChannel(conn, f.channel, f.ownerKey);
+      case 'claim.create': return this.createClaim(conn, f.channel, f.task, f.everySeconds, f.paths);
+      case 'claim.update': return this.updateClaims(conn, f.channel, f.claim, f.note, f.status);
       case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata);
       case 'shorthand.send': return this.postShorthand(conn, f.channel, f.shorthand);
       case 'dm.send': return this.sendDirect(conn, f.to, f.content ?? f.text, f.replyExpected, f.metadata);
@@ -441,7 +449,8 @@ export class MeshHub {
       questionsMode: 'on',
       questions: new Map(),
       posted: 0,
-      reads: new Map()
+      reads: new Map(),
+      claims: new Map()
     };
     this.channels.set(channel.id, channel);
     this.addMember(conn, channel);
@@ -502,6 +511,9 @@ export class MeshHub {
     // Nobody is left to receive the answer.
     for (const q of [...channel.questions.values()]) {
       if (q.from.id === conn.agent!.id) this.closeQuestion(channel, q, 'cancelled');
+    }
+    for (const claim of [...channel.claims.values()]) {
+      if (claim.owner.id === conn.agent!.id) this.closeClaim(channel, claim, 'dropped');
     }
     for (const lock of this.locks.releaseAllBy(conn.agent!.id, id)) {
       this.emit(channel, { type: 'lock.released', channel: id, file: lock.file, by: conn.ref, reason: 'disconnected' });
@@ -566,7 +578,8 @@ export class MeshHub {
       locks: this.locks.list(channel.id),
       attention: [...channel.members].map(id => this.attention(channel, id)).filter((a): a is MemberAttention => !!a),
       messages: seen >= 0 ? history.slice(seen + 1) : history,
-      questions: [...channel.questions.values()]
+      questions: [...channel.questions.values()],
+      claims: [...channel.claims.values()].map(c => ({ ...c }))
     };
   }
 
@@ -686,6 +699,8 @@ export class MeshHub {
   private record(channel: Channel, message: ChannelMessage, sender: Connection): ChannelMessage {
     const mentions = this.mentioned(channel, message.shorthand?.raw ?? message.content);
     if (mentions.length) message.mentions = mentions;
+    // A progress post is a heartbeat on the sender's claims here.
+    this.heartbeat(channel, sender.agent!.id);
     channel.posted++;
     channel.history.push(message);
     if (channel.history.length > this.opts.historyLimit) channel.history.shift();
@@ -801,6 +816,7 @@ export class MeshHub {
       return fail('lock_held', `${file} is locked by ${result.lock.holder.name}: ${result.lock.reason}`, result.lock);
     }
     channel.lastActivity = this.now();
+    this.heartbeat(channel, conn.agent!.id);
     this.emit(channel, { type: 'lock.acquired', lock: result.lock }, conn.agent!.id);
     return result.lock;
   }
@@ -812,6 +828,7 @@ export class MeshHub {
     const { released, heldBy } = this.locks.release(channel.id, file, conn.agent!.id);
     if (heldBy) fail('forbidden', `${file} is held by ${heldBy.holder.name}, not you`, heldBy);
     if (released) {
+      this.heartbeat(channel, conn.agent!.id);
       this.emit(channel, { type: 'lock.released', channel: channel.id, file, by: conn.ref, reason: 'released' }, conn.agent!.id);
     }
     return { channel: channel.id, file };
@@ -925,6 +942,95 @@ export class MeshHub {
   }
 
   // -------------------------------------------------------------------------
+  // Claims: "on it" as a promise with a heartbeat
+  // -------------------------------------------------------------------------
+
+  private createClaim(conn: Connection, address: unknown, task: unknown, everySeconds: unknown, paths: unknown): TaskClaim {
+    const channel = this.memberChannel(conn, address);
+    const text = cleanText(task, 280);
+    if (!text) fail('bad_request', 'task must be a non-empty string');
+    if (paths !== undefined && (!Array.isArray(paths) || paths.length > 20)) fail('bad_request', 'paths must be an array of at most 20 strings');
+    const mine = [...channel.claims.values()].filter(c => c.owner.id === conn.agent!.id).length;
+    if (mine >= this.opts.maxClaimsPerAgent) {
+      fail('quota_exceeded', `At most ${this.opts.maxClaimsPerAgent} open claims per agent; finish or drop one`);
+    }
+    const seconds = typeof everySeconds === 'number' && Number.isFinite(everySeconds) ? Math.min(Math.max(everySeconds, 60), 7200) : 600;
+    const now = this.now();
+    const claim: TaskClaim = {
+      id: newId('cl'),
+      channel: channel.id,
+      owner: conn.ref,
+      task: text,
+      createdAt: now,
+      lastHeartbeat: now,
+      everyMs: seconds * 1000,
+      nextUpdateBy: now + seconds * 1000,
+      status: 'active'
+    };
+    const files = ((paths as unknown[] | undefined) ?? []).map(p => LockManager.normalizePath(String(p))).filter(Boolean);
+    if (files.length) claim.paths = files;
+    channel.claims.set(claim.id, claim);
+    channel.lastActivity = now;
+    this.emit(channel, { type: 'claim.updated', claim: { ...claim } });
+    return { ...claim };
+  }
+
+  private updateClaims(conn: Connection, address: unknown, id: unknown, note: unknown, status: unknown): { claims: TaskClaim[] } {
+    const channel = this.memberChannel(conn, address);
+    if (status !== undefined && status !== 'done' && status !== 'dropped') fail('bad_request', 'status must be "done" or "dropped"');
+    let targets: TaskClaim[];
+    if (id === undefined) {
+      targets = [...channel.claims.values()].filter(c => c.owner.id === conn.agent!.id);
+    } else {
+      const claim = typeof id === 'string' ? channel.claims.get(id) : undefined;
+      if (!claim) return fail('not_found', 'No open claim with that id in this channel');
+      if (claim.owner.id !== conn.agent!.id) fail('forbidden', `That claim belongs to ${claim.owner.name}`);
+      targets = [claim];
+    }
+    const text = cleanText(note, 2000);
+    if (text) {
+      for (const c of targets) c.note = text;
+      // Progress is posted where everyone can see it; recording it heartbeats every claim of the sender here.
+      const message: ChannelMessage = {
+        id: newId('msg'),
+        channel: channel.id,
+        kind: 'chat',
+        from: conn.ref,
+        content: text,
+        timestamp: this.now(),
+        metadata: { claims: targets.map(c => c.id), status: status ?? 'progress' }
+      };
+      this.record(channel, message, conn);
+    } else {
+      for (const c of targets) this.beat(channel, c);
+    }
+    if (status) return { claims: targets.map(c => this.closeClaim(channel, c, status as 'done' | 'dropped')) };
+    return { claims: targets.map(c => ({ ...c })) };
+  }
+
+  /** Heartbeats every open claim `agentId` holds in the channel. */
+  private heartbeat(channel: Channel, agentId: string): void {
+    for (const claim of channel.claims.values()) if (claim.owner.id === agentId) this.beat(channel, claim);
+  }
+
+  private beat(channel: Channel, claim: TaskClaim): void {
+    const now = this.now();
+    claim.lastHeartbeat = now;
+    claim.nextUpdateBy = now + claim.everyMs;
+    if (claim.status === 'stalled') {
+      claim.status = 'active';
+      this.emit(channel, { type: 'claim.updated', claim: { ...claim } });
+    }
+  }
+
+  private closeClaim(channel: Channel, claim: TaskClaim, status: 'done' | 'dropped'): TaskClaim {
+    channel.claims.delete(claim.id);
+    const closed: TaskClaim = { ...claim, status, closedAt: this.now() };
+    this.emit(channel, { type: 'claim.updated', claim: closed });
+    return closed;
+  }
+
+  // -------------------------------------------------------------------------
   // Plumbing
   // -------------------------------------------------------------------------
 
@@ -945,6 +1051,14 @@ export class MeshHub {
     const now = this.now();
     for (const conn of [...this.resumable.values()]) {
       if (conn.droppedAt !== undefined && conn.droppedAt + this.opts.presenceGraceMs <= now) this.evict(conn);
+    }
+    for (const channel of this.channels.values()) {
+      for (const claim of channel.claims.values()) {
+        if (claim.status !== 'active' || claim.nextUpdateBy > now) continue;
+        // Everyone sees it, the owner's inbox included; the claimant gets it too, as a nudge.
+        claim.status = 'stalled';
+        this.emit(channel, { type: 'claim.updated', claim: { ...claim } });
+      }
     }
     for (const channel of [...this.channels.values()]) {
       if (channel.members.size > 0 || channel.emptySince === undefined) continue;

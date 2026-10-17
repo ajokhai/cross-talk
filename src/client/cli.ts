@@ -10,7 +10,7 @@ import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
-import type { ChannelMessage, DirectMessage, ServerFrame, UserQuestion } from '../protocol.js';
+import type { ChannelMessage, DirectMessage, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 
 const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().username}@${os.hostname().split('.')[0]}`;
@@ -101,6 +101,11 @@ function formatQuestion(q: UserQuestion, channels: Channel[]): string {
   ];
   if (q.options.length) lines.push('  ' + q.options.map((o, i) => `${bold(String(i + 1))}) ${o}`).join('   '));
   return lines.join('\n');
+}
+
+function formatStalled(c: TaskClaim, channels: Channel[]): string {
+  const ch = channels.find(x => x.address === c.channel);
+  return `${yellow('⚠ stalled')} ${bold(c.owner.name)} on "${c.task}" ${dim(`in #${ch?.name ?? c.channel}, no update since ${ago(c.lastHeartbeat)} (promised every ${Math.round(c.everyMs / 60_000)}m)`)}`;
 }
 
 function printShareHint(address: string) {
@@ -284,9 +289,11 @@ program
     const queue: UserQuestion[] = channels.flatMap(c => [...c.questions.values()]).sort((a, b) => a.createdAt - b.createdAt);
     const off = channels.filter(c => c.info.questions === 'off');
 
+    const stalled = () => channels.flatMap(c => [...c.claims.values()]).filter(c => c.status === 'stalled');
     if (opts.list) {
       if (!queue.length) console.log(dim(`No open questions in ${channels.length} channel${channels.length === 1 ? '' : 's'}.`));
       for (const q of queue) console.log(formatQuestion(q, channels) + '\n');
+      for (const c of stalled()) console.log(formatStalled(c, channels));
       await ct.close();
       return;
     }
@@ -294,6 +301,7 @@ program
     console.log(green(`✔ Watching ${channels.length} channel${channels.length === 1 ? '' : 's'} for questions`) +
       (off.length ? yellow(` (${off.length} with questions off)`) : ''));
     console.log(dim('Type a number or an answer. Enter skips. /off or /on (this channel), /off all, /on all, /list, /quit'));
+    for (const c of stalled()) console.log(formatStalled(c, channels));
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
     let current: UserQuestion | undefined;
@@ -324,6 +332,13 @@ program
         print(dim(`+ new question from ${q.from.name} (${queue.length} waiting)`));
         rl.prompt(true);
       }
+    });
+    // An agent that said "on it" and went quiet: you may need to prompt it in its own session.
+    ct.on('claim.updated', (c: TaskClaim) => {
+      if (c.status !== 'stalled') return;
+      process.stdout.write('\x07');
+      print(formatStalled(c, channels));
+      rl.prompt(true);
     });
     ct.on('question.closed', (q: UserQuestion) => {
       const i = queue.findIndex(x => x.id === q.id);
@@ -542,6 +557,43 @@ program
       if (text.startsWith('!')) await agent.request('shorthand.send', { channel, shorthand: text });
       else await agent.request('message.send', { channel, content: text });
       console.log(green(`✔ sent as ${agent.agent!.name}`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('claim <address> <task...>')
+  .description('Take on a task so the channel can track it; post progress (`crosstalk progress`) before each update is due or it shows as stalled')
+  .option('-e, --every <minutes>', 'how often you will post progress', '10')
+  .option('-p, --path <path...>', 'files or directories the work covers')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, words: string[], opts) => {
+    try {
+      const { agent, channel } = await oneShot(target, opts);
+      const claim = await agent.request('claim.create', { channel, task: words.join(' '), everySeconds: Number(opts.every) * 60, paths: opts.path });
+      console.log(green(`✔ claimed ${claim.id}: ${claim.task}`) + dim(` (next update due by ${new Date(claim.nextUpdateBy).toLocaleTimeString()})`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('progress <address> [note...]')
+  .description('Heartbeat your claims in a channel (all of them, or --claim), optionally posting a note; --done or --drop to close. Handy from a git hook')
+  .option('-c, --claim <id>', 'only this claim')
+  .option('--done', 'mark finished')
+  .option('--drop', 'give it up so someone else can take it')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, words: string[], opts) => {
+    try {
+      const { agent, channel } = await oneShot(target, opts);
+      const status = opts.done ? 'done' : opts.drop ? 'dropped' : undefined;
+      const { claims } = await agent.request('claim.update', { channel, claim: opts.claim, note: words.join(' ') || undefined, status });
+      if (!claims.length) return console.log(dim(`${agent.agent!.name} holds no claims in this channel.`));
+      for (const c of claims) console.log(green(`✔ ${c.status} ${c.id}: ${c.task}`));
     } catch (err) {
       fail(err);
     }

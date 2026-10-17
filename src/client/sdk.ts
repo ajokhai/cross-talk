@@ -19,6 +19,7 @@ import {
   type ResultData,
   type QuestionsMode,
   type ServerFrame,
+  type TaskClaim,
   type UserQuestion
 } from '../protocol.js';
 
@@ -79,7 +80,7 @@ function git(args: string[]): string | undefined {
  *
  * Events: 'message', 'member.joined', 'member.left', 'member.updated',
  * 'lock.acquired', 'lock.released', 'lock.contended', 'question.asked',
- * 'question.closed', 'updated' (channel settings changed), 'closed' (the
+ * 'question.closed', 'claim.updated', 'updated' (channel settings changed), 'closed' (the
  * owner closed the channel; you are no longer in it).
  */
 export class Channel extends EventEmitter {
@@ -90,6 +91,8 @@ export class Channel extends EventEmitter {
   readonly messages: ChannelMessage[] = [];
   /** Open questions for the owner, by id. */
   readonly questions = new Map<string, UserQuestion>();
+  /** Active and stalled claims, by id. */
+  readonly claims = new Map<string, TaskClaim>();
   /** Who was reading the channel, as of the last snapshot (join, refresh). */
   attention: MemberAttention[] = [];
   /**
@@ -126,6 +129,8 @@ export class Channel extends EventEmitter {
     this.questions.clear();
     for (const q of snapshot.questions ?? []) this.questions.set(q.id, q);
     this.attention = snapshot.attention ?? [];
+    this.claims.clear();
+    for (const c of snapshot.claims ?? []) this.claims.set(c.id, c);
   }
 
   /** @internal */
@@ -170,6 +175,11 @@ export class Channel extends EventEmitter {
         break;
       case 'channel.closed':
         this.emit('closed', frame.by);
+        break;
+      case 'claim.updated':
+        if (frame.claim.status === 'done' || frame.claim.status === 'dropped') this.claims.delete(frame.claim.id);
+        else this.claims.set(frame.claim.id, frame.claim);
+        this.emit('claim.updated', frame.claim);
         break;
     }
   }
@@ -248,6 +258,29 @@ export class Channel extends EventEmitter {
    */
   markRead(upTo?: string): Promise<MemberAttention> {
     return this.client.request('channel.read', { channel: this.address, upTo });
+  }
+
+  /**
+   * Takes on a task: "on it" as a promise others can track. Post progress at
+   * least every `everySeconds` (default 600) or the claim shows as stalled.
+   */
+  async claim(task: string, options: { everySeconds?: number; paths?: string[] } = {}): Promise<TaskClaim> {
+    const claim = await this.client.request('claim.create', { channel: this.address, task, ...options });
+    this.claims.set(claim.id, claim);
+    return claim;
+  }
+
+  /**
+   * A heartbeat on one claim (or all of yours here, when `claim` is omitted).
+   * `note` is posted to the channel; `status` finishes or drops the claim.
+   */
+  async updateClaim(options: { claim?: string; note?: string; status?: 'done' | 'dropped' } = {}): Promise<TaskClaim[]> {
+    const { claims } = await this.client.request('claim.update', { channel: this.address, ...options });
+    for (const c of claims) {
+      if (c.status === 'done' || c.status === 'dropped') this.claims.delete(c.id);
+      else this.claims.set(c.id, c);
+    }
+    return claims;
   }
 
   /** Ends the conversation for every member. Needs the owner key (defaults to this.ownerKey). */
@@ -517,6 +550,10 @@ export class CrossTalk extends EventEmitter {
       case 'channel.closed':
         this.channels.get(frame.channel)?.handle(frame);
         this.forget(frame.channel);
+        return;
+      case 'claim.updated':
+        this.channels.get(frame.claim.channel)?.handle(frame);
+        this.emit('claim.updated', frame.claim);
         return;
     }
   }

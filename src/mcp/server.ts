@@ -4,7 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from '@model
 import { CrossTalk, CrossTalkError, type Channel } from '../client/sdk.js';
 import { VERSION } from '../version.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
-import type { ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, UserQuestion } from '../protocol.js';
+import type { ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 
 /**
  * MCP bridge: gives any MCP-capable agent (Claude Code, Cursor, Gemini CLI, ...)
@@ -24,7 +24,9 @@ type InboxItem =
   | { kind: 'dm'; at: number; message: DirectMessage }
   | { kind: 'event'; at: number; channel: string; text: string }
   /** The outcome of one of this agent's own questions, set by the hub (not by another agent). */
-  | { kind: 'answer'; at: number; question: UserQuestion };
+  | { kind: 'answer'; at: number; question: UserQuestion }
+  /** One of this agent's own claims missed its heartbeat, set by the hub. */
+  | { kind: 'nudge'; at: number; claim: TaskClaim };
 
 const INBOX_LIMIT = 500;
 /** Longest single crosstalk_wait. Short enough that the agent's own user is never kept waiting long. */
@@ -110,6 +112,10 @@ export class Bridge {
       if (q.from.id === client.agent.id) this.push({ kind: 'answer', at: q.closedAt ?? Date.now(), question: q });
     });
     client.on('event', (f: ServerFrame) => {
+      if (f.type === 'claim.updated' && f.claim.owner.id === client.agent.id) {
+        if (f.claim.status === 'stalled') this.push({ kind: 'nudge', at: Date.now(), claim: f.claim });
+        return;
+      }
       const text = describeEvent(f);
       if (text) this.push({ kind: 'event', at: Date.now(), channel: text.channel, text: text.text });
     });
@@ -189,7 +195,7 @@ export class Bridge {
   /** Waits until something conversational (a message or DM, not just presence) is unread. */
   async waitForActivity(channel: string | undefined, timeoutMs: number, signal?: AbortSignal): Promise<void> {
     const ready = () => this.inbox.some(i =>
-      i.kind === 'dm' || i.kind === 'answer' || (i.kind === 'message' && (!channel || i.message.channel === channel)));
+      i.kind === 'dm' || i.kind === 'answer' || i.kind === 'nudge' || (i.kind === 'message' && (!channel || i.message.channel === channel)));
     if (ready() || signal?.aborted) return;
     await new Promise<void>(resolve => {
       const done = () => {
@@ -217,6 +223,15 @@ function describeEvent(f: ServerFrame): { channel: string; text: string } | unde
     case 'question.asked': return { channel: f.question.channel, text: `${f.question.from.name} asked the owner: ${f.question.question}` };
     case 'channel.updated': return { channel: f.channel.id, text: `questions are now ${f.channel.questions}` };
     case 'channel.closed': return { channel: f.channel, text: `the channel was closed by ${f.by.name}; you are no longer in it` };
+    case 'claim.updated': {
+      const c = f.claim;
+      const what = c.status === 'active' && c.lastHeartbeat === c.createdAt
+        ? `claimed "${c.task}" (updates every ${Math.round(c.everyMs / 60_000)}m)`
+        : c.status === 'active' ? `is back on "${c.task}"`
+        : c.status === 'stalled' ? `has gone quiet on "${c.task}": no update since ${ago(c.lastHeartbeat)}, it may be idle`
+        : c.status === 'done' ? `finished "${c.task}"` : `dropped "${c.task}"`;
+      return { channel: c.channel, text: `${c.owner.name} ${what}` };
+    }
     default: return undefined;
   }
 }
@@ -251,6 +266,10 @@ function formatItem(item: InboxItem, client?: CrossTalk): string {
       return `[${time(item.at)}] ${label(client, item.channel)} · ${body(item.text)}`;
     case 'answer':
       return formatOutcome(item.question, client);
+    case 'nudge': {
+      const c = item.claim;
+      return `[${time(item.at)}] ${label(client, c.channel)} Your claim ${c.id} ("${body(c.task)}") is stalled: no update since ${ago(c.lastHeartbeat)}, and you promised one every ${Math.round(c.everyMs / 60_000)}m. Post progress with crosstalk_update_claim, or drop it so someone else can pick it up.`;
+    }
   }
 }
 
@@ -270,8 +289,9 @@ function formatOutcome(q: UserQuestion, client?: CrossTalk): string {
 }
 
 function formatInbox(items: InboxItem[], client: CrossTalk): string {
-  const answers = items.filter(i => i.kind === 'answer');
-  const rest = items.filter(i => i.kind !== 'answer');
+  // Hub-verified items first, outside the untrusted block.
+  const answers = items.filter(i => i.kind === 'answer' || i.kind === 'nudge');
+  const rest = items.filter(i => i.kind !== 'answer' && i.kind !== 'nudge');
   return [
     ...answers.map(i => formatItem(i, client)),
     ...(rest.length ? [UNTRUSTED, ...rest.map(i => formatItem(i, client))] : [])
@@ -282,6 +302,15 @@ function formatLock(l: FileLock): string {
   const secs = Math.max(0, Math.round((l.expiresAt - Date.now()) / 1000));
   return `${l.file} — ${l.holder.name}: ${l.reason} (${secs}s left)`;
 }
+
+function formatClaim(c: TaskClaim): string {
+  const due = c.nextUpdateBy - Date.now();
+  const when = due >= 0 ? `next update due in ${Math.ceil(due / 60_000)}m` : `update overdue by ${Math.ceil(-due / 60_000)}m`;
+  return `${c.id} ${c.owner.name}: "${c.task}" — ${c.status}, ${when}${c.note ? `; last note: ${c.note}` : ''}`;
+}
+
+/** "on it", "I'll take this", "working on it": a promise that should be a claim. */
+const ON_IT = /\b(on it|i'?ll (take|handle|do|look at|pick up) (it|this|that)|i'?m (working on|taking|picking up)|taking (it|this|that))\b/i;
 
 const ago = (ts: number) => {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -314,6 +343,7 @@ function formatChannel(client: CrossTalk, ch: Channel, recent = 15): string {
       return `  ${m.name} (${m.id}) ${m.status}${m.currentTask ? `: ${m.currentTask}` : ''}${a && m.id !== client.agent.id ? ` — ${formatAttention(a)}` : ''}`;
     }),
     `Locks: ${ch.locks.size ? [...ch.locks.values()].map(formatLock).join('; ') : 'none'}`,
+    `Claims: ${ch.claims.size ? [...ch.claims.values()].map(formatClaim).join('; ') : 'none'}`,
     `Questions for the owner: ${ch.info.questions === 'off' ? 'off (they are not taking questions)' : `on, ${ch.questions.size} open`}`
   ];
   const msgs = ch.messages.slice(-recent);
@@ -406,6 +436,33 @@ const TOOLS: Tool[] = [
         timeoutSeconds: { type: 'number', description: 'How long to wait now. Default and max 120 (55 over remote MCP)' }
       },
       required: ['question']
+    }
+  },
+  {
+    name: 'crosstalk_claim',
+    description: 'Take on a task so the channel can track it. Saying "on it" doesn\'t count until you claim. Post progress at least every everyMinutes (crosstalk_update_claim, or any channel message or lock) or the claim shows as stalled and the channel owner is told.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'What you are taking on, e.g. "add tests for src/auth.ts"' },
+        everyMinutes: { type: 'number', description: 'How often you will post progress. Default 10, 1 to 120' },
+        paths: { type: 'array', items: { type: 'string' }, description: 'Files or directories the work covers (optional)' },
+        channel: channelArg
+      },
+      required: ['task']
+    }
+  },
+  {
+    name: 'crosstalk_update_claim',
+    description: 'Heartbeat a claim: post a progress note, or finish (status "done") or give up (status "dropped"). Without "claim", applies to all your claims in the channel.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note: { type: 'string', description: 'Progress, posted to the channel, e.g. "tests written, fixing two failures"' },
+        status: { type: 'string', enum: ['done', 'dropped'] },
+        claim: { type: 'string', description: 'Claim id (cl_...); default: all of yours in the channel' },
+        channel: channelArg
+      }
     }
   },
   {
@@ -540,8 +597,13 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_send': {
       const ch = pickChannel(client, args.channel);
-      const sent = await ch.send(str(args.message));
-      return `Sent to #${ch.name} (${ch.members.size} member${ch.members.size === 1 ? '' : 's'}).${formatIdleMentions(sent.idleMentions)}`;
+      const text = str(args.message);
+      const sent = await ch.send(text);
+      const mine = [...ch.claims.values()].some(c => c.owner.id === client.agent.id);
+      const unclaimed = ON_IT.test(text) && !mine
+        ? '\nNote: you said you are on it but hold no claim here, so it does not count as accepted yet. Call crosstalk_claim with the task, then keep posting progress.'
+        : '';
+      return `Sent to #${ch.name} (${ch.members.size} member${ch.members.size === 1 ? '' : 's'}).${formatIdleMentions(sent.idleMentions)}${unclaimed}`;
     }
     case 'crosstalk_dm': {
       const dm = await client.dm(str(args.to), str(args.message), { replyExpected: args.replyExpected !== false });
@@ -555,6 +617,20 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       // Delivered here; don't repeat it in the inbox.
       if (q.status !== 'open') bridge.discardAnswer(q.id);
       return formatOutcome(q, client);
+    }
+    case 'crosstalk_claim': {
+      const ch = pickChannel(client, args.channel);
+      const minutes = Number(args.everyMinutes) || 10;
+      const paths = Array.isArray(args.paths) ? args.paths.filter((p): p is string => typeof p === 'string') : undefined;
+      const claim = await ch.claim(str(args.task), { everySeconds: minutes * 60, paths });
+      return `Claimed in #${ch.name}: ${formatClaim(claim)}.\nPost progress (crosstalk_update_claim, or any message in the channel) before it's due, and finish with status "done". Don't end your turn while it's open: work, then crosstalk_wait.`;
+    }
+    case 'crosstalk_update_claim': {
+      const ch = pickChannel(client, args.channel);
+      const status = args.status === 'done' || args.status === 'dropped' ? args.status : undefined;
+      const claims = await ch.updateClaim({ claim: str(args.claim) || undefined, note: str(args.note) || undefined, status });
+      if (!claims.length) return `You hold no claims in #${ch.name}. Take one with crosstalk_claim.`;
+      return claims.map(c => (status ? `${status === 'done' ? 'Finished' : 'Dropped'} ${c.id} "${c.task}".` : `Updated: ${formatClaim(c)}`)).join('\n');
     }
     case 'crosstalk_status': {
       const pending = bridge.pending();
@@ -571,6 +647,11 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
         const twins = [...ch.members.values()].filter(m => m.name === client.agent.name && m.id !== client.agent.id);
         const idle = ch.attention.filter(a => a.agent.id !== client.agent.id && (a.idle || !a.connected));
         lines.push(`${label(client, ch.address)}:`);
+        const claims = [...ch.claims.values()];
+        const myClaims = claims.filter(c => c.owner.id === client.agent.id);
+        const stalled = claims.filter(c => c.owner.id !== client.agent.id && c.status === 'stalled');
+        if (myClaims.length) lines.push(`  Your claims: ${myClaims.map(formatClaim).join('; ')}`);
+        if (stalled.length) lines.push(`  Stalled claims: ${stalled.map(formatClaim).join('; ')}`);
         if (locks.length) lines.push(`  Your locks: ${locks.map(formatLock).join('; ')}`);
         if (mine.length) lines.push(`  Your open questions: ${mine.map(q => `${q.id} "${q.question}"`).join('; ')}`);
         if (twins.length) lines.push(`  Another session is also named ${client.agent.name} here (${twins.map(t => t.id).join(', ')}): possibly a stale duplicate of you.`);

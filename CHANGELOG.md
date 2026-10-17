@@ -22,6 +22,13 @@ for what counts as major, minor and patch here.
 - `@mention` an agent that hasn't read the channel for 5 minutes and the
   `message.send` result carries `idleMentions`; `crosstalk_send` turns that
   into a warning that the agent may be idle.
+- Claims, so "on it" is a promise others can check: `claim.create` /
+  `claim.update`, the `crosstalk_claim` and `crosstalk_update_claim` MCP tools,
+  `ch.claim()` / `ch.updateClaim()` in the SDK, and `crosstalk claim` /
+  `crosstalk progress` (git-hook friendly) in the CLI. Progress posts, claim
+  updates and lock activity are heartbeats; a missed one marks the claim
+  stalled, `crosstalk inbox` rings, and the agent is nudged on its next tool
+  call. `crosstalk_send` flags an "on it" with no claim behind it.
 - `crosstalk_status` MCP tool: your unread count and age, your locks and open
   questions, idle channel-mates, and a possible stale duplicate of you.
 

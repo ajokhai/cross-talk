@@ -24,6 +24,12 @@
  * and `channel.state` count too). The hub tracks each member's last read and
  * unread count, shows them in snapshots as `attention`, and warns a sender
  * when an `@mention` names someone who hasn't read in a while.
+ *
+ * Claims: "on it" is only a promise once it is a claim (`claim.create`): a
+ * task, an owner, and when the next update is due. Progress posts in the
+ * channel, `claim.update` and lock activity are heartbeats. A claim that
+ * misses its heartbeat turns `stalled`, which the channel (and so its owner's
+ * `crosstalk inbox`) and the claiming agent are told about.
  */
 
 export const PROTOCOL_VERSION = 2;
@@ -151,6 +157,28 @@ export interface MemberAttention {
   idle: boolean;
 }
 
+/** A task an agent has taken on, with heartbeats so a silent "on it" shows up as stalled. */
+export interface TaskClaim {
+  id: string;
+  /** Channel address. */
+  channel: string;
+  owner: AgentRef;
+  task: string;
+  createdAt: number;
+  /** Last heartbeat: a progress post in the channel, `claim.update`, or a lock taken or released. */
+  lastHeartbeat: number;
+  /** How often the owner promised an update. */
+  everyMs: number;
+  /** `lastHeartbeat + everyMs`; past it, the claim is `stalled`. */
+  nextUpdateBy: number;
+  status: 'active' | 'stalled' | 'done' | 'dropped';
+  /** Latest progress note. */
+  note?: string;
+  /** Files or directories the work covers, for tooling that heartbeats on file changes or commits there. */
+  paths?: string[];
+  closedAt?: number;
+}
+
 export interface ChannelSnapshot {
   channel: ChannelInfo;
   members: AgentInfo[];
@@ -160,6 +188,8 @@ export interface ChannelSnapshot {
   messages: ChannelMessage[];
   /** Open questions for the owner. */
   questions: UserQuestion[];
+  /** Active and stalled claims. */
+  claims: TaskClaim[];
 }
 
 /** `channel.create` also returns the owner key, once. Keep it private: it answers questions. */
@@ -206,6 +236,14 @@ export type RequestFrame =
   | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode }
   /** Marks the channel read, up to message `upTo` (default: everything so far). */
   | { type: 'channel.read'; id: string; channel: string; upTo?: string }
+  /** Takes on a task. `everySeconds`: how often you'll post progress (default 600, 60 to 7200). */
+  | { type: 'claim.create'; id: string; channel: string; task: string; everySeconds?: number; paths?: string[] }
+  /**
+   * A heartbeat on one of your claims, or on all of them in the channel when
+   * `claim` is omitted. `note` is also posted to the channel as progress;
+   * `status` finishes (`done`) or gives up (`dropped`) the claim.
+   */
+  | { type: 'claim.update'; id: string; channel: string; claim?: string; note?: string; status?: 'done' | 'dropped' }
   /** Ends the conversation for everyone: members are removed, locks and open questions dropped. Needs the owner key. */
   | { type: 'channel.close'; id: string; channel: string; ownerKey: string };
 
@@ -231,6 +269,8 @@ export interface ResultData {
   'channel.configure': ChannelInfo;
   'channel.read': MemberAttention;
   'channel.close': { channel: string };
+  'claim.create': TaskClaim;
+  'claim.update': { claims: TaskClaim[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +311,8 @@ export type ServerFrame =
   | { type: 'lock.released'; channel: string; file: string; by: AgentRef; reason: 'released' | 'expired' | 'disconnected' }
   | { type: 'lock.contended'; lock: FileLock; requester: AgentRef; reason: string }
   | { type: 'channel.updated'; channel: ChannelInfo }
+  /** A claim was made, stalled, resumed, finished or dropped. Plain heartbeats are silent. */
+  | { type: 'claim.updated'; claim: TaskClaim }
   /** The owner closed the channel; you are no longer in it. */
   | { type: 'channel.closed'; channel: string; by: AgentRef }
   | { type: 'question.asked'; question: UserQuestion }
