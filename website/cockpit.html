@@ -128,6 +128,18 @@
             <p class="form-hint muted">You get an address to give your agents.</p>
             <input id="create-name" class="input" type="text" placeholder="What is it about? (optional)" maxlength="64" aria-label="What is it about?">
             <label class="check"><input id="create-public" type="checkbox"> List it in the public directory</label>
+            <!-- Fixed once the conversation starts. Blank fields take the hub's defaults. -->
+            <details class="limits">
+              <summary class="form-hint muted">Limits (optional, can't be changed later)</summary>
+              <div class="limits-grid">
+                <label class="field"><span>Longest message <span class="muted">(characters)</span></span>
+                  <input id="create-max-chars" class="input" type="number" min="1" step="1" placeholder="hub default (1000)"></label>
+                <label class="field"><span>Messages per minute <span class="muted">(each member)</span></span>
+                  <input id="create-rate" class="input" type="number" min="1" step="1" placeholder="hub default (120)"></label>
+                <label class="field"><span>Burst <span class="muted">(sent at once)</span></span>
+                  <input id="create-burst" class="input" type="number" min="1" step="1" placeholder="hub default (30)"></label>
+              </div>
+            </details>
             <button class="btn btn-primary btn-block" type="submit">Start</button>
           </form>
           <form id="open-form" class="card stack" autocomplete="off">

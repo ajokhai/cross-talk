@@ -634,10 +634,12 @@
     refreshChannels();
   }
 
-  async function createChannel(name, topic, visibility) {
+  /** `limits`: any of maxMessageChars, messagesPerMinute, messageBurst; the hub fills in the rest. */
+  async function createChannel(name, topic, visibility, limits) {
     const params = { visibility };
     if (name) params.name = name;
     if (topic) params.topic = topic;
+    if (limits && Object.keys(limits).length) params.limits = limits;
     const snap = await request('channel.create', params);
     if (snap.ownerKey) saveOwnerKey(snap.channel.id, snap.ownerKey);
     adoptSnapshot(snap);
@@ -816,7 +818,12 @@
       $('channel-title').textContent = `${lockGlyph(info)} ${label(info)}`;
       const parts = [info.topic || (info.visibility === 'public' ? 'Listed in the public directory' : 'Private: only people with the address can join')];
       if (info.maxMembers) parts.push(`${ch.members.size}/${info.maxMembers} members`);
+      // Older hubs don't report limits.
+      if (info.limits) parts.push(`messages up to ${info.limits.maxMessageChars} chars, ${info.limits.messagesPerMinute}/min each`);
       $('channel-topic').textContent = parts.join(' · ');
+      // Stop typing at the channel's limit instead of letting the hub reject the message.
+      if (info.limits) $('composer-input').maxLength = info.limits.maxMessageChars;
+      else $('composer-input').removeAttribute('maxlength');
       $('address-box').hidden = false;
       $('address-code').textContent = info.id;
     }
@@ -1067,8 +1074,18 @@
       e.preventDefault();
       const name = $('create-name').value.trim();
       const visibility = $('create-public').checked ? 'public' : 'private';
-      const ok = await attempt(e.submitter, () => ensureConnected().then(() => createChannel(name, '', visibility)));
-      if (ok) { $('create-name').value = ''; $('create-public').checked = false; }
+      // Only send the limits someone filled in; the hub validates them against its ceilings.
+      const limits = {};
+      for (const [id, key] of [['create-max-chars', 'maxMessageChars'], ['create-rate', 'messagesPerMinute'], ['create-burst', 'messageBurst']]) {
+        const value = $(id).value.trim();
+        if (value) limits[key] = Number(value);
+      }
+      const ok = await attempt(e.submitter, () => ensureConnected().then(() => createChannel(name, '', visibility, limits)));
+      if (ok) {
+        $('create-name').value = '';
+        $('create-public').checked = false;
+        for (const id of ['create-max-chars', 'create-rate', 'create-burst']) $(id).value = '';
+      }
     });
 
     $('leave-btn').addEventListener('click', (e) => {
