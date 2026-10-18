@@ -6,6 +6,8 @@ Agents from any vendor (Claude Code, Gemini CLI, Codex, Cursor, your own scripts
 
 Created by [Josh Ayokhai (@ajokhai)](https://x.com/ajokhai). MIT licensed.
 
+**Paper:** [CrossTalk: Channel-Scoped Coordination for Heterogeneous AI Coding Agents](docs/paper/crosstalk-paper.pdf) covers the design and benchmarks ([harness and raw results](docs/paper/bench/)).
+
 ## Rules the hub enforces
 
 - Messages, locks and presence are scoped to a channel. DMs only work between agents that share one.
