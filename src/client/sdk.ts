@@ -9,6 +9,7 @@ import {
   type AgentInfo,
   type AgentStatus,
   type ChannelInfo,
+  type ChannelLimits,
   type ChannelMessage,
   type ChannelSnapshot,
   type DirectMessage,
@@ -608,8 +609,10 @@ export class CrossTalk extends EventEmitter {
    * private (reachable only by address) unless `public: true`, which also lists
    * them in the hub's discovery directory.
    */
-  async createChannel(name?: string, options: { topic?: string; public?: boolean } = {}): Promise<Channel> {
+  /** `limits`: message length and rate for this channel, fixed for its life; unset ones take the hub's defaults. */
+  async createChannel(name?: string, options: { topic?: string; public?: boolean; limits?: Partial<ChannelLimits> } = {}): Promise<Channel> {
     const created = await this.request('channel.create', {
+      limits: options.limits,
       name,
       topic: options.topic,
       visibility: options.public ? 'public' : 'private'

@@ -11,7 +11,7 @@ import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
-import type { ChannelMessage, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
+import type { ChannelLimits, ChannelMessage, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 
 // ANSI colours, off when NO_COLOR is set or output isn't a terminal (FORCE_COLOR turns them on).
@@ -138,14 +138,36 @@ program
   // --telemetry first, so the default stays undefined (not true) and CI / DO_NOT_TRACK still apply.
   .option('--telemetry', 'check in even when CI or DO_NOT_TRACK is set')
   .option('--no-telemetry', 'turn off the anonymous daily check-in (random id + version only) for the usage map')
+  .option('--channel-max-chars <n>', 'longest message in a new channel unless its creator picks another limit', '1000')
+  .option('--channel-rate <perMinute>', 'messages each member may post per minute in a new channel', '120')
+  .option('--channel-burst <n>', 'messages a member may post back to back before the rate applies', '30')
+  .option('--max-chars <n>', 'ceiling for any message or DM, and for what a channel creator can ask for', '16000')
+  .option('--request-rate <perSecond>', 'requests per second per connection', '20')
+  .option('--request-burst <n>', 'requests a connection may make back to back', '60')
+  .option('--no-rate-limit', 'don\'t enforce rate limits (only for hubs where every client is trusted); length limits still apply')
   .action(async opts => {
+    const n = (flag: string, value: string) => {
+      const v = Number(value);
+      if (!Number.isInteger(v) || v < 1) fail(`--${flag} must be a whole number of at least 1`);
+      return v;
+    };
     await startServer({
       port: Number(opts.port),
       host: opts.host,
       token: opts.token,
       allowedSubnets: opts.subnet,
       allowedOrigins: opts.allowOrigin,
-      trustProxy: opts.trustProxy || undefined
+      trustProxy: opts.trustProxy || undefined,
+      hub: {
+        maxMessageChars: n('max-chars', opts.maxChars),
+        channelLimits: {
+          maxMessageChars: n('channel-max-chars', opts.channelMaxChars),
+          messagesPerMinute: n('channel-rate', opts.channelRate),
+          messageBurst: n('channel-burst', opts.channelBurst)
+        },
+        rateLimit: { perSecond: n('request-rate', opts.requestRate), burst: n('request-burst', opts.requestBurst) },
+        rateLimits: opts.rateLimit
+      }
     }).catch(fail);
     startTelemetry({ enabled: opts.telemetry, log: line => console.log(`[crosstalk] ${line}`) });
   });
@@ -215,6 +237,15 @@ channel
     }
   });
 
+/** Channel limits from --max-chars / --rate / --burst; unset ones take the hub's defaults. */
+function limitsFrom(opts: { maxChars?: string; rate?: string; burst?: string }): Partial<ChannelLimits> | undefined {
+  const limits: Partial<ChannelLimits> = {};
+  if (opts.maxChars !== undefined) limits.maxMessageChars = Number(opts.maxChars);
+  if (opts.rate !== undefined) limits.messagesPerMinute = Number(opts.rate);
+  if (opts.burst !== undefined) limits.messageBurst = Number(opts.burst);
+  return Object.keys(limits).length ? limits : undefined;
+}
+
 const createAction = async (label: string | undefined, opts: any) => {
   try {
     const agent = new HttpAgent({ name: opts.name, url: opts.url });
@@ -222,7 +253,8 @@ const createAction = async (label: string | undefined, opts: any) => {
     const snap = await agent.request('channel.create', {
       name: label,
       topic: opts.topic,
-      visibility: opts.public ? 'public' : 'private'
+      visibility: opts.public ? 'public' : 'private',
+      limits: limitsFrom(opts)
     });
     console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`));
     saveKey(snap.channel.id, snap.channel.name, opts.url, snap.ownerKey);
@@ -237,6 +269,9 @@ for (const cmd of [program.command('new [label]'), channel.command('create [labe
     .description('Start a new conversation at its own address')
     .option('--public', 'also list it in the hub\'s public directory')
     .option('--topic <topic>', 'what the conversation is for')
+    .option('--max-chars <n>', 'longest message allowed (fixed for the channel\'s life; default: the hub\'s)')
+    .option('--rate <perMinute>', 'messages each member may post per minute (default: the hub\'s)')
+    .option('--burst <n>', 'messages a member may post back to back (default: the hub\'s)')
     .option('-n, --name <agent>', 'your agent name', defaultName())
     .option('-u, --url <url>', 'hub URL', defaultUrl())
     .action(createAction);
@@ -249,13 +284,16 @@ program
   .option('-r, --role <role>', 'your role', 'human')
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .option('--label <label>', 'label for a new conversation')
+  .option('--max-chars <n>', 'for a new conversation: longest message allowed')
+  .option('--rate <perMinute>', 'for a new conversation: messages each member may post per minute')
+  .option('--burst <n>', 'for a new conversation: messages a member may post back to back')
   .option('--no-start', 'do not start a local hub if none is running (only ever happens for localhost URLs)')
   .action(async (address: string | undefined, opts) => {
     let ct: CrossTalk;
     let ch: Channel;
     try {
       ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start });
-      ch = address ? await ct.joinChannel(address) : await ct.createChannel(opts.label);
+      ch = address ? await ct.joinChannel(address) : await ct.createChannel(opts.label, { limits: limitsFrom(opts) });
     } catch (err) {
       return fail(err);
     }

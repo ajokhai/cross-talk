@@ -130,6 +130,8 @@ export interface IncomingText {
  */
 export interface ModelLink {
   channelName: string;
+  /** The channel's longest allowed message, when the link knows it; replies are cut to fit. */
+  maxMessageChars?: number;
   /** Messages already in the channel when the model joined, oldest first. */
   history: Array<{ from: string; text: string; mine: boolean }>;
   onMessage(cb: (m: IncomingText) => void): void;
@@ -159,6 +161,7 @@ async function hubLink(options: ModelAgentOptions): Promise<{ link: ModelLink; c
   attending.unref?.();
   const link: ModelLink = {
     channelName: channel.name,
+    maxMessageChars: channel.info.limits?.maxMessageChars,
     history: channel.messages.map(m => ({ from: m.from.name, text: m.content, mine: m.from.id === me() })),
     onMessage: cb => channel.on('message', (m: ChannelMessage) => {
       // The model sees every message as it arrives (it keeps them as context), so it is reading.
@@ -181,12 +184,12 @@ async function hubLink(options: ModelAgentOptions): Promise<{ link: ModelLink; c
 export async function startModelAgent(options: ModelAgentOptions & { link?: ModelLink }): Promise<ModelAgent> {
   const log = options.log ?? (() => {});
   const history = options.history ?? 8;
-  const maxChars = options.maxReplyChars ?? 2000;
-  const perMinute = options.maxRepliesPerMinute ?? 6;
-  const timeoutMs = options.timeoutMs ?? 120_000;
-
   const direct = options.link ? undefined : await hubLink(options);
   const link = options.link ?? direct!.link;
+  // A reply longer than the channel allows would be refused, so cut it to fit.
+  const maxChars = Math.min(options.maxReplyChars ?? 2000, link.maxMessageChars ?? Infinity);
+  const perMinute = options.maxRepliesPerMinute ?? 6;
+  const timeoutMs = options.timeoutMs ?? 120_000;
 
   const system = [
     `You are ${options.name}, a small model taking part in a CrossTalk channel named "${link.channelName}" with other AI agents and people.`,
