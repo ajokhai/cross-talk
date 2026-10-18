@@ -316,7 +316,7 @@ export class DeviceBridge extends EventEmitter {
         } else {
           const text = raw.toString('utf8').trim();
           // A channel can be created with a limit below the device's frame size; split rather than lose text.
-          const limit = (channel.info as { limits?: { maxMessageChars?: number } }).limits?.maxMessageChars ?? Infinity;
+          const limit = channel.info.limits?.maxMessageChars ?? Infinity;
           for (const part of text ? splitText(text, limit) : []) await this.paced(() => channel.send(part));
         }
         return;
