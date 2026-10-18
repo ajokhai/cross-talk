@@ -1,0 +1,460 @@
+<title>Robots in the Channel</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="How CrossTalk coordinates robots, cameras, sensors and language models: what works today, measured results, proposed robot skills, and use cases.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: one 68ch reading column, like a preprint; figures may run to 720px. */
+:root {
+  --bg: #ffffff;
+  --fg: #16191d;
+  --muted: #5a6068;
+  --rule: #d9dde2;
+  --tint: #f3f5f7;
+  --accent: #1f5f8b;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --font-body: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --font-head: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171b; --fg: #e6e8eb; --muted: #a1a8b1; --rule: #343a42; --tint: #1c2026;
+    --accent: #7cb4dc; --series-1: #3987e5; --series-2: #d95926; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171b; --fg: #e6e8eb; --muted: #a1a8b1; --rule: #343a42; --tint: #1c2026;
+  --accent: #7cb4dc; --series-1: #3987e5; --series-2: #d95926; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 17px/1.6 var(--font-body); }
+.paper {
+  max-width: 720px; margin: 0 auto;
+  padding-block: 56px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.prose { max-width: 68ch; }
+h1, h2, h3 { font-family: var(--font-head); text-wrap: balance; line-height: 1.25; }
+h1 { font-size: 30px; font-weight: 600; margin: 0 0 14px; letter-spacing: -0.01em; }
+h2 { font-size: 20px; font-weight: 600; margin: 44px 0 10px; }
+h3 { font-size: 16.5px; font-weight: 600; margin: 28px 0 6px; }
+h2 .n, h3 .n { color: var(--muted); font-weight: 500; margin-right: 8px; font-variant-numeric: tabular-nums; }
+p { margin: 0 0 14px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 0.86em var(--font-mono); background: var(--tint); padding: 1px 4px; border-radius: 3px; overflow-wrap: anywhere; }
+.byline { font-family: var(--font-head); font-size: 14.5px; color: var(--muted); margin: 0 0 30px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.byline strong { color: var(--fg); font-weight: 500; }
+.abstract { border-block: 1px solid var(--rule); padding-block: 18px 6px; margin-bottom: 8px; }
+.label { font-family: var(--font-head); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+ul, ol { margin: 0 0 14px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.eq { font-style: italic; text-align: center; margin: 4px 0 16px; font-variant-numeric: tabular-nums; }
+.eq span { font-style: normal; color: var(--muted); }
+figure { margin: 26px 0 28px; }
+figure svg { display: block; width: 100%; height: auto; max-width: 100%; }
+figcaption { font-size: 14.5px; line-height: 1.5; color: var(--muted); margin-top: 10px; max-width: 68ch; }
+figcaption b { color: var(--fg); font-family: var(--font-head); font-weight: 600; }
+.table-wrap { overflow-x: auto; margin: 22px 0 6px; }
+table { border-collapse: collapse; font: 14px/1.4 var(--font-head); font-variant-numeric: tabular-nums; min-width: 100%; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-weight: 600; border-bottom: 1.5px solid var(--fg); vertical-align: bottom; }
+tbody tr.sep td { border-top: 1.5px solid var(--rule); }
+.tcap { font-size: 14.5px; color: var(--muted); margin-bottom: 22px; max-width: 68ch; }
+.tcap b { color: var(--fg); font-family: var(--font-head); font-weight: 600; }
+.text th, .text td { text-align: left; }
+.zero { color: var(--accent); font-weight: 600; }
+.refs { font-size: 14.5px; line-height: 1.5; padding-left: 30px; }
+.refs li { margin-bottom: 8px; }
+/* SVG figure styles; every fill comes from a token */
+.fig text { font-family: var(--font-head); fill: var(--fg); }
+.fig .ax { font-size: 12px; fill: var(--muted); }
+.fig .lab { font-size: 12.5px; font-weight: 500; }
+.fig .grid { stroke: var(--rule); stroke-width: 1; }
+.fig .base { stroke: var(--muted); stroke-width: 1; }
+.fig .box { fill: var(--tint); stroke: var(--rule); stroke-width: 1; }
+.fig .hub { fill: var(--bg); stroke: var(--accent); stroke-width: 1.5; }
+.fig .inner { fill: var(--tint); stroke: none; }
+.fig .wire { stroke: var(--muted); stroke-width: 1.25; fill: none; }
+.fig .head { fill: var(--muted); }
+.fig .s1 { fill: var(--series-1); }
+.fig .whisk { stroke: var(--fg); stroke-width: 1.25; }
+.fig .l1 { stroke: var(--series-1); stroke-width: 2; fill: none; }
+.fig .l2 { stroke: var(--series-2); stroke-width: 2; fill: none; }
+.fig .m1 { fill: var(--series-1); stroke: var(--bg); stroke-width: 2; }
+.fig .m2 { fill: var(--series-2); stroke: var(--bg); stroke-width: 2; }
+.fig .accent { fill: var(--accent); }
+.fig .small { font-size: 11.5px; fill: var(--muted); }
+.fig .title { font-size: 13px; font-weight: 600; }
+.status { font: 600 11.5px var(--font-head); letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.built { color: var(--accent); background: var(--tint); }
+.proposed { color: var(--muted); border: 1px solid var(--rule); }
+.case { border-top: 1px solid var(--rule); padding-top: 4px; margin-top: 22px; }
+.case dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 15.5px; margin: 8px 0 12px; }
+.case dt { font: 600 13px/1.9 var(--font-head); color: var(--muted); }
+.case dd { margin: 0; min-width: 0; }
+@media (max-width: 520px) { .case dl { grid-template-columns: 1fr; } .case dt { line-height: 1.4; } }
+@media (max-width: 520px) { body { font-size: 16px; } h1 { font-size: 25px; } .paper { padding-block: 32px 56px; } }
+@media print {
+  :root { --bg: #fff; --fg: #111; --muted: #555b62; --rule: #d4d8dd; --tint: #f2f4f6; --accent: #1f5f8b; --series-1: #2a78d6; --series-2: #eb6834; }
+  body { font-size: 10.5pt; }
+  .paper { padding: 0; max-width: none; }
+  .prose { max-width: none; }
+  h2 { margin-top: 26px; break-after: avoid; }
+  h3 { break-after: avoid; }
+  figure, .table-wrap, .tcap { break-inside: avoid; }
+  .table-wrap { overflow: visible; }
+  table { font-size: 8.5pt; }
+  th, td { padding: 4px 6px; }
+  thead th { white-space: normal; }
+  a { color: var(--fg); text-decoration: none; }
+}
+@page { size: letter; margin: 0.85in 0.9in; }
+</style>
+
+<article class="paper">
+<header class="prose">
+  <h1>Robots in the Channel: Coordinating Machines, Cameras and Language Models with CrossTalk</h1>
+  <div class="byline">
+    <span><strong>Josh Ayokhai</strong> (@ajokhai)</span>
+    <span>October 2026</span>
+    <span><a href="https://github.com/ajokhai/cross-talk">github.com/ajokhai/cross-talk</a></span>
+  </div>
+</header>
+
+<section class="abstract prose">
+  <div class="label">Abstract</div>
+  <p>CrossTalk gives AI agents a shared, private conversation with messages, leased locks, claims and read tracking [1]. This paper looks at the same primitives for machines. Microcontrollers, rovers, sensors and robot arms can join a channel today through a bridge that speaks 10-byte-header binary frames over serial, Bluetooth, TCP or radio. The device side is a single C header that takes about 340 bytes of RAM. Locks then cover physical resources such as a charging dock or an arm's work zone, and a person approves risky steps from one inbox. We argue for one design rule: <em>the model supplies goals, never motion</em>. A language model picks from a short skill menu; the robot plans, solves kinematics and enforces safety itself. In simulations that run the real bridge and link code, rovers sharing a dock without coordination drove into an occupied dock on 39–90% of charges, and never did with CrossTalk locks. Over a simulated 9,600 bit/s radio with 20% packet loss, the reliable link delivered all 40 test messages, against 28% with checksums alone. A complete pick-and-place exchange in the proposed skill format is 117 tokens, less than one 640×480 camera frame sent to a vision model. We separate what is built from what is proposed, describe seven use cases, and list the safety limits of a coordination layer.</p>
+</section>
+
+<div class="prose">
+<h2><span class="n">1</span>Introduction</h2>
+<p>Robots rarely work alone. Warehouse robots share chargers, aisles and lifts. A lab cell has an arm, a camera and a planner. A farm has sensors spread across fields, controllers for fans and valves, and a person who should approve anything that cuts the water. These machines come from different vendors, run different software, and are connected by whatever link reaches them: USB, Wi-Fi, Bluetooth, or a radio that drops packets.</p>
+<p>Language models are now good at the part of this work that is hard to hand-code: turning a request like "put the red cube in bin 2" into steps, and choosing what to do when a step fails. Most current ways of connecting models to robots are heavy, though. Vision-language-action models [4, 5, 6] map camera frames to motor commands with large networks that need GPUs and robot-specific training. Sending frames to a vision model costs hundreds of tokens per image. Agents built on ROS [9] often give one capable model raw topics and services, which is verbose and easy to misuse.</p>
+<p>CrossTalk was built to coordinate coding agents, and its primitives carry over to machines with little change. A lock on <code>src/auth.ts</code> and a lock on <code>dock/charger-1</code> are the same operation. This paper makes four contributions:</p>
+<ol>
+  <li>A description of what CrossTalk already provides for devices, with its measured footprint and how well each part has been verified (§2).</li>
+  <li>A division of labour in which models only supply goals, and a token-light skill and event format built on it, proposed in issues #5–#7 (§3, §4).</li>
+  <li>Simulated measurements, using the real bridge and link code, of shared-dock coordination, radio delivery, and tokens per task (§5).</li>
+  <li>Seven use cases, each marked with what works today and what is missing, and a discussion of safety (§6, §7).</li>
+</ol>
+
+<h2><span class="n">2</span>What CrossTalk provides for machines today</h2>
+<p>A device too small to run a WebSocket client sends compact binary frames to <code>crosstalk-bridge</code> on a nearby computer, which makes it an ordinary channel member. Each frame has a 10-byte header (magic byte, version, opcode, flags, timestamp, payload length) and a payload. Opcodes cover registering a name, heartbeats, channel messages, direct messages, lock acquire and release, and a state query. Lock requests use a packed form of the XDialect shorthand, so <code>!LCK @dock/charger-1 "charging" ~60</code> becomes a few bytes. The bridge relays the channel back: messages, DMs, other members' lock activity, and a conflict alert when someone wants a lock the device holds.</p>
+<p>The device side is one C header with no heap allocation and no threads. Compiled with <code>clang -Os</code>, full support (register, message, DM, lock, unlock, heartbeat, decode) is 883 bytes of code on a Cortex-M0 and 961 on a Cortex-M4, with 170 bytes of static RAM and a peak stack of 168 bytes: about 340 bytes of RAM, a sixth of an Arduino Uno's 2 KB. MicroPython and Arduino clients exist, along with frame-header validators in AVR, ARM Thumb-2 and WebAssembly. The hub is a Node process; one measured hub used about 54 MB at idle and 61 MB with 200 agents connected, which fits a Raspberry Pi.</p>
+<p>For links that lose or corrupt bytes, an optional link layer (<code>--reliable</code>) splits messages into packets of up to 64 bytes, adds a CRC-16 to each, acknowledges and resends them, suppresses duplicates, and paces transmissions to a duty cycle such as the 1% limit on many EU 868 MHz bands [13]. <code>crosstalk llm</code> puts a local model into a channel through any OpenAI-compatible server, including over a serial or radio link, so an offline device can host its own model. Two features from the agent setting matter even more with hardware: a question to the channel owner, answered from one inbox with an owner key no other member holds, and attention tracking, which shows a device whose link has died as an idle member.</p>
+
+<div class="table-wrap">
+<table class="text">
+  <thead><tr><th>Capability</th><th>Status</th><th>How it has been checked</th></tr></thead>
+  <tbody>
+    <tr><td>Bridge, binary frames, device locks</td><td><span class="status built">Built</span></td><td>Tests against a real hub</td></tr>
+    <tr><td>C header client</td><td><span class="status built">Built</span></td><td>Unit tests under ASan and UBSan, as C and C++</td></tr>
+    <tr><td>MicroPython client</td><td><span class="status built">Built</span></td><td>Run under CPython against the Node codec</td></tr>
+    <tr><td>Arduino / ESP32 sketch</td><td><span class="status built">Built</span></td><td>Compiled against a stub; not yet run on hardware</td></tr>
+    <tr><td>Thumb-2, WASM header checks</td><td><span class="status built">Built</span></td><td>Emulated; match the C decoder on 2,050 frames</td></tr>
+    <tr><td>AVR header check</td><td><span class="status built">Built</span></td><td>Reviewed by hand only</td></tr>
+    <tr><td>Reliable link for radios</td><td><span class="status built">Built</span></td><td>Simulated lossy links; computers on both ends</td></tr>
+    <tr><td>Models over serial or radio</td><td><span class="status built">Built</span></td><td>Simulated radio test with a real hub</td></tr>
+    <tr class="sep"><td>Robot skill menus, constrained commands (#5)</td><td><span class="status proposed">Proposed</span></td><td>Open issue</td></tr>
+    <tr><td>AI cameras posting detections (#6)</td><td><span class="status proposed">Proposed</span></td><td>Open issue</td></tr>
+    <tr><td>ROS 2 bridge (#7)</td><td><span class="status proposed">Proposed</span></td><td>Open issue</td></tr>
+    <tr><td>Hub peering, failover, offline meshes (#2–#4)</td><td><span class="status proposed">Proposed</span></td><td>Open issues</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="tcap"><b>Table 1.</b> What exists and how it has been verified. No part has yet run on a physical robot; the microcontroller firmware does not yet speak the reliable link.</p>
+
+<h2><span class="n">3</span>The model supplies goals, never motion</h2>
+<p>A robot runs several control loops at very different speeds. CrossTalk, and any model talking through it, belongs only in the slowest one.</p>
+
+<figure>
+<svg class="fig" viewBox="0 0 640 248" role="img" aria-labelledby="r1t">
+  <title id="r1t">Four layers of robot control. The model and CrossTalk handle only the task layer, in seconds. The robot handles motion planning, kinematics and motor control.</title>
+  <rect class="hub" x="0" y="6" width="640" height="52" rx="5"/>
+  <text class="lab" x="16" y="28">Task: what to do, in what order, what to try after a failure</text>
+  <text class="small" x="16" y="47">the model, through CrossTalk · "@bot1 pick cube-red" · "bot1: pick fail unreachable"</text>
+  <text class="small" x="624" y="28" text-anchor="end">seconds</text>
+  <text class="small accent" x="16" y="78">CrossTalk boundary: skill names, object and place names, short results</text>
+  <line class="wire" x1="0" x2="640" y1="88" y2="88" stroke-dasharray="4 4"/>
+  <rect class="box" x="0" y="98" width="640" height="44" rx="4"/>
+  <text class="lab" x="16" y="117">Motion planning: a path to the target, around obstacles, within reach</text>
+  <text class="small" x="16" y="134">robot or bridge · MoveIt, Nav2, or simple firmware</text>
+  <text class="small" x="624" y="117" text-anchor="end">~100 ms</text>
+  <rect class="box" x="0" y="150" width="640" height="44" rx="4"/>
+  <text class="lab" x="16" y="169">Kinematics: target position to joint angles</text>
+  <text class="small" x="16" y="186">robot or bridge · analytic IK on a microcontroller, KDL or TRAC-IK in ROS</text>
+  <text class="small" x="624" y="169" text-anchor="end">milliseconds</text>
+  <rect class="box" x="0" y="202" width="640" height="44" rx="4"/>
+  <text class="lab" x="16" y="221">Motor control: reach those angles, enforce limits, stop on a fault</text>
+  <text class="small" x="16" y="238">robot firmware · emergency stop and interlocks live here</text>
+  <text class="small" x="624" y="221" text-anchor="end">~1 kHz</text>
+</svg>
+<figcaption><b>Figure 1.</b> Who does what. A model that takes ten seconds to answer cannot destabilise a loop that runs at a kilohertz, because it never touches that loop.</figcaption>
+</figure>
+
+<p>Three rules follow. <strong>Skills take objects or places, not joint angles.</strong> <code>pick cube-red</code> is best, because the robot resolves where the cube is. <code>go 120 40</code> in the robot's own frame is acceptable when the numbers come from a camera or the robot itself, never from the model's arithmetic. <code>shoulder 42 elbow -17</code> is not allowed, because it puts kinematics on the model. <strong>Failures come back with a reason</strong>, such as <code>pick fail unreachable</code>, so the model can choose another action. <strong>Safety stays on the device</strong>: limits, watchdogs and emergency stops do not depend on the channel. This is the split SayCan [2] used, where a language model chooses among skills that the robot can execute; CrossTalk's contribution is to make the skill list and its results small enough for a microcontroller and a slow link, and to put several robots, cameras, models and people in one conversation.</p>
+
+<h2><span class="n">4</span>Proposed extensions</h2>
+<h3><span class="n">4.1</span>Skill menus and constrained commands (#5)</h3>
+<p>When a robot joins, it advertises what it can do in one line, for example <code>bot1 skills: go(place) pick(object) drop(place) look() stop()</code>, which is 17 tokens and sent once. The model replies with one command per decision, such as <code>@bot1 pick cube-red</code> (5–7 tokens). <code>crosstalk llm</code> would compile the menu into a grammar (GBNF for llama.cpp [11], or a JSON schema for OpenAI-compatible servers), so that even a 0.5-billion-parameter model can only produce commands on the menu. The robot answers only on events (<code>go done</code>, <code>go fail blocked</code>) and reports status when it changes (<code>bat 81 grip c</code>). If no valid command arrives within a set time, the robot stops.</p>
+<h3><span class="n">4.2</span>Cameras that post detections, not images (#6)</h3>
+<p>Many inexpensive camera modules already run object detection on board. As channel members, they would post one line when something changes, after a confidence cutoff and a short delay to ignore flicker: <code>cam1: +cube-red table 0.92</code>, <code>cam1: -person door</code>, <code>cam1: ?unknown 0.4</code>. A quiet scene costs nothing. The camera or its bridge applies its own hand-eye calibration, so detections arrive as named objects or in the robot's frame, never in pixels. Locks such as <code>target/cube-red</code> stop two robots chasing one object, and a stronger model can be @mentioned only for <code>?unknown</code>. Event-based camera systems such as Frigate [14] already work this way for home security; the difference is a shared channel with the robots and models that act on the events.</p>
+<h3><span class="n">4.3</span>A ROS 2 bridge (#7)</h3>
+<p>Most real robots run ROS 2 [7]. A small bridge node would map each skill to a ROS 2 action, whose goal, feedback and result map onto <code>go</code> and <code>go done</code>, and mirror selected topics into the channel as short change-only lines. MoveIt [15] and Nav2 [8] keep doing the planning. Unlike rosbridge [16], which exposes everything as JSON, or agents that hand a model raw topics [9], the bridge would expose only a configured menu. Robots on ROS 2 and robots on bare microcontrollers would then share one protocol; micro-ROS [10] brings ROS to microcontrollers but needs far more memory than the 340-byte client and does not address model control.</p>
+<h3><span class="n">4.4</span>Meshes without a central hub (#2–#4)</h3>
+<p>Today each channel lives in one hub's memory, and the radio link connects exactly two ends. Field deployments need hubs that peer over any link and relay across several hops, failover when a hub disappears, and discovery that works with no internet at all. How locks behave when hubs are partitioned is an open question (§8).</p>
+
+<h2><span class="n">5</span>Evaluation</h2>
+<p>These are simulations, run on an Apple M1 Pro with Node 20.20 and CrossTalk 2.7.0, each against a fresh hub with stock settings. They use the real bridge, binary codec and reliable link code; only the devices and the radio are simulated. The harness (<code>docs/paper/bench/robotics.ts</code>) and its output (<code>robotics-results.json</code>) are in the repository.</p>
+
+<h3><span class="n">5.1</span>Rovers sharing charging docks</h3>
+<p>Each rover is a simulated device behind its own <code>DeviceBridge</code>, speaking binary frames. It works for 300–600 ms, then needs to charge: it drives to a dock (50 ms) and charges (200 ms). Without coordination it picks a dock at random. With CrossTalk it sends <code>LOCK_ACQUIRE</code> for <code>dock/charger-k</code>, tries the next dock on <code>LOCK_DENIED</code>, waits for a release frame when every dock is taken, and releases the lock after charging. A collision is a rover arriving at a dock another rover occupies. Each configuration ran three times for 6 seconds.</p>
+
+<figure>
+<svg class="fig" viewBox="0 0 640 238" role="img" aria-labelledby="r2t">
+  <title id="r2t">Share of charges where a rover drove into an occupied dock, without coordination. With locks it never happened.</title>
+  <line class="grid" x1="44" x2="624" y1="20" y2="20"/>
+  <line class="grid" x1="44" x2="624" y1="65" y2="65"/>
+  <line class="grid" x1="44" x2="624" y1="110" y2="110"/>
+  <line class="grid" x1="44" x2="624" y1="155" y2="155"/>
+  <text class="ax" x="36" y="24" text-anchor="end">100%</text>
+  <text class="ax" x="36" y="69" text-anchor="end">75%</text>
+  <text class="ax" x="36" y="114" text-anchor="end">50%</text>
+  <text class="ax" x="36" y="159" text-anchor="end">25%</text>
+  <text class="ax" x="36" y="204" text-anchor="end">0</text>
+  <text class="title" x="160" y="12">1 dock</text>
+  <text class="title" x="464" y="12">2 docks</text>
+  <path class="s1" d="M88.5 200 V80.2 Q88.5 76.2 92.5 76.2 H132.5 Q136.5 76.2 136.5 80.2 V200 Z"><title>1 dock, 4 rovers: 68.8% of charges collided</title></path>
+  <path class="s1" d="M225.5 200 V41.3 Q225.5 37.3 229.5 37.3 H269.5 Q273.5 37.3 273.5 41.3 V200 Z"><title>1 dock, 8 rovers: 90.4% of charges collided</title></path>
+  <path class="s1" d="M394.5 200 V134.5 Q394.5 130.5 398.5 130.5 H438.5 Q442.5 130.5 442.5 134.5 V200 Z"><title>2 docks, 4 rovers: 38.6% of charges collided</title></path>
+  <path class="s1" d="M531.5 200 V81.4 Q531.5 77.4 535.5 77.4 H575.5 Q579.5 77.4 579.5 81.4 V200 Z"><title>2 docks, 8 rovers: 68.1% of charges collided</title></path>
+  <text class="lab" x="112.5" y="68" text-anchor="middle">69%</text>
+  <text class="lab" x="249.5" y="30" text-anchor="middle">90%</text>
+  <text class="lab" x="418.5" y="122" text-anchor="middle">39%</text>
+  <text class="lab" x="555.5" y="69" text-anchor="middle">68%</text>
+  <line class="base" x1="44" x2="318" y1="200" y2="200"/>
+  <line class="base" x1="350" x2="624" y1="200" y2="200"/>
+  <text class="ax" x="112.5" y="217" text-anchor="middle">4 rovers</text>
+  <text class="ax" x="249.5" y="217" text-anchor="middle">8 rovers</text>
+  <text class="ax" x="418.5" y="217" text-anchor="middle">4 rovers</text>
+  <text class="ax" x="555.5" y="217" text-anchor="middle">8 rovers</text>
+  <text class="small accent" x="112.5" y="234" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="249.5" y="234" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="418.5" y="234" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="555.5" y="234" text-anchor="middle">locks: 0</text>
+</svg>
+<figcaption><b>Figure 2.</b> Charges where a rover arrived at an occupied dock, without coordination (mean of 3 runs). With CrossTalk locks, none of 348 charges collided.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Docks</th><th>Rovers</th><th>Collided, none</th><th>Collided, locks</th><th>Charges per run, locks</th><th>Dock busy, locks</th><th>Wait p95, locks</th><th>Link bytes per charge</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>4</td><td>66 / 96</td><td class="zero">0 / 65</td><td>21.7</td><td>72.7%</td><td>800 ms</td><td>551</td></tr>
+    <tr><td>1</td><td>8</td><td>170 / 188</td><td class="zero">0 / 64</td><td>21.3</td><td>71.7%</td><td>937 ms</td><td>1,315</td></tr>
+    <tr class="sep"><td>2</td><td>4</td><td>37 / 96</td><td class="zero">0 / 92</td><td>30.7</td><td>51.5%</td><td>159 ms</td><td>480</td></tr>
+    <tr><td>2</td><td>8</td><td>128 / 188</td><td class="zero">0 / 127</td><td>42.3</td><td>71.0%</td><td>831 ms</td><td>1,231</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="tcap"><b>Table 2.</b> Dock sharing, totals over 3 runs of 6 s. "Dock busy" is the share of time docks spent charging. Link bytes count every frame in both directions on the device links, divided by charges completed.</p>
+<p>Without locks, collisions rise with fleet size until nearly every charge with one dock and eight rovers is a collision. Rovers there "charged" more often only because several occupied the same dock at once, which a real dock cannot allow. With locks, no charge collided. A lock is held for the drive and the charge, so a single dock can spend at most 200 of every 250 ms charging, or 80%; it spent 72%. The cost of coordination over the device link grows with the fleet: each rover receives every other rover's lock activity, so a charge cycle took about 500 bytes of frames with four rovers and about 1.3 KB with eight. That is negligible over USB or Wi-Fi and about a second of airtime at 9,600 bit/s, so radio deployments need devices to receive only the locks they care about (§8).</p>
+
+<h3><span class="n">5.2</span>Messages over a lossy radio</h3>
+<p>Two <code>ReliableLink</code> ends are joined by a simulated half-duplex radio at 9,600 bit/s, where each transmission takes its airtime, may be dropped, and may arrive with one byte flipped (corruption is set to half the drop rate). Forty 120-byte messages, the size of a status line or a short model reply, cross one at a time. The default link (64-byte packets, acknowledgements, up to 6 resends, 250 ms acknowledgement timeout) is compared with the same link sending each packet once, which keeps the checksums but not the resends.</p>
+
+<figure>
+<svg class="fig" viewBox="0 0 640 244" role="img" aria-labelledby="r3t">
+  <title id="r3t">Messages delivered intact against packet loss. With acknowledgements and resends, delivery stays at 100% up to 20% loss and 97.5% at 30%. With checksums only it falls to 17.5%.</title>
+  <line class="grid" x1="60" x2="620" y1="30" y2="30"/>
+  <line class="grid" x1="60" x2="620" y1="72.5" y2="72.5"/>
+  <line class="grid" x1="60" x2="620" y1="115" y2="115"/>
+  <line class="grid" x1="60" x2="620" y1="157.5" y2="157.5"/>
+  <line class="base" x1="60" x2="620" y1="200" y2="200"/>
+  <text class="ax" x="50" y="34" text-anchor="end">100%</text>
+  <text class="ax" x="50" y="76.5" text-anchor="end">75%</text>
+  <text class="ax" x="50" y="119" text-anchor="end">50%</text>
+  <text class="ax" x="50" y="161.5" text-anchor="end">25%</text>
+  <text class="ax" x="50" y="204" text-anchor="end">0</text>
+  <text class="ax" x="60" y="218" text-anchor="middle">0%</text>
+  <text class="ax" x="151.7" y="218" text-anchor="middle">5%</text>
+  <text class="ax" x="243.3" y="218" text-anchor="middle">10%</text>
+  <text class="ax" x="426.7" y="218" text-anchor="middle">20%</text>
+  <text class="ax" x="610" y="218" text-anchor="middle">30%</text>
+  <text class="ax" x="335" y="238" text-anchor="middle">transmissions dropped (half as many again corrupted)</text>
+  <polyline class="l2" points="60,30 151.7,64 243.3,102.3 426.7,153.3 610,170.3"/>
+  <polyline class="l1" points="60,30 151.7,30 243.3,30 426.7,30 610,34.3"/>
+  <circle class="m2" cx="151.7" cy="64" r="4.5"><title>5% loss, checksums only: 32 of 40</title></circle>
+  <circle class="m2" cx="243.3" cy="102.3" r="4.5"><title>10% loss, checksums only: 23 of 40</title></circle>
+  <circle class="m2" cx="426.7" cy="153.3" r="4.5"><title>20% loss, checksums only: 11 of 40</title></circle>
+  <circle class="m2" cx="610" cy="170.3" r="4.5"><title>30% loss, checksums only: 7 of 40</title></circle>
+  <circle class="m1" cx="60" cy="30" r="4.5"><title>No loss: 40 of 40 both ways</title></circle>
+  <circle class="m1" cx="151.7" cy="30" r="4.5"><title>5% loss, reliable: 40 of 40</title></circle>
+  <circle class="m1" cx="243.3" cy="30" r="4.5"><title>10% loss, reliable: 40 of 40</title></circle>
+  <circle class="m1" cx="426.7" cy="30" r="4.5"><title>20% loss, reliable: 40 of 40</title></circle>
+  <circle class="m1" cx="610" cy="34.3" r="4.5"><title>30% loss, reliable: 39 of 40</title></circle>
+  <text class="lab" x="426.7" y="20" text-anchor="middle">acknowledgements and resends</text>
+  <text class="lab" x="300" y="104">checksums only</text>
+</svg>
+<figcaption><b>Figure 3.</b> Messages delivered whole out of 40. The one message the reliable link could not deliver at 30% loss was reported as lost, not silently dropped.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Dropped</th><th>Intact, checksums only</th><th>Intact, reliable</th><th>Mean latency, reliable</th><th>p95 latency, reliable</th><th>Air bytes per payload byte, reliable</th></tr></thead>
+  <tbody>
+    <tr><td>0%</td><td>40 / 40</td><td class="zero">40 / 40</td><td>136 ms</td><td>137 ms</td><td>1.33</td></tr>
+    <tr><td>5%</td><td>32 / 40</td><td class="zero">40 / 40</td><td>230 ms</td><td>393 ms</td><td>1.57</td></tr>
+    <tr><td>10%</td><td>23 / 40</td><td class="zero">40 / 40</td><td>305 ms</td><td>880 ms</td><td>1.75</td></tr>
+    <tr><td>20%</td><td>11 / 40</td><td class="zero">40 / 40</td><td>698 ms</td><td>1,646 ms</td><td>2.76</td></tr>
+    <tr><td>30%</td><td>7 / 40</td><td>39 / 40</td><td>878 ms</td><td>2,135 ms</td><td>3.18</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="tcap"><b>Table 3.</b> Radio delivery at 9,600 bit/s. Air bytes include packet headers, checksums, acknowledgements and resends.</p>
+<p>Reliability costs airtime: a third more bytes on a clean link for headers, checksums and acknowledgements, and about three times as many at 30% loss. On long-range LoRa settings, which carry a few hundred bits per second, and under a 1% duty cycle, that budget is tight. A 120-byte message at 1.33 air bytes per byte takes about 0.13 s at 9,600 bit/s, after which a 1% duty cycle requires about 13 s of silence. That favours the terse skill commands of §4.1, which are a few dozen bytes, over conversational replies.</p>
+
+<h3><span class="n">5.3</span>Tokens per task</h3>
+<p>We wrote out a complete pick-and-place exchange in the proposed format: the robot's menu, two camera detections, the person's request, four commands, the robot's results including one failure and recovery, and the camera's final update. We counted tokens with the o200k tokenizer and compared the total with three other ways of giving a model the same information over a 30-second task.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>What the model reads</th><th>Tokens</th><th>Basis</th></tr></thead>
+  <tbody>
+    <tr><td>Whole task as skill commands and events</td><td class="zero">117</td><td>Measured: 14 lines</td></tr>
+    <tr><td>One 640×480 camera frame per decision (4 decisions)</td><td>1,640</td><td>4 × 410; about width × height / 750 [12]</td></tr>
+    <tr><td>Camera at 1 frame per second for 30 s</td><td>12,300</td><td>30 × 410</td></tr>
+    <tr><td>Raw joint states at 10 Hz for 30 s</td><td>44,100</td><td>300 × 147, one rosbridge JointState message measured</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="tcap"><b>Table 4.</b> Tokens a model reads for one pick-and-place task. Only the first row and the size of one joint-state message are measured; the others multiply a measured or documented unit cost by an assumed rate.</p>
+<p>The whole exchange costs less than one camera frame. The menu is 17 tokens, commands 5–7, and events 5–13. The comparison is not like for like: a vision model looking at frames can notice things no detector was trained for. The point is that when a camera module can name what it sees, a model that reads names instead of pixels can run on far smaller hardware, including models that cannot read images at all.</p>
+
+<h2><span class="n">6</span>Use cases</h2>
+<p>Each case lists the channel's members, the locks they share, and what is built or missing.</p>
+
+<div class="case">
+<h3><span class="n">6.1</span>Fleet charging and shared floor space</h3>
+<p>Cleaning robots, lawn robots or warehouse carts share chargers, narrow aisles and lifts.</p>
+<dl>
+  <dt>Members</dt><dd>Each robot through one bridge on Wi-Fi (<code>--tcp-listen</code>); optionally a planner agent; the site operator.</dd>
+  <dt>Locks</dt><dd><code>dock/charger-1</code>, <code>aisle/3</code>, <code>lift/main</code></dd>
+  <dt>Today</dt><dd>Works with the existing bridge and firmware; this is the scenario measured in §5.1.</dd>
+  <dt>Missing</dt><dd>A wait queue so the next robot is handed a dock on release instead of retrying.</dd>
+</dl>
+</div>
+
+<div class="case">
+<h3><span class="n">6.2</span>A lab or kitting cell</h3>
+<p>An arm, a camera and a planner sort parts into bins. The planner turns a request into steps and handles failures; nobody needs the planner's context but the planner.</p>
+<dl>
+  <dt>Members</dt><dd>Arm controller, camera module, a planner model, the technician.</dd>
+  <dt>Locks</dt><dd><code>cell/arm-zone</code> while the arm moves; <code>target/part-17</code> while it is being picked.</dd>
+  <dt>Today</dt><dd>Messages, locks and approvals work. The arm and camera would post plain text.</dd>
+  <dt>Missing</dt><dd>Skill menus and constrained commands (#5), camera detections (#6), and the ROS 2 bridge for arms planned with MoveIt (#7).</dd>
+</dl>
+</div>
+
+<div class="case">
+<h3><span class="n">6.3</span>Greenhouses and farms</h3>
+<p>Sensors post readings. An agent watches them and messages fan and valve controllers. Before cutting irrigation it asks the grower, who answers from <code>crosstalk inbox</code>. If the grower has switched questions off, the risky step is left undone.</p>
+<dl>
+  <dt>Members</dt><dd>Sensor nodes, fan and valve controllers, an agent, the grower.</dd>
+  <dt>Locks</dt><dd><code>valve/zone-2</code>, so a scheduled job and the agent do not fight over one valve.</dd>
+  <dt>Today</dt><dd>Works with the bridge, the owner inbox and the reliable link for distant greenhouses.</dd>
+  <dt>Missing</dt><dd>Reliable-link support in the microcontroller firmware, and multi-hop relays (#2) for sites larger than one radio hop.</dd>
+</dl>
+</div>
+
+<div class="case">
+<h3><span class="n">6.4</span>Field robots beyond network coverage</h3>
+<p>A rover works where there is no internet. A laptop at base runs the hub and a small local model; the rover talks to it over LoRa.</p>
+<dl>
+  <dt>Members</dt><dd>The rover, a local model through <code>crosstalk llm</code>, the operator.</dd>
+  <dt>Locks</dt><dd><code>zone/north-field</code>, if more than one rover works the site.</dd>
+  <dt>Today</dt><dd>A model can already sit on the far side of a radio with <code>--serial --reliable</code>; airtime limits mean a few short messages a minute (§5.2).</dd>
+  <dt>Missing</dt><dd>Constrained skill commands to keep messages short (#5), firmware support for the reliable link, offline discovery (#4).</dd>
+</dl>
+</div>
+
+<div class="case">
+<h3><span class="n">6.5</span>Small models with a stronger model on call</h3>
+<p>A small local model makes routine choices from the skill menu. When a camera posts <code>?unknown</code> or a skill keeps failing, it @mentions a stronger cloud model in the same channel, and if both are unsure, asks the person.</p>
+<dl>
+  <dt>Members</dt><dd>Robots, cameras, a local model, a cloud model, the person.</dd>
+  <dt>Locks</dt><dd>Targets and zones as above.</dd>
+  <dt>Today</dt><dd>Mixing local and cloud models in one channel works, and models answer other models only when named.</dd>
+  <dt>Missing</dt><dd>The skill grammar and camera events (#5, #6); a policy for when to escalate.</dd>
+</dl>
+</div>
+
+<div class="case">
+<h3><span class="n">6.6</span>Teaching and hobby robots</h3>
+<p>A planned first demonstration: a hobby-grade radio-controlled car with an ESP32 between its receiver and its steering servo and speed controller. The car joins with <code>drive</code>, <code>steer</code> and <code>stop</code>; a camera board streams to a laptop, where a detector posts what it sees. The car caps its throttle, stops if no valid command arrives within half a second, and keeps the original remote as a manual override.</p>
+<dl>
+  <dt>Members</dt><dd>The car, the camera's detector, a model, the student.</dd>
+  <dt>Today</dt><dd>The bridge and firmware exist; the Arduino sketch has not yet run on hardware.</dd>
+  <dt>Missing</dt><dd>The first hardware run, which this demo is meant to be.</dd>
+</dl>
+</div>
+
+<div class="case">
+<h3><span class="n">6.7</span>Mixed research fleets</h3>
+<p>A lab has robots on ROS 2 and robots on bare microcontrollers, plus coding agents changing their software. All of them can share one channel, and attention tracking shows a robot with a pulled cable as an idle member instead of a silent one.</p>
+<dl>
+  <dt>Today</dt><dd>Microcontroller robots, agents and attention work.</dd>
+  <dt>Missing</dt><dd>The ROS 2 bridge (#7).</dd>
+</dl>
+</div>
+
+<h2><span class="n">7</span>Safety</h2>
+<p>CrossTalk coordinates machines. It is not a safety system, and nothing in this paper should be read as one.</p>
+<ul>
+  <li><strong>Safety stays on the device.</strong> Emergency stops, interlocks, speed and force limits and watchdogs must work with the channel unreachable. Messages can be delayed and a hub or bridge can go offline.</li>
+  <li><strong>Locks are advisory.</strong> A robot that ignores a lock can still enter a zone. Physical barriers and sensors, not locks, keep people safe.</li>
+  <li><strong>A lease expiring does not make a place empty.</strong> Locks expire so that a crashed agent cannot block others forever. For a physical resource, that can be wrong: a robot that loses its link inside a zone loses its lock after the time to live, while it may still be standing there. A robot that loses its link should stop where it is, lock times to live should exceed the time needed to clear a zone, and robots should confirm that a zone is clear with their own sensors before entering it.</li>
+  <li><strong>The menu limits what a model can say.</strong> With a grammar built from the skill menu, a confused or manipulated model can only pick listed skills, and skills cannot express raw motion. Risky skills can require approval from the channel owner, whose key no other member holds, so a message that claims to speak for the owner cannot approve anything.</li>
+</ul>
+
+<h2><span class="n">8</span>Limitations and open questions</h2>
+<ul>
+  <li><strong>No hardware yet.</strong> All results come from simulations of devices and radios. The first hardware runs (§6.6) are the next step, and real radios lose packets in bursts that our independent-loss model does not capture.</li>
+  <li><strong>Device traffic grows with the fleet.</strong> Every device receives every other member's lock activity (§5.1). Letting a device subscribe only to the resources it uses would keep radio traffic flat.</li>
+  <li><strong>Polling for a free resource.</strong> Rovers retry after a release frame instead of joining a queue, which wastes a round trip per attempt and does not guarantee fairness.</li>
+  <li><strong>Locks across hubs.</strong> Once hubs peer (#2), two hubs on either side of a broken link could each grant the same dock. Whether a channel needs one authoritative hub, or locks need quorum, is unresolved.</li>
+  <li><strong>Detection quality.</strong> A camera that posts names is only as good as its detector; a wrong label is a confident wrong fact to the model.</li>
+</ul>
+
+<h2><span class="n">9</span>Conclusion</h2>
+<p>The coordination problems of robots that share space look like those of agents that share a repository, and the same small primitives help: a private channel, short messages, leased locks, read tracking and a person who can approve. Today a microcontroller with 340 bytes to spare can join such a channel over a cable or a lossy radio and take turns at a shared dock. The proposed skill menus, camera events and ROS 2 bridge would let any model, including small offline ones, direct robots while the robots keep their own control and safety. The open issues (#2–#7) describe that work in detail, and contributions are welcome.</p>
+
+<h2>Availability</h2>
+<p>CrossTalk is MIT-licensed at <a href="https://github.com/ajokhai/cross-talk">github.com/ajokhai/cross-talk</a>. The device bridge and firmware are in <code>packages/embedded</code>. To reproduce §5, run <code>npm run build</code> and then <code>npx tsx docs/paper/bench/robotics.ts</code>; the token count also needs <code>js-tiktoken</code>.</p>
+
+<h2>References</h2>
+<ol class="refs">
+  <li>J. Ayokhai. CrossTalk: channel-scoped coordination for heterogeneous AI coding agents. 2026. <a href="https://github.com/ajokhai/cross-talk/blob/main/docs/paper/crosstalk-paper.pdf">github.com/ajokhai/cross-talk</a></li>
+  <li>M. Ahn et al. Do as I can, not as I say: grounding language in robotic affordances. arXiv:2204.01691, 2022.</li>
+  <li>J. Liang et al. Code as policies: language model programs for embodied control. arXiv:2209.07753, 2022.</li>
+  <li>A. Brohan et al. RT-2: vision-language-action models transfer web knowledge to robotic control. arXiv:2307.15818, 2023.</li>
+  <li>M. J. Kim et al. OpenVLA: an open-source vision-language-action model. arXiv:2406.09246, 2024.</li>
+  <li>K. Black et al. π0: a vision-language-action flow model for general robot control. arXiv:2410.24164, 2024.</li>
+  <li>S. Macenski, T. Foote, B. Gerkey, C. Lalancette and W. Woodall. Robot Operating System 2: design, architecture, and uses in the wild. <em>Science Robotics</em> 7(66), 2022.</li>
+  <li>S. Macenski, F. Martín, R. White and J. Ginés Clavero. The Marathon 2: a navigation system. <em>IROS</em>, 2020.</li>
+  <li>NASA Jet Propulsion Laboratory. ROSA: the Robot Operating System Agent. 2024. <a href="https://github.com/nasa-jpl/rosa">github.com/nasa-jpl/rosa</a></li>
+  <li>micro-ROS: ROS 2 for microcontrollers. <a href="https://micro.ros.org">micro.ros.org</a></li>
+  <li>llama.cpp grammars (GBNF). <a href="https://github.com/ggml-org/llama.cpp/tree/master/grammars">github.com/ggml-org/llama.cpp</a></li>
+  <li>Anthropic. Vision in the Claude API: image token cost is about width × height / 750.</li>
+  <li>ETSI EN 300 220: short range devices operating in the 25 MHz to 1,000 MHz range.</li>
+  <li>Frigate NVR. <a href="https://frigate.video">frigate.video</a></li>
+  <li>D. Coleman, I. Sucan, S. Chitta and N. Correll. Reducing the barrier to entry of complex robotic software: a MoveIt! case study. <em>Journal of Software Engineering for Robotics</em> 5(1), 2014.</li>
+  <li>C. Crick, G. Jay, S. Osentoski, B. Pitzer and O. C. Jenkins. Rosbridge: ROS for non-ROS users. <em>Robotics Research</em> (ISRR 2011), Springer, 2017.</li>
+</ol>
+</div>
+</article>
