@@ -58,6 +58,20 @@ export interface AgentRef {
   name: string;
 }
 
+/**
+ * A channel's message limits. They are set when the channel is created and
+ * never change: a mesh has no owner to change them later. The hub caps what
+ * a creator can ask for.
+ */
+export interface ChannelLimits {
+  /** Longest message, in characters. */
+  maxMessageChars: number;
+  /** Messages one member may post per minute. */
+  messagesPerMinute: number;
+  /** Messages one member may post back to back before the per-minute rate applies. */
+  messageBurst: number;
+}
+
 export interface ChannelInfo {
   /** The channel's address. Share it to invite others. */
   id: string;
@@ -72,6 +86,8 @@ export interface ChannelInfo {
   maxMembers: number;
   /** 'off' means the owner isn't taking questions: new ones come back `unattended`. */
   questions: QuestionsMode;
+  /** Fixed at creation. Rates aren't enforced on hubs started with rate limiting off. */
+  limits: ChannelLimits;
 }
 
 export interface FileLock {
@@ -227,7 +243,8 @@ export interface HelloFrame {
 
 /** Requests; each gets a `result` frame with the matching `id`. */
 export type RequestFrame =
-  | { type: 'channel.create'; id: string; name?: string; topic?: string; visibility?: ChannelVisibility }
+  /** `limits`: any you leave out take the hub's defaults; values above the hub's ceilings are refused. */
+  | { type: 'channel.create'; id: string; name?: string; topic?: string; visibility?: ChannelVisibility; limits?: Partial<ChannelLimits> }
   /** `since`: a message id; the snapshot then holds only newer messages (all of them if the id has aged out). */
   | { type: 'channel.join'; id: string; channel: string; since?: string }
   | { type: 'channel.leave'; id: string; channel: string }

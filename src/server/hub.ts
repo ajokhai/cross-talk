@@ -4,6 +4,7 @@ import {
   type AgentInfo,
   type AgentRef,
   type ChannelInfo,
+  type ChannelLimits,
   type ChannelMessage,
   type ChannelSnapshot,
   type ChannelVisibility,
@@ -44,7 +45,12 @@ export interface HubOptions {
   maxAgents?: number;
   /** Simultaneous connections (WebSocket + HTTP sessions) from one network address. */
   maxConnectionsPerAddress?: number;
+  /** Ceiling for any message or DM, and for what a channel creator can ask for. */
   maxMessageChars?: number;
+  /** What a new channel gets unless its creator asks for other limits (defaults: 1000 chars, 120 messages/min, burst 30). */
+  channelLimits?: Partial<ChannelLimits>;
+  /** The most messages per minute a channel creator can allow. */
+  maxMessagesPerMinute?: number;
   /** Open questions one agent can have in one channel, and per channel in total. */
   maxQuestionsPerAgent?: number;
   maxQuestionsPerChannel?: number;
@@ -62,8 +68,14 @@ export interface HubOptions {
   presenceGraceMs?: number;
   /** A member that hasn't read a channel for this long is shown as idle, and senders who @mention it are warned. */
   idleAfterMs?: number;
-  /** Token bucket per connection: burst size and refill per second. */
+  /** Token bucket per connection, over every request: burst size and refill per second. */
   rateLimit?: { burst: number; perSecond: number };
+  /**
+   * Enforce rate limits: the per-connection request bucket, each channel's
+   * per-member message rate, and the DM rate. Default true; switch off only
+   * on a hub where every client is trusted.
+   */
+  rateLimits?: boolean;
   locks?: LockManagerOptions;
   /** Persistence hook, called for every channel message (e.g. write to a database). */
   onMessage?: (message: ChannelMessage) => void;
@@ -103,7 +115,36 @@ interface Channel {
   reads: Map<string, { at: number; seq: number }>;
   /** Active and stalled claims by id. */
   claims: Map<string, TaskClaim>;
+  /** Fixed at creation. */
+  limits: ChannelLimits;
+  /** Per member: its message allowance here. */
+  senders: Map<string, Bucket>;
 }
+
+/** A token bucket: `burst` at once, refilled at `perSecond`. */
+class Bucket {
+  private tokens: number;
+  private refilledAt: number;
+
+  constructor(private readonly burst: number, private readonly perSecond: number, now: number) {
+    this.tokens = burst;
+    this.refilledAt = now;
+  }
+
+  /** Takes one token, or returns how many ms until one is available. */
+  take(now: number): true | number {
+    this.tokens = Math.min(this.burst, this.tokens + ((now - this.refilledAt) / 1000) * this.perSecond);
+    this.refilledAt = now;
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return true;
+    }
+    return Math.ceil(((1 - this.tokens) / this.perSecond) * 1000);
+  }
+}
+
+/** Channel limits unless the hub or the channel's creator says otherwise. */
+const DEFAULT_LIMITS: ChannelLimits = { maxMessageChars: 1000, messagesPerMinute: 120, messageBurst: 30 };
 
 /** Frames kept for a dropped agent before it is evicted instead of resumed. */
 const REPLAY_LIMIT = 1000;
@@ -115,17 +156,18 @@ export class Connection {
   /** @internal Secret that lets a reconnecting client take over this agent. */ resumeToken?: string;
   /** @internal Set while the transport is gone but the agent is still present. */ droppedAt?: number;
   /** @internal Frames to send right after a resumed client's welcome. */ replay?: ServerFrame[];
-  private tokens: number;
-  private refilledAt: number;
+  /** @internal Allowance for DMs this agent sends. */ dms: Bucket;
+  private readonly requests: Bucket;
 
   constructor(
     public peer: Peer,
     readonly address: string,
-    private readonly limit: { burst: number; perSecond: number },
-    now: number
+    limit: { burst: number; perSecond: number },
+    now: number,
+    dms: ChannelLimits = DEFAULT_LIMITS
   ) {
-    this.tokens = limit.burst;
-    this.refilledAt = now;
+    this.requests = new Bucket(limit.burst, limit.perSecond, now);
+    this.dms = new Bucket(dms.messageBurst, dms.messagesPerMinute / 60, now);
   }
 
   get ref(): AgentRef {
@@ -134,12 +176,7 @@ export class Connection {
 
   /** Returns false when the connection has exhausted its rate budget. */
   take(now: number): boolean {
-    const elapsed = (now - this.refilledAt) / 1000;
-    this.tokens = Math.min(this.limit.burst, this.tokens + elapsed * this.limit.perSecond);
-    this.refilledAt = now;
-    if (this.tokens < 1) return false;
-    this.tokens -= 1;
-    return true;
+    return this.requests.take(now) === true;
   }
 }
 
@@ -165,7 +202,7 @@ export class MeshHub {
   private readonly agents = new Map<string, Connection>(); // agent id -> connection
   private readonly perAddress = new Map<string, number>(); // address -> open connections
   private readonly resumable = new Map<string, Connection>(); // resume token -> connection (live or dropped)
-  private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now'>>;
+  private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now' | 'channelLimits'>> & { channelLimits: ChannelLimits };
   private readonly onMessage?: (message: ChannelMessage) => void;
   private readonly now: () => number;
   private sweeper?: NodeJS.Timeout;
@@ -183,6 +220,9 @@ export class MeshHub {
       maxAgents: options.maxAgents ?? 10_000,
       maxConnectionsPerAddress: options.maxConnectionsPerAddress ?? 64,
       maxMessageChars: options.maxMessageChars ?? 16_000,
+      maxMessagesPerMinute: options.maxMessagesPerMinute ?? 600,
+      channelLimits: { ...DEFAULT_LIMITS, ...options.channelLimits },
+      rateLimits: options.rateLimits ?? true,
       maxQuestionsPerAgent: options.maxQuestionsPerAgent ?? 5,
       maxQuestionsPerChannel: options.maxQuestionsPerChannel ?? 200,
       maxClaimsPerAgent: options.maxClaimsPerAgent ?? 20,
@@ -219,7 +259,7 @@ export class MeshHub {
     if (open >= this.opts.maxConnectionsPerAddress) fail('rate_limited', 'Too many connections from your address');
     if (this.agents.size >= this.opts.maxAgents) fail('rate_limited', 'Hub is at capacity');
     this.perAddress.set(address, open + 1);
-    return new Connection(peer, address, this.opts.rateLimit, this.now());
+    return new Connection(peer, address, this.opts.rateLimit, this.now(), this.opts.channelLimits);
   }
 
   /** Handles a raw text frame from a streaming transport (WebSocket). */
@@ -364,7 +404,7 @@ export class MeshHub {
     try {
       if (!id) fail('bad_request', 'Requests need a string "id" (max 128 chars)');
       if (!conn.agent) fail('not_registered', 'Send "hello" first');
-      if (!conn.take(this.now())) fail('rate_limited', 'Too many requests; slow down');
+      if (this.opts.rateLimits && !conn.take(this.now())) fail('rate_limited', 'Too many requests; slow down');
       conn.agent!.lastSeen = this.now();
       const data = await this.dispatch(conn, frame as unknown as RequestFrame);
       return { type: 'result', id, ok: true, data };
@@ -385,7 +425,7 @@ export class MeshHub {
 
   private async dispatch(conn: Connection, f: RequestFrame): Promise<unknown> {
     switch (f.type) {
-      case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility);
+      case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility, f.limits);
       case 'channel.join': return this.joinChannel(conn, f.channel, f.since);
       case 'channel.leave': return this.leaveChannel(conn, f.channel);
       case 'channel.list': return this.listChannels(conn, f.scope ?? 'joined', f.limit, f.cursor);
@@ -422,10 +462,11 @@ export class MeshHub {
   }
 
   /** Creates a conversation with a fresh, unguessable address and joins the creator to it. */
-  private createChannel(conn: Connection, rawName: unknown, topic: unknown, visibility: unknown): CreatedChannel {
+  private createChannel(conn: Connection, rawName: unknown, topic: unknown, visibility: unknown, limits: unknown): CreatedChannel {
     if (visibility !== undefined && visibility !== 'public' && visibility !== 'private') {
       fail('bad_request', 'visibility must be "public" or "private"');
     }
+    const fixed = this.channelLimits(limits);
     if (this.channels.size >= this.opts.maxChannels) fail('quota_exceeded', 'Hub channel limit reached');
     let fromAddress = 0;
     for (const c of this.channels.values()) if (c.createdFrom === conn.address) fromAddress++;
@@ -452,7 +493,9 @@ export class MeshHub {
       questions: new Map(),
       posted: 0,
       reads: new Map(),
-      claims: new Map()
+      claims: new Map(),
+      limits: fixed,
+      senders: new Map()
     };
     this.channels.set(channel.id, channel);
     this.addMember(conn, channel);
@@ -543,6 +586,37 @@ export class MeshHub {
     return out;
   }
 
+  /** The hub's defaults, overridden by what the creator asked for within the hub's ceilings. */
+  private channelLimits(asked: unknown): ChannelLimits {
+    if (asked !== undefined && !isPlainObject(asked)) fail('bad_request', 'limits must be an object');
+    const want = (asked ?? {}) as Record<string, unknown>;
+    const pick = (key: keyof ChannelLimits, max: number): number => {
+      const value = want[key];
+      if (value === undefined) return Math.min(this.opts.channelLimits[key], max);
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > max) {
+        return fail('bad_request', `limits.${key} must be a whole number from 1 to ${max} on this hub`);
+      }
+      return value;
+    };
+    return {
+      maxMessageChars: pick('maxMessageChars', this.opts.maxMessageChars),
+      messagesPerMinute: pick('messagesPerMinute', this.opts.maxMessagesPerMinute),
+      messageBurst: pick('messageBurst', 1000)
+    };
+  }
+
+  /** Charges one message to `conn` in `channel`, or fails with when it may post again. */
+  private spend(channel: Channel, conn: Connection): void {
+    if (!this.opts.rateLimits) return;
+    const id = conn.agent!.id;
+    let bucket = channel.senders.get(id);
+    if (!bucket) channel.senders.set(id, (bucket = new Bucket(channel.limits.messageBurst, channel.limits.messagesPerMinute / 60, this.now())));
+    const waited = bucket.take(this.now());
+    if (waited !== true) {
+      fail('rate_limited', `This channel allows ${channel.limits.messagesPerMinute} messages a minute per member (bursts of ${channel.limits.messageBurst}); try again in ${Math.ceil(waited / 1000)}s`, { retryAfterMs: waited });
+    }
+  }
+
   private deleteChannel(channel: Channel): void {
     this.channels.delete(channel.id);
     this.locks.releaseChannel(channel.id);
@@ -567,7 +641,8 @@ export class MeshHub {
       lastActivity: channel.lastActivity,
       memberCount: channel.members.size,
       maxMembers: this.opts.maxMembersPerChannel,
-      questions: channel.questionsMode
+      questions: channel.questionsMode,
+      limits: channel.limits
     };
   }
 
@@ -707,11 +782,12 @@ export class MeshHub {
   // Messaging
   // -------------------------------------------------------------------------
 
-  private messageText(content: unknown): string {
+  /** `max`: the channel's limit, or the hub's ceiling for DMs. */
+  private messageText(content: unknown, max = this.opts.maxMessageChars): string {
     if (typeof content !== 'string' || !content.trim()) fail('bad_request', 'content must be a non-empty string');
     const text = content as string;
-    if (text.length > this.opts.maxMessageChars) {
-      fail('bad_request', `content exceeds ${this.opts.maxMessageChars} characters`);
+    if (text.length > max) {
+      fail('bad_request', `Message is ${text.length} characters; this ${max === this.opts.maxMessageChars ? 'hub' : 'channel'} allows ${max}. Say it more briefly, split it, or point to a file.`, { maxMessageChars: max });
     }
     return text;
   }
@@ -747,12 +823,14 @@ export class MeshHub {
 
   private postMessage(conn: Connection, address: unknown, content: unknown, metadata: unknown): ChannelMessage {
     const channel = this.memberChannel(conn, address);
+    const text = this.messageText(content, channel.limits.maxMessageChars);
+    this.spend(channel, conn);
     const message: ChannelMessage = {
       id: newId('msg'),
       channel: channel.id,
       kind: 'chat',
       from: conn.ref,
-      content: this.messageText(content),
+      content: text,
       timestamp: this.now()
     };
     const meta = this.metadata(metadata);
@@ -763,7 +841,8 @@ export class MeshHub {
   /** XDialect shorthand. `!LCK` / `!REL` with a target also take or release the lock. */
   private postShorthand(conn: Connection, address: unknown, shorthand: unknown): ChannelMessage {
     const channel = this.memberChannel(conn, address);
-    const raw = this.messageText(shorthand);
+    const raw = this.messageText(shorthand, channel.limits.maxMessageChars);
+    this.spend(channel, conn);
     const parsed = DialectEngine.parse(raw);
 
     if (parsed.action === '!LCK' && parsed.target) {
@@ -786,11 +865,14 @@ export class MeshHub {
   /** DMs are only allowed between agents that share at least one channel. */
   private sendDirect(conn: Connection, to: unknown, content: unknown, replyExpected: unknown, metadata: unknown): DirectMessage {
     const target = this.resolvePeer(conn, to);
+    const text = this.messageText(content);
+    const waited = this.opts.rateLimits ? conn.dms.take(this.now()) : true;
+    if (waited !== true) fail('rate_limited', `Too many DMs; try again in ${Math.ceil(waited / 1000)}s`, { retryAfterMs: waited });
     const message: DirectMessage = {
       id: newId('dm'),
       from: conn.ref,
       to: target.ref,
-      content: this.messageText(content),
+      content: text,
       timestamp: this.now(),
       replyExpected: replyExpected !== false
     };
@@ -1086,6 +1168,8 @@ export class MeshHub {
         claim.status = 'stalled';
         this.emit(channel, { type: 'claim.updated', claim: { ...claim } });
       }
+      // Allowances outlive leaving the channel (so rejoining doesn't reset them), not the agent.
+      for (const id of channel.senders.keys()) if (!this.agents.has(id)) channel.senders.delete(id);
     }
     for (const channel of [...this.channels.values()]) {
       if (channel.members.size > 0 || channel.emptySince === undefined) continue;
