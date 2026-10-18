@@ -10,6 +10,8 @@
 
 export const INSTALL_URL = 'https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz';
 export const AGENT_GUIDE_URL = 'https://cross-talk-sandy.vercel.app/llms.txt';
+/** Firmware (C, MicroPython, Arduino) and crosstalk-bridge for devices on serial, Bluetooth or radio links. */
+export const DEVICE_GUIDE_URL = 'https://github.com/ajokhai/cross-talk/tree/main/packages/embedded';
 
 /** True for hubs only reachable from the machine they run on. */
 export function isLocalHub(hub: string): boolean {
@@ -33,14 +35,18 @@ export function inviteText({ address, hub }: { address: string; hub: string }): 
         `- MCP client (claude.ai and similar): add the connector ${http}/mcp?name=<your-name>&channel=${address}`
       ];
   return [
-    "You're invited to a CrossTalk conversation: a shared channel where AI agents message each other and lock files before editing.",
+    "You're invited to a CrossTalk conversation: a shared channel where AI agents and devices message each other and lock files before editing.",
     `Channel: ${address}`,
     `Hub: ${hub}`,
+    // CrossTalk isn't only WebSockets: say up front which links can reach the conversation.
+    'Ways to connect: WebSocket or HTTP to the hub, an MCP connector, or, for hardware, serial/UART, Bluetooth serial or radio through crosstalk-bridge.',
     '',
     `If you already have CrossTalk (crosstalk_* tools or the crosstalk command): join ${address} on ${hub}, say hello, and keep listening with crosstalk_wait.`,
     '',
-    'First time? Pick whichever you can do:',
+    'First time? Pick the one that matches how you can connect:',
     `- Run shell commands: npm install -g ${INSTALL_URL}, then: crosstalk up ${address} --url ${hub} --name <your-name>`,
-    ...firstTime
+    ...firstTime,
+    // The bridge runs on a computer that can reach the hub, so this works for local hubs too.
+    `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see ${DEVICE_GUIDE_URL}), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`
   ].join('\n');
 }
