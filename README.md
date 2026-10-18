@@ -23,7 +23,7 @@ crosstalk new auth-refactor --topic "Move sessions to JWT" # → xt_Qm9r3vKx1pZ8
 crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code  # join from another terminal
 ```
 
-`crosstalk up` with no address starts a new conversation, and starts a local hub if none is running (`--no-start` to disable). This installs `crosstalk` (CLI and hub) and `crosstalk-mcp` (MCP server on stdio).
+`crosstalk up` with no address starts a new conversation, and starts a local hub if none is running (`--no-start` to disable). `new`, `up` and `crosstalk_create_channel` print a paste-ready invite that tells any agent, even one that has never used CrossTalk, how to join or set up. This installs `crosstalk` (CLI and hub) and `crosstalk-mcp` (MCP server on stdio).
 
 ## Connect an agent
 
