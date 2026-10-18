@@ -1,0 +1,1133 @@
+{
+  "machine": {
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "node": "v20.20.2",
+    "platform": "darwin 25.5.0"
+  },
+  "ranAt": "2026-10-18T19:08:56.203Z",
+  "edits": [
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "none",
+      "seed": 1,
+      "attempted": 50,
+      "landed": 41,
+      "lost": 9,
+      "makespanMs": 614,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "none",
+      "seed": 2,
+      "attempted": 50,
+      "landed": 44,
+      "lost": 6,
+      "makespanMs": 646,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "none",
+      "seed": 3,
+      "attempted": 50,
+      "landed": 36,
+      "lost": 14,
+      "makespanMs": 611,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "none",
+      "seed": 4,
+      "attempted": 50,
+      "landed": 42,
+      "lost": 8,
+      "makespanMs": 644,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "none",
+      "seed": 5,
+      "attempted": 50,
+      "landed": 43,
+      "lost": 7,
+      "makespanMs": 610,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 1,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 791,
+      "contended": 11,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.53,
+        "p99": 3.03
+      },
+      "lockWaitMs": {
+        "mean": 5.38,
+        "p95": 40.28
+      }
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 2,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 795,
+      "contended": 10,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.25,
+        "p99": 1.12
+      },
+      "lockWaitMs": {
+        "mean": 4.73,
+        "p95": 45.25
+      }
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 3,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 922,
+      "contended": 17,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.34,
+        "p99": 1.59
+      },
+      "lockWaitMs": {
+        "mean": 9.92,
+        "p95": 93.91
+      }
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 4,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 821,
+      "contended": 13,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.36,
+        "p99": 1.38
+      },
+      "lockWaitMs": {
+        "mean": 6.55,
+        "p95": 41.95
+      }
+    },
+    {
+      "files": 4,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 5,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 861,
+      "contended": 13,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.37,
+        "p99": 1.48
+      },
+      "lockWaitMs": {
+        "mean": 6.69,
+        "p95": 52.79
+      }
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "none",
+      "seed": 1,
+      "attempted": 100,
+      "landed": 64,
+      "lost": 36,
+      "makespanMs": 651,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "none",
+      "seed": 2,
+      "attempted": 100,
+      "landed": 66,
+      "lost": 34,
+      "makespanMs": 649,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "none",
+      "seed": 3,
+      "attempted": 100,
+      "landed": 59,
+      "lost": 41,
+      "makespanMs": 610,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "none",
+      "seed": 4,
+      "attempted": 100,
+      "landed": 61,
+      "lost": 39,
+      "makespanMs": 586,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "none",
+      "seed": 5,
+      "attempted": 100,
+      "landed": 68,
+      "lost": 32,
+      "makespanMs": 634,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 1,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 1246,
+      "contended": 54,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.31,
+        "p99": 1.46
+      },
+      "lockWaitMs": {
+        "mean": 18.65,
+        "p95": 122.29
+      }
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 2,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 1210,
+      "contended": 53,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.26,
+        "p99": 4.92
+      },
+      "lockWaitMs": {
+        "mean": 16.63,
+        "p95": 108.74
+      }
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 3,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 1674,
+      "contended": 46,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.28,
+        "p99": 1.42
+      },
+      "lockWaitMs": {
+        "mean": 23.14,
+        "p95": 57.01
+      }
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 4,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 1378,
+      "contended": 54,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.32,
+        "p99": 2.65
+      },
+      "lockWaitMs": {
+        "mean": 25.22,
+        "p95": 116.11
+      }
+    },
+    {
+      "files": 4,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 5,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 1573,
+      "contended": 41,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.27,
+        "p99": 4.46
+      },
+      "lockWaitMs": {
+        "mean": 21.68,
+        "p95": 56.88
+      }
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "none",
+      "seed": 1,
+      "attempted": 200,
+      "landed": 81,
+      "lost": 119,
+      "makespanMs": 653,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "none",
+      "seed": 2,
+      "attempted": 200,
+      "landed": 82,
+      "lost": 118,
+      "makespanMs": 674,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "none",
+      "seed": 3,
+      "attempted": 200,
+      "landed": 88,
+      "lost": 112,
+      "makespanMs": 688,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "none",
+      "seed": 4,
+      "attempted": 200,
+      "landed": 81,
+      "lost": 119,
+      "makespanMs": 610,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "none",
+      "seed": 5,
+      "attempted": 200,
+      "landed": 78,
+      "lost": 122,
+      "makespanMs": 699,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 1,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 2576,
+      "contended": 157,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.28,
+        "p99": 1.4
+      },
+      "lockWaitMs": {
+        "mean": 43.23,
+        "p95": 141.84
+      }
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 2,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 2467,
+      "contended": 165,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.29,
+        "p99": 2.22
+      },
+      "lockWaitMs": {
+        "mean": 47.1,
+        "p95": 228.95
+      }
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 3,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 2644,
+      "contended": 169,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.3,
+        "p99": 3.16
+      },
+      "lockWaitMs": {
+        "mean": 53.98,
+        "p95": 415.45
+      }
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 4,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 2406,
+      "contended": 135,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.28,
+        "p99": 1.6
+      },
+      "lockWaitMs": {
+        "mean": 44.65,
+        "p95": 252.19
+      }
+    },
+    {
+      "files": 4,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 5,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 2291,
+      "contended": 163,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.27,
+        "p99": 2.33
+      },
+      "lockWaitMs": {
+        "mean": 50.09,
+        "p95": 399.67
+      }
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "none",
+      "seed": 1,
+      "attempted": 50,
+      "landed": 46,
+      "lost": 4,
+      "makespanMs": 621,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "none",
+      "seed": 2,
+      "attempted": 50,
+      "landed": 47,
+      "lost": 3,
+      "makespanMs": 661,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "none",
+      "seed": 3,
+      "attempted": 50,
+      "landed": 45,
+      "lost": 5,
+      "makespanMs": 620,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "none",
+      "seed": 4,
+      "attempted": 50,
+      "landed": 49,
+      "lost": 1,
+      "makespanMs": 601,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "none",
+      "seed": 5,
+      "attempted": 50,
+      "landed": 45,
+      "lost": 5,
+      "makespanMs": 594,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 1,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 669,
+      "contended": 2,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.19,
+        "p99": 2.4
+      },
+      "lockWaitMs": {
+        "mean": 0.95,
+        "p95": 2.41
+      }
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 2,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 652,
+      "contended": 2,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.22,
+        "p99": 1.94
+      },
+      "lockWaitMs": {
+        "mean": 1.09,
+        "p95": 1.94
+      }
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 3,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 650,
+      "contended": 3,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.19,
+        "p99": 0.4
+      },
+      "lockWaitMs": {
+        "mean": 1.69,
+        "p95": 0.32
+      }
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 4,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 610,
+      "contended": 2,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.16,
+        "p99": 1.04
+      },
+      "lockWaitMs": {
+        "mean": 1.31,
+        "p95": 0.93
+      }
+    },
+    {
+      "files": 16,
+      "agents": 2,
+      "mode": "locks",
+      "seed": 5,
+      "attempted": 50,
+      "landed": 50,
+      "lost": 0,
+      "makespanMs": 733,
+      "contended": 4,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.14,
+        "p99": 1.2
+      },
+      "lockWaitMs": {
+        "mean": 1.78,
+        "p95": 13.37
+      }
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "none",
+      "seed": 1,
+      "attempted": 100,
+      "landed": 87,
+      "lost": 13,
+      "makespanMs": 653,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "none",
+      "seed": 2,
+      "attempted": 100,
+      "landed": 86,
+      "lost": 14,
+      "makespanMs": 644,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "none",
+      "seed": 3,
+      "attempted": 100,
+      "landed": 82,
+      "lost": 18,
+      "makespanMs": 593,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "none",
+      "seed": 4,
+      "attempted": 100,
+      "landed": 88,
+      "lost": 12,
+      "makespanMs": 583,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "none",
+      "seed": 5,
+      "attempted": 100,
+      "landed": 85,
+      "lost": 15,
+      "makespanMs": 634,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 1,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 790,
+      "contended": 14,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.19,
+        "p99": 2.04
+      },
+      "lockWaitMs": {
+        "mean": 3.9,
+        "p95": 20.24
+      }
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 2,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 686,
+      "contended": 13,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.2,
+        "p99": 0.53
+      },
+      "lockWaitMs": {
+        "mean": 2.7,
+        "p95": 18.38
+      }
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 3,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 796,
+      "contended": 19,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.19,
+        "p99": 1.52
+      },
+      "lockWaitMs": {
+        "mean": 4.55,
+        "p95": 53.15
+      }
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 4,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 832,
+      "contended": 23,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.18,
+        "p99": 1.59
+      },
+      "lockWaitMs": {
+        "mean": 5.38,
+        "p95": 40.96
+      }
+    },
+    {
+      "files": 16,
+      "agents": 4,
+      "mode": "locks",
+      "seed": 5,
+      "attempted": 100,
+      "landed": 100,
+      "lost": 0,
+      "makespanMs": 822,
+      "contended": 20,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.17,
+        "p99": 3.12
+      },
+      "lockWaitMs": {
+        "mean": 4.79,
+        "p95": 45.57
+      }
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "none",
+      "seed": 1,
+      "attempted": 200,
+      "landed": 140,
+      "lost": 60,
+      "makespanMs": 639,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "none",
+      "seed": 2,
+      "attempted": 200,
+      "landed": 145,
+      "lost": 55,
+      "makespanMs": 640,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "none",
+      "seed": 3,
+      "attempted": 200,
+      "landed": 140,
+      "lost": 60,
+      "makespanMs": 665,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "none",
+      "seed": 4,
+      "attempted": 200,
+      "landed": 147,
+      "lost": 53,
+      "makespanMs": 618,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "none",
+      "seed": 5,
+      "attempted": 200,
+      "landed": 139,
+      "lost": 61,
+      "makespanMs": 673,
+      "contended": 0,
+      "rateLimited": 0,
+      "lockRttMs": null,
+      "lockWaitMs": null
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 1,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 1348,
+      "contended": 74,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.25,
+        "p99": 4.95
+      },
+      "lockWaitMs": {
+        "mean": 12.63,
+        "p95": 53.82
+      }
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 2,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 1215,
+      "contended": 83,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.24,
+        "p99": 1.61
+      },
+      "lockWaitMs": {
+        "mean": 11.6,
+        "p95": 55.91
+      }
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 3,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 1127,
+      "contended": 96,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.26,
+        "p99": 1.98
+      },
+      "lockWaitMs": {
+        "mean": 13.38,
+        "p95": 56.08
+      }
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 4,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 1332,
+      "contended": 86,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.25,
+        "p99": 1.66
+      },
+      "lockWaitMs": {
+        "mean": 15.49,
+        "p95": 88.37
+      }
+    },
+    {
+      "files": 16,
+      "agents": 8,
+      "mode": "locks",
+      "seed": 5,
+      "attempted": 200,
+      "landed": 200,
+      "lost": 0,
+      "makespanMs": 1348,
+      "contended": 92,
+      "rateLimited": 0,
+      "lockRttMs": {
+        "p50": 0.3,
+        "p99": 2.49
+      },
+      "lockWaitMs": {
+        "mean": 15.12,
+        "p95": 101.88
+      }
+    }
+  ],
+  "fanout": [
+    {
+      "members": 2,
+      "messages": 100,
+      "deliveries": 100,
+      "expected": 100,
+      "perDeliveryMs": {
+        "p50": 0.64,
+        "p95": 2.39,
+        "p99": 4.34,
+        "max": 4.34
+      },
+      "lastMemberMs": {
+        "p50": 0.64,
+        "p99": 4.34
+      }
+    },
+    {
+      "members": 5,
+      "messages": 100,
+      "deliveries": 400,
+      "expected": 400,
+      "perDeliveryMs": {
+        "p50": 0.47,
+        "p95": 1.96,
+        "p99": 5.29,
+        "max": 5.36
+      },
+      "lastMemberMs": {
+        "p50": 0.49,
+        "p99": 5.36
+      }
+    },
+    {
+      "members": 10,
+      "messages": 100,
+      "deliveries": 900,
+      "expected": 900,
+      "perDeliveryMs": {
+        "p50": 1.19,
+        "p95": 4.04,
+        "p99": 8.2,
+        "max": 8.34
+      },
+      "lastMemberMs": {
+        "p50": 1.39,
+        "p99": 8.34
+      }
+    },
+    {
+      "members": 25,
+      "messages": 100,
+      "deliveries": 2400,
+      "expected": 2400,
+      "perDeliveryMs": {
+        "p50": 1.38,
+        "p95": 5.92,
+        "p99": 9.67,
+        "max": 10.6
+      },
+      "lastMemberMs": {
+        "p50": 1.58,
+        "p99": 10.6
+      }
+    },
+    {
+      "members": 50,
+      "messages": 100,
+      "deliveries": 4900,
+      "expected": 4900,
+      "perDeliveryMs": {
+        "p50": 3.28,
+        "p95": 8.43,
+        "p99": 18.8,
+        "max": 19.22
+      },
+      "lastMemberMs": {
+        "p50": 4.06,
+        "p99": 19.22
+      }
+    }
+  ],
+  "stall": [
+    {
+      "claim": "cl_7caf834f9897cd96",
+      "everySeconds": 60,
+      "silentMs": 64961,
+      "overdueMs": 4961
+    },
+    {
+      "claim": "cl_3d6b23710840d25f",
+      "everySeconds": 60,
+      "silentMs": 63259,
+      "overdueMs": 3259
+    },
+    {
+      "claim": "cl_3d8a9c3269e2cc4f",
+      "everySeconds": 60,
+      "silentMs": 61557,
+      "overdueMs": 1557
+    }
+  ]
+}

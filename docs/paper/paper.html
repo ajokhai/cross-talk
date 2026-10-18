@@ -1,0 +1,399 @@
+<title>CrossTalk Paper</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="CrossTalk: channel-scoped coordination for heterogeneous AI coding agents. Design, the turn-boundary problem, and measurements.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: one 68ch reading column, like a preprint; figures may run to 720px. */
+:root {
+  --bg: #ffffff;
+  --fg: #16191d;
+  --muted: #5a6068;
+  --rule: #d9dde2;
+  --tint: #f3f5f7;
+  --accent: #1f5f8b;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --font-body: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --font-head: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171b; --fg: #e6e8eb; --muted: #a1a8b1; --rule: #343a42; --tint: #1c2026;
+    --accent: #7cb4dc; --series-1: #3987e5; --series-2: #d95926; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171b; --fg: #e6e8eb; --muted: #a1a8b1; --rule: #343a42; --tint: #1c2026;
+  --accent: #7cb4dc; --series-1: #3987e5; --series-2: #d95926; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 17px/1.6 var(--font-body); }
+.paper {
+  max-width: 720px; margin: 0 auto;
+  padding-block: 56px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.prose { max-width: 68ch; }
+h1, h2, h3 { font-family: var(--font-head); text-wrap: balance; line-height: 1.25; }
+h1 { font-size: 30px; font-weight: 600; margin: 0 0 14px; letter-spacing: -0.01em; }
+h2 { font-size: 20px; font-weight: 600; margin: 44px 0 10px; }
+h3 { font-size: 16.5px; font-weight: 600; margin: 28px 0 6px; }
+h2 .n, h3 .n { color: var(--muted); font-weight: 500; margin-right: 8px; font-variant-numeric: tabular-nums; }
+p { margin: 0 0 14px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 0.86em var(--font-mono); background: var(--tint); padding: 1px 4px; border-radius: 3px; overflow-wrap: anywhere; }
+.byline { font-family: var(--font-head); font-size: 14.5px; color: var(--muted); margin: 0 0 30px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.byline strong { color: var(--fg); font-weight: 500; }
+.abstract { border-block: 1px solid var(--rule); padding-block: 18px 6px; margin-bottom: 8px; }
+.label { font-family: var(--font-head); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+ul, ol { margin: 0 0 14px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.eq { font-style: italic; text-align: center; margin: 4px 0 16px; font-variant-numeric: tabular-nums; }
+.eq span { font-style: normal; color: var(--muted); }
+figure { margin: 26px 0 28px; }
+figure svg { display: block; width: 100%; height: auto; max-width: 100%; }
+figcaption { font-size: 14.5px; line-height: 1.5; color: var(--muted); margin-top: 10px; max-width: 68ch; }
+figcaption b { color: var(--fg); font-family: var(--font-head); font-weight: 600; }
+.table-wrap { overflow-x: auto; margin: 22px 0 6px; }
+table { border-collapse: collapse; font: 14px/1.4 var(--font-head); font-variant-numeric: tabular-nums; min-width: 100%; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-weight: 600; border-bottom: 1.5px solid var(--fg); vertical-align: bottom; }
+tbody tr.sep td { border-top: 1.5px solid var(--rule); }
+.tcap { font-size: 14.5px; color: var(--muted); margin-bottom: 22px; max-width: 68ch; }
+.tcap b { color: var(--fg); font-family: var(--font-head); font-weight: 600; }
+.zero { color: var(--accent); font-weight: 600; }
+.refs { font-size: 14.5px; line-height: 1.5; padding-left: 30px; }
+.refs li { margin-bottom: 8px; }
+/* SVG figure styles; every fill comes from a token */
+.fig text { font-family: var(--font-head); fill: var(--fg); }
+.fig .ax { font-size: 12px; fill: var(--muted); }
+.fig .lab { font-size: 12.5px; font-weight: 500; }
+.fig .grid { stroke: var(--rule); stroke-width: 1; }
+.fig .base { stroke: var(--muted); stroke-width: 1; }
+.fig .box { fill: var(--tint); stroke: var(--rule); stroke-width: 1; }
+.fig .hub { fill: var(--bg); stroke: var(--accent); stroke-width: 1.5; }
+.fig .inner { fill: var(--tint); stroke: none; }
+.fig .wire { stroke: var(--muted); stroke-width: 1.25; fill: none; }
+.fig .head { fill: var(--muted); }
+.fig .s1 { fill: var(--series-1); }
+.fig .whisk { stroke: var(--fg); stroke-width: 1.25; }
+.fig .l1 { stroke: var(--series-1); stroke-width: 2; fill: none; }
+.fig .l2 { stroke: var(--series-2); stroke-width: 2; fill: none; }
+.fig .m1 { fill: var(--series-1); stroke: var(--bg); stroke-width: 2; }
+.fig .m2 { fill: var(--series-2); stroke: var(--bg); stroke-width: 2; }
+.fig .accent { fill: var(--accent); }
+.fig .small { font-size: 11.5px; fill: var(--muted); }
+.fig .title { font-size: 13px; font-weight: 600; }
+@media (max-width: 520px) { body { font-size: 16px; } h1 { font-size: 25px; } .paper { padding-block: 32px 56px; } }
+@media print {
+  :root { --bg: #fff; --fg: #111; --muted: #555b62; --rule: #d4d8dd; --tint: #f2f4f6; --accent: #1f5f8b; --series-1: #2a78d6; --series-2: #eb6834; }
+  body { font-size: 10.5pt; }
+  .paper { padding: 0; max-width: none; }
+  .prose { max-width: none; }
+  h2 { margin-top: 26px; break-after: avoid; }
+  h3 { break-after: avoid; }
+  figure, .table-wrap, .tcap { break-inside: avoid; }
+  .table-wrap { overflow: visible; }
+  table { font-size: 8.5pt; }
+  th, td { padding: 4px 6px; }
+  thead th { white-space: normal; }
+  a { color: var(--fg); text-decoration: none; }
+}
+@page { size: letter; margin: 0.85in 0.9in; }
+</style>
+
+<article class="paper">
+<header class="prose">
+  <h1>CrossTalk: Channel-Scoped Coordination for Heterogeneous AI Coding Agents</h1>
+  <div class="byline">
+    <span><strong>Josh Ayokhai</strong> (@ajokhai)</span>
+    <span>October 2026</span>
+    <span><a href="https://github.com/ajokhai/cross-talk">github.com/ajokhai/cross-talk</a></span>
+  </div>
+</header>
+
+<section class="abstract prose">
+  <div class="label">Abstract</div>
+  <p>Developers now run several AI coding agents on one repository at once, often from different vendors: Claude Code in one terminal, Gemini CLI or Codex in another, a script or a local model elsewhere. Each agent is driven by its own harness, and none of them can see the others. They overwrite each other's edits, duplicate work, and promise things nobody can check. We present CrossTalk, an open-source hub that gives such agents a shared, private conversation (a <em>channel</em>) with four primitives: messages delivered once, leased advisory file locks, <em>claims</em> that turn "on it" into a promise with a heartbeat, and <em>attention</em> tracking that tells "connected" apart from "reading". Agents join over MCP, remote MCP, WebSocket, HTTP long-polling, a CLI, or a serial and radio bridge, so the same channel can hold a frontier model, a shell script and a microcontroller. We identify the <em>turn-boundary problem</em>: agents built on request/response tool protocols cannot be woken by a new message, so a connected agent may never read it. We describe the mechanisms CrossTalk uses to make that failure rare and, when it happens, visible. In a concurrent-edit benchmark, uncoordinated agents lost 59% of their edits on average in the most contended setting; with CrossTalk locks, 0 of 3,500 edits were lost across 30 runs, at a median lock round trip of 0.3 ms. Messages reached all 49 other members of a 50-member channel with a median latency of 3.3 ms, and a silent claim surfaced less than 5 s after its deadline.</p>
+</section>
+
+<div class="prose">
+<h2><span class="n">1</span>Introduction</h2>
+<p>A single coding agent works in a loop: read files, reason, edit, run tests. Two such agents on the same working tree interfere in ways a single agent never sees. One reads <code>src/auth.ts</code>, spends a minute deciding what to change, and writes the file back without the edit the other agent made in that minute. One says it will write the tests, then its session ends, and the other waits. A third is still connected but stopped reading the channel ten minutes ago, so a question addressed to it goes nowhere.</p>
+<p>These failures are familiar from distributed systems: lost updates, liveness, and failure detection. What is new is that the participants are language-model agents run by different products. They cannot share memory, they speak through whatever tool interface their harness provides, and most of them only act when a human or a tool result gives them a turn. Studies of multi-agent LLM systems attribute a large share of failures to coordination between agents rather than to individual capability [12].</p>
+<p>The common workarounds each have a cost. Sharing context (pasting transcripts, keeping a running summary, a notes file every agent re-reads) makes every agent pay for everything shared, on every update. Separate git worktrees avoid edit collisions but defer the conflict to merge time, when the agents that understood the change may be gone. Orchestration frameworks [4, 5, 6] coordinate agents they spawn themselves, inside one program; they do not help when the agents are independent products the developer already uses.</p>
+<p>CrossTalk takes a smaller position. It does not plan, decompose or route tasks. It provides a place where independently run agents can find each other, say short things, and claim files and tasks, with enough bookkeeping that a missing participant shows up as missing. This paper makes four contributions:</p>
+<ol>
+  <li>A minimal coordination model for heterogeneous agents: private, capability-addressed channels; channel-scoped leased advisory locks; heartbeat claims; and per-member attention (§3).</li>
+  <li>A description of the turn-boundary problem and five mechanisms that address it, from piggybacking unread messages on every tool result to an external wake supervisor (§3.3).</li>
+  <li>One protocol across six transports, including lossy serial and radio links, so models, scripts and devices are members of the same channel (§3.5, §4).</li>
+  <li>Measurements of lost updates, fan-out latency and stall detection, and an analytic model of coordination token cost (§5).</li>
+</ol>
+
+<h2><span class="n">2</span>Background and related work</h2>
+<p><strong>Agent protocols.</strong> The Model Context Protocol (MCP) [1] connects an agent to tools and data sources. It is the most widely supported extension point in coding agents, which is why CrossTalk ships as an MCP server, but it defines no notion of other agents. Google's Agent2Agent protocol (A2A) [2] lets one agent delegate a task to another agent exposed as a server, described by an agent card. CrossTalk is complementary: its members are peers in a shared channel, most of them clients that cannot accept inbound connections at all, and the shared object they contend for is the working tree.</p>
+<p><strong>Multi-agent frameworks.</strong> AutoGen [4], MetaGPT [5] and ChatDev [6] run several LLM agents inside one process with a scripted conversation pattern or role structure. They own the agents' loops. CrossTalk owns nothing but the channel; each agent keeps its own harness, model and user.</p>
+<p><strong>Classic coordination.</strong> Blackboard architectures [7] and tuple spaces such as Linda [8] decouple cooperating processes through a shared store; KQML [9] gave software agents a common message vocabulary. CrossTalk's channel is a small blackboard with delivery semantics, and its optional XDialect shorthand plays a role similar to KQML performatives. File locking for collaborative editing goes back to reserved checkouts in RCS [10]. CrossTalk's locks are leases in the sense of Gray and Cheriton [3]: a lock is valid for a bounded time and must be renewed, so a crashed holder cannot block others forever. Like Chubby's locks [11], they are advisory.</p>
+
+<h2><span class="n">3</span>Design</h2>
+<figure>
+<svg class="fig" viewBox="0 0 640 300" role="img" aria-labelledby="f1t">
+  <title id="f1t">Agents on six transports connect to one hub, which holds channels with messages, locks, claims and attention.</title>
+  <g>
+    <rect class="box" x="0" y="8" width="250" height="46" rx="4"/>
+    <text class="lab" x="12" y="27">Claude Code, Codex, Gemini CLI</text>
+    <text class="small" x="12" y="44">MCP over stdio (crosstalk-mcp)</text>
+    <rect class="box" x="0" y="62" width="250" height="46" rx="4"/>
+    <text class="lab" x="12" y="81">claude.ai, cloud sessions</text>
+    <text class="small" x="12" y="98">remote MCP, Streamable HTTP /mcp</text>
+    <rect class="box" x="0" y="116" width="250" height="46" rx="4"/>
+    <text class="lab" x="12" y="135">Scripts, SDKs, curl, git hooks</text>
+    <text class="small" x="12" y="152">WebSocket, HTTP long-poll, CLI</text>
+    <rect class="box" x="0" y="170" width="250" height="46" rx="4"/>
+    <text class="lab" x="12" y="189">Local models (llama.cpp, Ollama)</text>
+    <text class="small" x="12" y="206">crosstalk llm, any OpenAI-style API</text>
+    <rect class="box" x="0" y="224" width="250" height="46" rx="4"/>
+    <text class="lab" x="12" y="243">Microcontrollers, radios</text>
+    <text class="small" x="12" y="260">crosstalk-bridge: serial, BLE, LoRa</text>
+  </g>
+  <g>
+    <path class="wire" d="M250 31 H322"/><path class="head" d="M330 31 l-8 -4 v8 z"/>
+    <path class="wire" d="M250 85 H322"/><path class="head" d="M330 85 l-8 -4 v8 z"/>
+    <path class="wire" d="M250 139 H322"/><path class="head" d="M330 139 l-8 -4 v8 z"/>
+    <path class="wire" d="M250 193 H322"/><path class="head" d="M330 193 l-8 -4 v8 z"/>
+    <path class="wire" d="M250 247 H322"/><path class="head" d="M330 247 l-8 -4 v8 z"/>
+  </g>
+  <rect class="hub" x="330" y="8" width="308" height="262" rx="6"/>
+  <text class="title" x="346" y="30">Hub (in memory, one process)</text>
+  <rect class="inner" x="346" y="42" width="276" height="164" rx="4"/>
+  <text class="lab" x="358" y="62">Channel xt_Qm9r3vKx1pZ8aT2cL5nWdA</text>
+  <text class="small" x="358" y="86">messages · delivered once, DMs inside channel</text>
+  <text class="small" x="358" y="112">locks · channel + path, leased 5 s–30 min</text>
+  <text class="small" x="358" y="138">claims · task, owner, heartbeat interval</text>
+  <text class="small" x="358" y="164">attention · last read, unread, idle</text>
+  <text class="small" x="358" y="190">questions · asked by agents, owner answers</text>
+  <text class="small" x="346" y="230">owner key (never posted) ⟶ crosstalk inbox</text>
+  <text class="small" x="346" y="252">the human answers every channel's questions here</text>
+</svg>
+<figcaption><b>Figure 1.</b> System overview. Every transport carries the same request and event frames, so each member sees the same channel regardless of how it connects.</figcaption>
+</figure>
+
+<h3><span class="n">3.1</span>Channels as capabilities</h3>
+<p>Every conversation is a channel with an address of 128 random bits, written <code>xt_</code> plus 22 base64url characters. Knowing the address is what grants the right to join, read and post, in the style of capability URLs; there is no lobby, so agents only talk to the agents whose user handed them the address. Messages, locks and presence are scoped to the channel: a lock on <code>src/auth.ts</code> in one channel does not block another. Direct messages work only between agents that share a channel. Channels hold 50 members by default, and empty channels expire (10 minutes if never used, 1 hour after the last member leaves), so the hub needs no persistent storage.</p>
+
+<h3><span class="n">3.2</span>Leased advisory locks</h3>
+<p>Before editing a file, an agent calls <code>lock.acquire</code> with a repo-relative path and a reason. The hub normalizes the path, keys the lock by channel and path, and performs a test-and-set; because the hub processes requests on one thread, two acquires cannot both succeed. A lock is a lease: its time to live defaults to 5 minutes and is clamped to between 5 seconds and 30 minutes, and re-acquiring renews it. A holder that leaves or disconnects loses its locks, after a 2-minute grace period that lets a dropped socket resume as the same agent. Each agent may hold at most 25 locks.</p>
+<p>Locks are advisory. The hub cannot stop an agent from writing a file, so enforcement comes from the agent's instructions and, where the harness allows it, from hooks: a pre-edit hook asks the hub whether another agent holds the file and warns before the edit runs. We chose advisory leases over mandatory locking because CrossTalk does not sit in the file system's path, and because a lease that expires is safer for agents that crash or lose their session without releasing anything.</p>
+
+<h3><span class="n">3.3</span>The turn-boundary problem</h3>
+<p>MCP, like most tool interfaces in coding agents, is request and response. The model calls a tool and gets a result; between calls, nothing can reach it. When an agent ends its turn, it stops until its user types something. A message sent to it at that point is delivered to its connection but never to the model. From the outside, the agent looks present: its socket is open and its status says <em>working</em>. We call this the turn-boundary problem. It is the most common failure we saw in practice, and it is invisible unless the system measures reading rather than connection.</p>
+<p>CrossTalk addresses it in five ways, in order of how much they ask of the client:</p>
+<ol>
+  <li><strong>Piggybacking.</strong> Every MCP tool result begins with the messages that arrived since the agent's last call, so any tool use, including a lock or a status update, is also a read.</li>
+  <li><strong>Blocking wait.</strong> <code>crosstalk_wait</code> blocks inside one tool call until a message arrives (up to 120 s locally, 55 s over remote MCP). The server's instructions tell agents to end a step with a wait rather than by ending their turn.</li>
+  <li><strong>Wait as an alarm clock.</strong> Some agents resume only when a command they started exits. For them, <code>crosstalk wait --timeout 0</code> runs as an ordinary background command that exits when a message arrives, which wakes the agent.</li>
+  <li><strong>Wake supervisor.</strong> For clients that support neither, <code>crosstalk wake</code> runs next to the agent. When the agent is @mentioned and has not read the channel within a grace period (30 s), or one of its claims stalls, the supervisor re-invokes it: it types into its tmux pane or resumes its latest session through the vendor's CLI. It applies a cooldown, never overlaps wakes, and posts a note in the channel when it acts.</li>
+  <li><strong>Attention.</strong> The hub records, per member, when it last read (a <code>channel.read</code> report, a state query, a join, or an HTTP long-poll), how many messages it has not read, and whether it is idle (no read for 5 minutes by default). Snapshots expose this, and a message that @mentions an idle member comes back to the sender with a warning. Bridges for devices and local models report reads as messages reach the device, so a pulled serial cable shows up as an idle member.</li>
+</ol>
+<p>The first three mechanisms make the failure rare; the fourth recovers from it; the fifth makes whatever remains visible to the other agents and to the human.</p>
+
+<h3><span class="n">3.4</span>Claims</h3>
+<p>Agents readily say "on it". A claim makes that statement checkable. It records a task, an owner, optional paths, and a promised update interval (10 minutes by default, between 1 minute and 2 hours). Any message from the owner in the channel, a claim update, or lock activity counts as a heartbeat. When a heartbeat is missed, the claim turns <em>stalled</em>: every member receives a <code>claim.updated</code> event, the owner's inbox rings, and the agent sees a nudge at the top of its next tool result. An agent that posts "on it" without a claim is told it does not count yet. Claims finish as <em>done</em> or <em>dropped</em>. Shell commands (<code>crosstalk claim</code>, <code>crosstalk progress</code>) let git hooks send heartbeats, so a commit can serve as progress.</p>
+
+<h3><span class="n">3.5</span>Transports</h3>
+<p>The wire protocol is a set of JSON request frames, each answered by exactly one result, and a set of pushed events. It runs over WebSocket, where a dropped connection can resume with a token and replay missed events; over HTTP, with a session header and long-polling for events; over MCP on stdio and over MCP Streamable HTTP at <code>/mcp</code>, for clients such as claude.ai that cannot run a local process; and through a CLI. Devices too small for JSON send compact binary frames over serial, Bluetooth or TCP to <code>crosstalk-bridge</code>, which makes them ordinary members. For lossy radio links, an optional link layer adds CRC-16 checksums, acknowledgements, retries, duplicate suppression, message splitting and duty-cycle pacing. <code>crosstalk llm</code> puts a local or hosted model into a channel through any OpenAI-compatible endpoint or any command that reads a prompt on stdin. Model members reply only when @named or messaged directly, never answer other models unless named, and are rate-limited, so two models cannot talk each other into a loop.</p>
+
+<h3><span class="n">3.6</span>Asking the human</h3>
+<p>Running many agents means many of them will need their user: an approval, a choice, a missing fact. Agents ask through the hub, and the user answers every channel's questions from one terminal (<code>crosstalk inbox</code>). Creating a channel returns a 192-bit owner key that is stored locally with owner-only permissions and never posted. Only a request carrying that key can answer a question, so another agent in the channel, or a prompt injection in a channel message that claims to speak for the user, cannot answer on the user's behalf. A user who steps away can switch questions off; agents then get an immediate <em>unattended</em> reply and are instructed to stay within what was already approved and leave destructive actions undone.</p>
+
+<h2><span class="n">4</span>Implementation</h2>
+<p>CrossTalk is written in TypeScript for Node 18 and later. The core (hub, protocol, SDK, CLI and MCP server) is about 6,000 lines. The hub keeps channels, locks, claims and recent history (100 messages per channel) in memory and sweeps expired locks, stalled claims and abandoned channels every 5 seconds. It applies a token-bucket rate limit of 20 requests per second per connection with a burst of 60, and at most 64 connections per client address. Each channel also limits its members' messages, by default to 1,000 characters each and 120 a minute per member with bursts of 30; the creator can lower these limits, and the hub caps how high they can go. A Python SDK is a single file with no dependencies. Add-on packages provide the device bridge with C, MicroPython and Arduino clients, an offline single-file installer, and a Chinese translation of the XDialect shorthand. The project is MIT-licensed, and a public hub runs on Railway for agents on different networks.</p>
+
+<h2><span class="n">5</span>Evaluation</h2>
+<p>All experiments ran on an Apple M1 Pro (10 cores) with Node 20.20, CrossTalk 2.7.0, and stock hub settings. Each run starts a fresh hub on a local port; clients connect over WebSocket. The harness is in the repository (<code>docs/paper/bench/run.mjs</code>) with its raw output (<code>results.json</code>), and reproduces with one command.</p>
+
+<h3><span class="n">5.1</span>Lost updates under concurrent edits</h3>
+<p>We model the interference in §1 directly. <em>K</em> agents each perform 25 edits. An edit picks one of <em>F</em> shared files at random, reads it, waits 5–40 ms (uniform) to stand in for the model's thinking, appends one line and writes the file back. Without coordination, two edits that overlap on the same file lose one of their lines. With CrossTalk, the agent acquires a lock on the file before reading it and releases it after writing; when the lock is held, it retries with jittered exponential backoff from 10 to 160 ms. We count lines that landed against edits attempted, over 5 seeds per configuration.</p>
+
+<figure>
+<svg class="fig" viewBox="0 0 640 250" role="img" aria-labelledby="f2t">
+  <title id="f2t">Share of edits lost without coordination, by number of agents, for 4 and 16 shared files. With locks, no edits were lost.</title>
+  <line class="grid" x1="44" x2="624" y1="45.7" y2="45.7"/>
+  <line class="grid" x1="44" x2="624" y1="97.1" y2="97.1"/>
+  <line class="grid" x1="44" x2="624" y1="148.6" y2="148.6"/>
+  <text class="ax" x="36" y="49.7" text-anchor="end">60%</text>
+  <text class="ax" x="36" y="101.1" text-anchor="end">40%</text>
+  <text class="ax" x="36" y="152.6" text-anchor="end">20%</text>
+  <text class="ax" x="36" y="204" text-anchor="end">0</text>
+  <text class="title" x="50" y="14">4 shared files</text>
+  <text class="title" x="356" y="14">16 shared files</text>
+  <path class="s1" d="M69.7 200 V158.7 Q69.7 154.7 73.7 154.7 H105.7 Q109.7 154.7 109.7 158.7 V200 Z"><title>2 agents, 4 files: 17.6% lost (±5.6)</title></path>
+  <path class="s1" d="M161 200 V110.4 Q161 106.4 165 106.4 H197 Q201 106.4 201 110.4 V200 Z"><title>4 agents, 4 files: 36.4% lost (±3.3)</title></path>
+  <path class="s1" d="M252.3 200 V52.3 Q252.3 48.3 256.3 48.3 H288.3 Q292.3 48.3 292.3 52.3 V200 Z"><title>8 agents, 4 files: 59.0% lost (±1.6)</title></path>
+  <path class="s1" d="M375.7 200 V185.5 Q375.7 181.5 379.7 181.5 H411.7 Q415.7 181.5 415.7 185.5 V200 Z"><title>2 agents, 16 files: 7.2% lost (±3.0)</title></path>
+  <path class="s1" d="M467 200 V167.0 Q467 163.0 471 163.0 H503 Q507 163.0 507 167.0 V200 Z"><title>4 agents, 16 files: 14.4% lost (±2.1)</title></path>
+  <path class="s1" d="M558.3 200 V129.7 Q558.3 125.7 562.3 125.7 H594.3 Q598.3 125.7 598.3 129.7 V200 Z"><title>8 agents, 16 files: 28.9% lost (±1.6)</title></path>
+  <g>
+    <line class="whisk" x1="89.7" x2="89.7" y1="140.3" y2="169.1"/><line class="whisk" x1="85.7" x2="93.7" y1="140.3" y2="140.3"/>
+    <line class="whisk" x1="181" x2="181" y1="97.9" y2="114.9"/><line class="whisk" x1="177" x2="185" y1="97.9" y2="97.9"/>
+    <line class="whisk" x1="272.3" x2="272.3" y1="44.2" y2="52.4"/><line class="whisk" x1="268.3" x2="276.3" y1="44.2" y2="44.2"/>
+    <line class="whisk" x1="395.7" x2="395.7" y1="173.8" y2="189.2"/><line class="whisk" x1="391.7" x2="399.7" y1="173.8" y2="173.8"/>
+    <line class="whisk" x1="487" x2="487" y1="157.6" y2="168.4"/><line class="whisk" x1="483" x2="491" y1="157.6" y2="157.6"/>
+    <line class="whisk" x1="578.3" x2="578.3" y1="121.6" y2="129.8"/><line class="whisk" x1="574.3" x2="582.3" y1="121.6" y2="121.6"/>
+  </g>
+  <text class="lab" x="111.7" y="148.7">18%</text>
+  <text class="lab" x="203" y="100.4">36%</text>
+  <text class="lab" x="294.3" y="42.3">59%</text>
+  <text class="lab" x="417.7" y="175.5">7%</text>
+  <text class="lab" x="509" y="157.0">14%</text>
+  <text class="lab" x="600.3" y="119.7">29%</text>
+  <line class="base" x1="44" x2="318" y1="200" y2="200"/>
+  <line class="base" x1="350" x2="624" y1="200" y2="200"/>
+  <text class="ax" x="89.7" y="217" text-anchor="middle">2 agents</text>
+  <text class="ax" x="181" y="217" text-anchor="middle">4 agents</text>
+  <text class="ax" x="272.3" y="217" text-anchor="middle">8 agents</text>
+  <text class="ax" x="395.7" y="217" text-anchor="middle">2 agents</text>
+  <text class="ax" x="487" y="217" text-anchor="middle">4 agents</text>
+  <text class="ax" x="578.3" y="217" text-anchor="middle">8 agents</text>
+  <text class="small accent" x="89.7" y="236" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="181" y="236" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="272.3" y="236" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="395.7" y="236" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="487" y="236" text-anchor="middle">locks: 0</text>
+  <text class="small accent" x="578.3" y="236" text-anchor="middle">locks: 0</text>
+</svg>
+<figcaption><b>Figure 2.</b> Edits lost without coordination (mean of 5 seeds; whiskers ±1 standard deviation). With CrossTalk locks, every edit landed in every run.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Files</th><th>Agents</th><th>Lost, none</th><th>Lost, locks</th><th>Makespan, none</th><th>Makespan, locks</th><th>Lock RTT p50</th><th>Mean lock wait</th><th>Contended acquires</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>4</td><td>2</td><td>17.6% ± 5.6</td><td class="zero">0 / 250</td><td>625 ms</td><td>838 ms</td><td>0.37 ms</td><td>7 ms</td><td>13</td></tr>
+    <tr><td>4</td><td>4</td><td>36.4% ± 3.3</td><td class="zero">0 / 500</td><td>626 ms</td><td>1,416 ms</td><td>0.29 ms</td><td>21 ms</td><td>50</td></tr>
+    <tr><td>4</td><td>8</td><td>59.0% ± 1.6</td><td class="zero">0 / 1,000</td><td>665 ms</td><td>2,477 ms</td><td>0.28 ms</td><td>48 ms</td><td>158</td></tr>
+    <tr class="sep"><td>16</td><td>2</td><td>7.2% ± 3.0</td><td class="zero">0 / 250</td><td>619 ms</td><td>663 ms</td><td>0.18 ms</td><td>1 ms</td><td>3</td></tr>
+    <tr><td>16</td><td>4</td><td>14.4% ± 2.1</td><td class="zero">0 / 500</td><td>621 ms</td><td>785 ms</td><td>0.19 ms</td><td>4 ms</td><td>18</td></tr>
+    <tr><td>16</td><td>8</td><td>28.9% ± 1.6</td><td class="zero">0 / 1,000</td><td>647 ms</td><td>1,274 ms</td><td>0.26 ms</td><td>14 ms</td><td>86</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="tcap"><b>Table 1.</b> Concurrent-edit results, 5 seeds per row. "Lost, locks" totals edits over the 5 runs. Makespan, RTT, wait and contention are per-run means. No request was rate-limited.</p>
+
+<p>Without coordination, loss grows with the number of agents and with contention: with 8 agents on 4 files, most edits vanish. Even 2 agents on 16 files lost 7%. With locks, all 3,500 edits landed. The cost is serialization. With 8 agents on 4 files, each file receives about 50 edits of 22.5 ms mean think time, so perfect scheduling needs roughly 1.1 s; the observed 2.5 s makespan is about twice that, and the difference is backoff while polling for a held lock. The hub round trip itself (0.2–0.4 ms) is negligible. Real agent edits take seconds to minutes, so the relative overhead of polling shrinks, but a lock queue that notifies the next waiter would remove it (§6).</p>
+<p>The uncoordinated case here is a worst case for read-modify-write. Agents that re-read a file immediately before a targeted string replacement narrow the window, but they do not close it, and the semantic version of the conflict (two agents changing the same function toward different goals) remains even when both writes survive.</p>
+
+<h3><span class="n">5.2</span>Fan-out latency</h3>
+<p>One member posts 100 messages, 2 per second (inside the default limit of 120 messages a minute per member), to a channel of <em>N</em> members, and every other member timestamps arrival. All clients share one process and one clock, so the measurement includes queuing in the receivers' event loop.</p>
+
+<figure>
+<svg class="fig" viewBox="0 0 640 245" role="img" aria-labelledby="f3t">
+  <title id="f3t">Median and 99th percentile delivery latency against channel size. Median stays under 3.3 ms; p99 rises to 18.8 ms at 50 members.</title>
+  <line class="grid" x1="60" x2="620" y1="56.0" y2="56.0"/>
+  <line class="grid" x1="60" x2="620" y1="128.0" y2="128.0"/>
+  <line class="base" x1="60" x2="620" y1="200" y2="200"/>
+  <text class="ax" x="50" y="60.0" text-anchor="end">20 ms</text>
+  <text class="ax" x="50" y="132.0" text-anchor="end">10 ms</text>
+  <text class="ax" x="50" y="204" text-anchor="end">0</text>
+  <text class="ax" x="60" y="218" text-anchor="middle">2</text>
+  <text class="ax" x="216.6" y="218" text-anchor="middle">5</text>
+  <text class="ax" x="334.2" y="218" text-anchor="middle">10</text>
+  <text class="ax" x="490.8" y="218" text-anchor="middle">25</text>
+  <text class="ax" x="610" y="218" text-anchor="middle">50</text>
+  <text class="ax" x="335" y="238" text-anchor="middle">channel members (log scale)</text>
+  <polyline class="l2" points="60,168.8 216.6,161.9 334.2,141.0 490.8,130.4 610,64.6"/>
+  <polyline class="l1" points="60,195.4 216.6,196.6 334.2,191.4 490.8,190.1 610,176.4"/>
+  <circle class="m2" cx="60" cy="168.8" r="4.5"><title>2 members: p99 4.3 ms</title></circle>
+  <circle class="m2" cx="216.6" cy="161.9" r="4.5"><title>5 members: p99 5.3 ms</title></circle>
+  <circle class="m2" cx="334.2" cy="141.0" r="4.5"><title>10 members: p99 8.2 ms</title></circle>
+  <circle class="m2" cx="490.8" cy="130.4" r="4.5"><title>25 members: p99 9.7 ms</title></circle>
+  <circle class="m2" cx="610" cy="64.6" r="4.5"><title>50 members: p99 18.8 ms</title></circle>
+  <circle class="m1" cx="60" cy="195.4" r="4.5"><title>2 members: p50 0.6 ms</title></circle>
+  <circle class="m1" cx="216.6" cy="196.6" r="4.5"><title>5 members: p50 0.5 ms</title></circle>
+  <circle class="m1" cx="334.2" cy="191.4" r="4.5"><title>10 members: p50 1.2 ms</title></circle>
+  <circle class="m1" cx="490.8" cy="190.1" r="4.5"><title>25 members: p50 1.4 ms</title></circle>
+  <circle class="m1" cx="610" cy="176.4" r="4.5"><title>50 members: p50 3.3 ms</title></circle>
+  <text class="lab" x="598" y="58.599999999999994" text-anchor="end">p99 · 18.8 ms</text>
+  <text class="lab" x="598" y="168.4" text-anchor="end">p50 · 3.3 ms</text>
+  <rect class="s1" x="80" y="16" width="14" height="3" rx="1.5"/><text class="ax" x="100" y="21">median (p50)</text>
+  <rect x="190" y="16" width="14" height="3" rx="1.5" style="fill: var(--series-2)"/><text class="ax" x="210" y="21">99th percentile</text>
+</svg>
+<figcaption><b>Figure 3.</b> Per-delivery latency from send to receipt at each other member. All 4,900 deliveries arrived in the 50-member run; none were dropped in any run.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Members</th><th>Deliveries</th><th>p50</th><th>p95</th><th>p99</th><th>Max</th><th>Last member, p50</th></tr></thead>
+  <tbody>
+    <tr><td>2</td><td>100 / 100</td><td>0.64 ms</td><td>2.39 ms</td><td>4.34 ms</td><td>4.34 ms</td><td>0.64 ms</td></tr>
+    <tr><td>5</td><td>400 / 400</td><td>0.47 ms</td><td>1.96 ms</td><td>5.29 ms</td><td>5.36 ms</td><td>0.49 ms</td></tr>
+    <tr><td>10</td><td>900 / 900</td><td>1.19 ms</td><td>4.04 ms</td><td>8.20 ms</td><td>8.34 ms</td><td>1.39 ms</td></tr>
+    <tr><td>25</td><td>2,400 / 2,400</td><td>1.38 ms</td><td>5.92 ms</td><td>9.67 ms</td><td>10.60 ms</td><td>1.58 ms</td></tr>
+    <tr><td>50</td><td>4,900 / 4,900</td><td>3.28 ms</td><td>8.43 ms</td><td>18.80 ms</td><td>19.22 ms</td><td>4.06 ms</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="tcap"><b>Table 2.</b> Fan-out latency. "Last member" is the time until the slowest recipient of a message received it.</p>
+<p>The median stays between 0.5 and 3.3 ms up to the default member limit. The tail grows with channel size, in part because 49 receivers share the benchmark's one event loop. For agents whose turns take seconds, coordination latency is not the bottleneck.</p>
+
+<h3><span class="n">5.3</span>Detecting a silent claim</h3>
+<p>Three agents each claim a task with the minimum 60-second heartbeat and then go silent; an observer in the channel records when each <code>claim.updated</code> event with status <em>stalled</em> arrives. The claims were staggered by 1.7 s so they fall at different points of the hub's sweep cycle.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Claim</th><th>Promised interval</th><th>Silent until flagged</th><th>Past the deadline</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>60 s</td><td>65.0 s</td><td>5.0 s</td></tr>
+    <tr><td>2</td><td>60 s</td><td>63.3 s</td><td>3.3 s</td></tr>
+    <tr><td>3</td><td>60 s</td><td>61.6 s</td><td>1.6 s</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="tcap"><b>Table 3.</b> Stall detection. Detection lag is bounded by the hub's 5-second sweep interval (claim 1: 4.96 s).</p>
+<p>A stalled promise reaches everyone in the channel within one sweep of its deadline. Without claims, a silent agent's "on it" stays true indefinitely as far as its teammates can tell.</p>
+
+<h3><span class="n">5.4</span>Coordination token cost</h3>
+<p>Language-model agents pay for what they read. Let <em>N</em> agents make <em>U</em> updates, with a shared context of <em>C</em> tokens and messages of about <em>m</em> tokens. If every agent re-reads the shared context per update, coordination costs</p>
+<p class="eq">N · U · C &nbsp;<span>versus</span>&nbsp; U · m · (N − 1)</p>
+<p>for one message per update delivered once to the others. For 4 agents, 10 updates, <em>C</em> = 40,000 and <em>m</em> = 30, that is 1,600,000 tokens against 900; the ratio is roughly <em>C</em>/<em>m</em>. This counts coordination only; each agent still reads what its own task needs, and prompt caching lowers the price of repeated context without freeing the context window. Two related costs follow the same pattern. An agent that polls for a reply re-sends its context each turn, so ten empty checks at 50,000 tokens cost about 500,000 input tokens, against about 50,000 for one blocking wait. An agent that re-reads a growing notes file after each of <em>n</em> updates reads <em>m</em>·<em>n</em>(<em>n</em>+1)/2 tokens, against <em>m</em>·<em>n</em> from an inbox: 54,900 against 1,800 for 60 updates of 30 tokens. These are estimates from a model, not measurements of a workload. The optional XDialect shorthand is measured: three typical lock, release and conflict messages take 41 tokens against 79 for their English expansions with the o200k tokenizer, about 48% fewer.</p>
+
+<h2><span class="n">6</span>Limitations and future work</h2>
+<ul>
+  <li><strong>Synthetic agents.</strong> The benchmarks use scripted agents to isolate the coordination layer. They show what locks prevent and what the hub costs, not how often real LLM agents follow the protocol. A study of compliance across vendors (how often agents lock before editing, claim before promising, and wait instead of ending their turn) is the most important next step.</li>
+  <li><strong>Advisory enforcement.</strong> An agent that ignores its instructions and has no pre-edit hook can still overwrite a locked file.</li>
+  <li><strong>File granularity.</strong> Locks cover whole files, which serializes agents that would touch different functions in one file. Region- or symbol-level locks would allow more parallelism.</li>
+  <li><strong>Polling for locks.</strong> Waiting for a held lock is retry with backoff. A per-lock queue that hands the lock to the next waiter on release would remove the overhead measured in §5.1.</li>
+  <li><strong>One hub, in memory.</strong> A hub restart clears its channels, and the hub is a single point of failure. Hub peering and failover, so that no particular hub (and no cloud service) is required, are planned.</li>
+  <li><strong>Single machine.</strong> Latency was measured on one machine; wide-area and radio links add their own delays, which the reliable link layer trades for delivery.</li>
+  <li><strong>Address secrecy.</strong> Access to a channel rests on keeping its address private. An address pasted into a public log grants access to anyone who reads it.</li>
+</ul>
+
+<h2><span class="n">7</span>Conclusion</h2>
+<p>Coding agents from different vendors can already share a repository; what they lack is a way to share a conversation about it. CrossTalk supplies a small one: private channels, leased locks, claims with heartbeats, and attention, over whatever transport an agent has. The scripted benchmark shows the stakes, since uncoordinated agents lost an average of 59% of their edits under heavy contention while locked agents lost none, and shows that the hub adds well under a millisecond per lock. The harder problem is the turn boundary: an agent that is connected but not reading. CrossTalk's answer is to make reading cheap, waiting easy, waking possible, and not reading visible.</p>
+
+<h2>Availability</h2>
+<p>CrossTalk is MIT-licensed at <a href="https://github.com/ajokhai/cross-talk">github.com/ajokhai/cross-talk</a>. The benchmark harness and raw results are in <code>docs/paper/bench/</code>; run <code>npm run build</code> and then <code>node docs/paper/bench/run.mjs</code> to reproduce them.</p>
+
+<h2>References</h2>
+<ol class="refs">
+  <li>Anthropic. Model Context Protocol specification. 2024. <a href="https://modelcontextprotocol.io">modelcontextprotocol.io</a></li>
+  <li>Google. Agent2Agent (A2A) protocol. 2025. <a href="https://github.com/a2aproject/A2A">github.com/a2aproject/A2A</a></li>
+  <li>C. Gray and D. Cheriton. Leases: an efficient fault-tolerant mechanism for distributed file cache consistency. <em>SOSP</em>, 1989.</li>
+  <li>Q. Wu et al. AutoGen: enabling next-gen LLM applications via multi-agent conversation. arXiv:2308.08155, 2023.</li>
+  <li>S. Hong et al. MetaGPT: meta programming for a multi-agent collaborative framework. arXiv:2308.00352, 2023.</li>
+  <li>C. Qian et al. ChatDev: communicative agents for software development. arXiv:2307.07924, 2023.</li>
+  <li>L. D. Erman, F. Hayes-Roth, V. R. Lesser and D. R. Reddy. The Hearsay-II speech-understanding system: integrating knowledge to resolve uncertainty. <em>ACM Computing Surveys</em> 12(2), 1980.</li>
+  <li>D. Gelernter. Generative communication in Linda. <em>ACM TOPLAS</em> 7(1), 1985.</li>
+  <li>T. Finin, R. Fritzson, D. McKay and R. McEntire. KQML as an agent communication language. <em>CIKM</em>, 1994.</li>
+  <li>W. F. Tichy. RCS: a system for version control. <em>Software: Practice and Experience</em> 15(7), 1985.</li>
+  <li>M. Burrows. The Chubby lock service for loosely-coupled distributed systems. <em>OSDI</em>, 2006.</li>
+  <li>M. Cemri et al. Why do multi-agent LLM systems fail? arXiv:2503.13657, 2025.</li>
+</ol>
+</div>
+</article>
