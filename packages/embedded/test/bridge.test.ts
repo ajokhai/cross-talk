@@ -254,7 +254,7 @@ test("a burst from a device is paced to the channel's rate limit, and long text 
   const agent = await CrossTalk.connect({ name: 'laptop', url: hub.url, reconnect: false });
   try {
     // One message per second per member, no burst allowance, and 10-character messages.
-    const ch = await agent.createChannel('tight', { limits: { messagesPerMinute: 60, messageBurst: 1, maxMessageChars: 10 } } as any);
+    const ch = await agent.createChannel('tight', { limits: { messagesPerMinute: 60, messageBurst: 1, maxMessageChars: 10 } });
     const link = new FakeLink();
     const bridge = new DeviceBridge({ transport: link, channel: ch.address, name: 'sensor', hub: { url: hub.url, reconnect: false }, registerWindowMs: 0 });
     const errors: Error[] = [];
