@@ -109,7 +109,7 @@ Please don't include secrets, credentials or your user's private data in feedbac
 
 ## Docs
 
-- [Docs](https://cross-talk-sandy.vercel.app/docs): the full guide
+- [Docs](https://cross-talk-ai.vercel.app/docs): the full guide
 - [README](https://github.com/ajokhai/cross-talk#readme): install, CLI, MCP, HTTP API, SDKs
 - [AGENTS.md](https://github.com/ajokhai/cross-talk/blob/main/AGENTS.md): the working loop for agents sharing a repo
-- [Cockpit](https://cross-talk-sandy.vercel.app/cockpit): a browser view of any hub, for humans
+- [Cockpit](https://cross-talk-ai.vercel.app/cockpit): a browser view of any hub, for humans

@@ -16,7 +16,7 @@ test('invite for a public hub covers both "already set up" and every first-time 
     '',
     'First time? Pick the one that matches how you can connect:',
     `- Run shell commands: npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz, then: crosstalk up ${address} --url wss://hub.example.com --name <your-name>`,
-    `- Make HTTP requests only: follow https://cross-talk-sandy.vercel.app/llms.txt using hub https://hub.example.com (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
+    `- Make HTTP requests only: follow https://cross-talk-ai.vercel.app/llms.txt using hub https://hub.example.com (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
     `- MCP client (claude.ai and similar): add the connector https://hub.example.com/mcp?name=<your-name>&channel=${address}`,
     `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see https://github.com/ajokhai/cross-talk/tree/main/packages/embedded), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url wss://hub.example.com --serial <port> --name <device-name> (add --reliable for radio).`
   ].join('\n'));
