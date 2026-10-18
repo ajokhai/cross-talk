@@ -67,6 +67,18 @@ export class CrossTalkError extends Error {
 type RequestType = RequestFrame['type'];
 type RequestBody<T extends RequestType> = Omit<Extract<RequestFrame, { type: T }>, 'type' | 'id'>;
 
+/** The channel a pushed event belongs to, if any. */
+function channelOf(f: ServerFrame): string | undefined {
+  switch (f.type) {
+    case 'message': return f.message.channel;
+    case 'lock.acquired': case 'lock.contended': return f.lock.channel;
+    case 'question.asked': case 'question.closed': return f.question.channel;
+    case 'claim.updated': return f.claim.channel;
+    case 'channel.updated': return f.channel.id;
+    case 'member.joined': case 'member.left': case 'member.updated': case 'lock.released': case 'channel.closed': return f.channel;
+  }
+}
+
 function git(args: string[]): string | undefined {
   try {
     return execFileSync('git', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || undefined;
@@ -513,54 +525,23 @@ export class CrossTalk extends EventEmitter {
     }
 
     this.emit('event', frame);
+    if (frame.type === 'error') return this.report(new CrossTalkError(frame.error.code, frame.error.message));
+    if (frame.type === 'dm' || frame.type === 'message') this.queue(frame.message);
+    if (frame.type === 'question.closed') {
+      this.closedQuestions.set(frame.question.id, frame.question);
+      if (this.closedQuestions.size > 200) this.closedQuestions.delete(this.closedQuestions.keys().next().value!);
+    }
+    const address = channelOf(frame);
+    if (address) this.channels.get(address)?.handle(frame);
     switch (frame.type) {
-      case 'dm':
-        this.queue(frame.message);
-        this.emit('dm', frame.message);
-        return;
-      case 'error':
-        this.report(new CrossTalkError(frame.error.code, frame.error.message));
-        return;
-      case 'message':
-        this.queue(frame.message);
-        this.channels.get(frame.message.channel)?.handle(frame);
-        this.emit('message', frame.message);
-        return;
-      case 'lock.contended':
-        this.channels.get(frame.lock.channel)?.handle(frame);
-        this.emit('lock.contended', frame);
-        return;
-      case 'member.joined':
-      case 'member.left':
-      case 'member.updated':
-      case 'lock.released':
-        this.channels.get(frame.channel)?.handle(frame);
-        return;
-      case 'lock.acquired':
-        this.channels.get(frame.lock.channel)?.handle(frame);
-        return;
-      case 'question.asked':
-        this.channels.get(frame.question.channel)?.handle(frame);
-        this.emit('question.asked', frame.question);
-        return;
+      case 'dm': case 'message': return void this.emit(frame.type, frame.message);
+      case 'lock.contended': return void this.emit(frame.type, frame);
+      case 'question.asked': return void this.emit(frame.type, frame.question);
+      case 'claim.updated': return void this.emit(frame.type, frame.claim);
+      case 'channel.closed': return this.forget(frame.channel);
       case 'question.closed':
-        this.closedQuestions.set(frame.question.id, frame.question);
-        if (this.closedQuestions.size > 200) this.closedQuestions.delete(this.closedQuestions.keys().next().value!);
-        this.channels.get(frame.question.channel)?.handle(frame);
-        this.emit('question.closed', frame.question);
+        this.emit(frame.type, frame.question);
         for (const wake of this.wakeWaiters) wake();
-        return;
-      case 'channel.updated':
-        this.channels.get(frame.channel.id)?.handle(frame);
-        return;
-      case 'channel.closed':
-        this.channels.get(frame.channel)?.handle(frame);
-        this.forget(frame.channel);
-        return;
-      case 'claim.updated':
-        this.channels.get(frame.claim.channel)?.handle(frame);
-        this.emit('claim.updated', frame.claim);
-        return;
     }
   }
 
