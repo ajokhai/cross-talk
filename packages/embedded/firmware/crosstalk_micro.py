@@ -61,6 +61,17 @@ def _short_string(value: str) -> bytes:
     return data
 
 
+def _packed(opcode: int, action: int, intent: int, flow: int, ttl: int, target: str, reason: str) -> bytes:
+    """Packed XDialect frame, shared by pack_claim and pack_release.
+
+    Payload: [ACTION:1][INTENT:1][FLOW:1][TTL:2 BE][TARGET_LEN:1][TARGET][REASON_LEN:1][REASON]
+    """
+    t = _short_string(target)
+    r = _short_string(reason)
+    payload = struct.pack(">BBBHB", action, intent, flow, ttl, len(t)) + t + bytes([len(r)]) + r
+    return _frame(opcode, payload)
+
+
 def _is_packed_action(byte: int) -> bool:
     """True if the bridge would read a BROADCAST starting with this byte as packed XDialect."""
     return 0x10 <= byte <= 0x15 or byte in (0x70, 0x71)
@@ -79,36 +90,12 @@ class CrossTalkMicro:
     @staticmethod
     def pack_claim(target_file: str, reason: str = "Hardware sensor task", ttl: int = 60) -> bytes:
         """Packs a lock claim (!LCK @file #FEAT "reason" ~ttl &WAIT), length-prefixed for a stream."""
-        target_bytes = _short_string(target_file)
-        reason_bytes = _short_string(reason)
-
-        # Payload: [ACTION:1][INTENT:1][FLOW:1][TTL:2][TARGET_LEN:1][TARGET][REASON_LEN:1][REASON]
-        payload = bytearray()
-        payload.append(TOK_LCK)
-        payload.append(INTENT_FEAT)
-        payload.append(FLOW_WAIT)
-        payload.extend(struct.pack(">H", ttl))
-        payload.append(len(target_bytes))
-        payload.extend(target_bytes)
-        payload.append(len(reason_bytes))
-        payload.extend(reason_bytes)
-
-        return _frame(OP_LOCK_ACQUIRE, bytes(payload))
+        return _packed(OP_LOCK_ACQUIRE, TOK_LCK, INTENT_FEAT, FLOW_WAIT, ttl, target_file, reason)
 
     @staticmethod
     def pack_release(target_file: str) -> bytes:
         """Packs a lock release (!REL @file &DONE &PROCEED), length-prefixed for a stream."""
-        target_bytes = _short_string(target_file)
-        payload = bytearray()
-        payload.append(TOK_REL)
-        payload.append(0x00)
-        payload.append(FLOW_DONE | FLOW_PROCEED)
-        payload.extend(struct.pack(">H", 0))
-        payload.append(len(target_bytes))
-        payload.extend(target_bytes)
-        payload.append(0)
-
-        return _frame(OP_LOCK_RELEASE, bytes(payload))
+        return _packed(OP_LOCK_RELEASE, TOK_REL, 0x00, FLOW_DONE | FLOW_PROCEED, 0, target_file, "")
 
     @staticmethod
     def unpack_frame(raw_bytes: bytes):
