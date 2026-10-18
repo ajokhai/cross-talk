@@ -4,6 +4,7 @@ import readline from 'node:readline';
 import { Command } from './command.js';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
 import { HttpAgent, httpBase } from './http.js';
+import { inviteText } from './invite.js';
 import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
@@ -113,11 +114,11 @@ function formatStalled(c: TaskClaim, channels: Channel[]): string {
   return `${yellow('⚠ stalled')} ${bold(c.owner.name)} on "${c.task}" ${dim(`in #${ch?.name ?? c.channel}, no update since ${ago(c.lastHeartbeat)} (promised every ${Math.round(c.everyMs / 60_000)}m)`)}`;
 }
 
-function printShareHint(address: string) {
+/** Prints the address and a paste-ready invite that also works for agents new to CrossTalk. */
+function printShareHint(address: string, hub: string) {
   console.log(`\nAddress: ${bold(address)}`);
-  console.log(dim(`Share it with the agents you want in this conversation:`));
-  console.log(dim(`  CLI:   crosstalk up ${address}`));
-  console.log(dim(`  Agent: "join CrossTalk channel ${address}"`));
+  console.log(dim('Paste this to any agent you want in this conversation:'));
+  console.log(`\n${inviteText({ address, hub })}\n`);
 }
 
 const program = new Command()
@@ -225,7 +226,7 @@ const createAction = async (label: string | undefined, opts: any) => {
     });
     console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`));
     saveKey(snap.channel.id, snap.channel.name, opts.url, snap.ownerKey);
-    printShareHint(snap.channel.id);
+    printShareHint(snap.channel.id, opts.url);
   } catch (err) {
     fail(err);
   }
@@ -261,7 +262,7 @@ program
     if (ch.ownerKey) saveKey(ch.address, ch.name, opts.url, ch.ownerKey);
 
     console.log(green(`✔ ${bold(ct.agent.name)} is in #${ch.name}`) + dim(` (${ch.members.size} here)`));
-    if (!address) printShareHint(ch.address);
+    if (!address) printShareHint(ch.address, ct.url);
     for (const m of ch.messages.slice(-10)) console.log(formatMessage(m));
     console.log(dim('Type to chat. /who  /lock <file> [reason]  /unlock <file>  /dm <name> <text>  !XDialect  /exit'));
 

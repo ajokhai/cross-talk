@@ -35,6 +35,18 @@ export interface McpEndpoint {
 const cleanName = (value: string | null): string =>
   (value ?? '').replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 64);
 
+/**
+ * The hub's address as the remote client reached it (behind Railway and similar
+ * proxies, from X-Forwarded-*), for invites. Only shown back to that client.
+ */
+function publicHubUrl(req: http.IncomingMessage): string | undefined {
+  const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.split(',')[0].trim();
+  const host = first(req.headers['x-forwarded-host']) || first(req.headers.host);
+  if (!host || !/^[\w.:[\]-]+$/.test(host)) return undefined;
+  const secure = first(req.headers['x-forwarded-proto']) === 'https' || (req.socket as { encrypted?: boolean }).encrypted;
+  return `${secure ? 'wss' : 'ws'}://${host}`;
+}
+
 function readBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -115,7 +127,8 @@ export function createMcpEndpoint(opts: { hubUrl: string; token?: string; secret
           token: opts.token,
           headers: { [INTERNAL_HEADER]: opts.secret, [CLIENT_HEADER]: address },
           channels: (url.searchParams.get('channel') ?? '').split(','),
-          remote: true
+          remote: true,
+          publicUrl: publicHubUrl(req)
         });
         const sid = crypto.randomUUID();
         session = { server: new McpServer(bridge), bridge, address, lastSeen: Date.now() };

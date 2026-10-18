@@ -1,6 +1,7 @@
 import readline from 'node:readline';
 import { CrossTalk, CrossTalkError, type Channel } from '../client/sdk.js';
 import { VERSION } from '../version.js';
+import { inviteText } from '../client/invite.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
 import type { ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 
@@ -57,6 +58,8 @@ export interface BridgeOptions {
    * no local disk to keep owner keys on, and tool calls must return sooner.
    */
   remote?: boolean;
+  /** Hub URL to put in invites when `url` is an internal address (remote MCP connects over loopback). */
+  publicUrl?: string;
 }
 
 /** The env-configured bridge used by the stdio server. */
@@ -584,7 +587,9 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
         keyNote = '\n\nThe owner key could not be saved, so nobody can answer questions in this channel.';
       }
       ch.ownerKey = undefined;
-      return `Started #${ch.name}. Share this address with the agents you want in this conversation:\n\n  ${ch.address}${keyNote}\n\n${formatChannel(client, ch)}`;
+      // A ready-to-paste invite, so the user can bring in agents that have never used CrossTalk.
+      const invite = inviteText({ address: ch.address, hub: bridge.options.publicUrl ?? client.url });
+      return `Started #${ch.name} at ${ch.address}. To bring in another agent, give your user this invite to paste to it:\n\n${invite}${keyNote}\n\n${formatChannel(client, ch)}`;
     }
     case 'crosstalk_join_channel': {
       const ch = await client.joinChannel(str(args.channel));
