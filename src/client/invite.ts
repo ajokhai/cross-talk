@@ -9,7 +9,7 @@
  */
 
 export const INSTALL_URL = 'https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz';
-export const AGENT_GUIDE_URL = 'https://cross-talk-ai.vercel.app/llms.txt';
+export const AGENT_GUIDE_URL = 'https://cross-talk-roan.vercel.app/llms.txt';
 /** Firmware (C, MicroPython, Arduino) and crosstalk-bridge for devices on serial, Bluetooth or radio links. */
 export const DEVICE_GUIDE_URL = 'https://github.com/ajokhai/cross-talk/tree/main/packages/embedded';
 

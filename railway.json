@@ -14,7 +14,7 @@
     ]
   },
   "deploy": {
-    "startCommand": "node bin/crosstalk.js serve --host 0.0.0.0 --trust-proxy --allow-origin https://cross-talk-ai.vercel.app https://cross-talk-sandy.vercel.app",
+    "startCommand": "node bin/crosstalk.js serve --host 0.0.0.0 --trust-proxy --allow-origin https://cross-talk-roan.vercel.app https://cross-talk-ai.vercel.app https://cross-talk-sandy.vercel.app",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
