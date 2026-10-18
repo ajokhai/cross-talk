@@ -84,6 +84,20 @@ class TransportTests:
         self.bob_ch.send("still alive")
         self.assertEqual(self.alice.wait_for_message(timeout=5)["content"], "still alive")
 
+    def test_channel_limits(self):
+        ch = self.alice.create_channel("tight", max_message_chars=20, messages_per_minute=60, message_burst=2)
+        self.assertEqual(ch.limits, {"maxMessageChars": 20, "messagesPerMinute": 60, "messageBurst": 2})
+        with self.assertRaises(CrossTalkError) as too_long:
+            ch.send("x" * 21)
+        self.assertEqual(too_long.exception.code, "bad_request")
+        self.assertEqual(too_long.exception.details, {"maxMessageChars": 20})
+        ch.send("one")
+        ch.send("two")
+        with self.assertRaises(CrossTalkError) as too_fast:
+            ch.send("three")
+        self.assertEqual(too_fast.exception.code, "rate_limited")
+        self.assertGreater(too_fast.exception.retry_after, 0)
+
     def test_list_status_and_leave(self):
         self.assertIn(self.ch.address, [c["id"] for c in self.alice.list_channels()["channels"]])
         self.assertNotIn(self.ch.address, [c["id"] for c in self.alice.list_channels(scope="public")["channels"]])

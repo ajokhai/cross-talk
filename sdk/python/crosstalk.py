@@ -61,6 +61,12 @@ class CrossTalkError(Exception):
         self.message = message
         self.details = details
 
+    @property
+    def retry_after(self) -> Optional[float]:
+        """Seconds to wait before retrying, for 'rate_limited' errors that say (details.retryAfterMs)."""
+        ms = self.details.get("retryAfterMs") if isinstance(self.details, dict) else None
+        return ms / 1000 if isinstance(ms, (int, float)) else None
+
 
 def is_address(value: str) -> bool:
     """True for a channel address: "xt_" followed by 22 base64url characters."""
@@ -291,6 +297,12 @@ class Channel:
     def name(self) -> str:
         return self.info.get("name", "")
 
+    @property
+    def limits(self) -> Dict[str, Any]:
+        """Fixed when the channel was created: maxMessageChars, messagesPerMinute, messageBurst.
+        Empty on older hubs that don't report limits."""
+        return self.info.get("limits") or {}
+
     def send(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return self._client.send(self.address, text, metadata)
 
@@ -457,10 +469,18 @@ class CrossTalk:
             channel = self.channels[address] = Channel(self, snapshot)
         return channel
 
-    def create_channel(self, name: Optional[str] = None, topic: Optional[str] = None, public: bool = False) -> Channel:
-        """Creates a channel (private unless `public=True`) and joins it. Share `channel.address`."""
+    def create_channel(self, name: Optional[str] = None, topic: Optional[str] = None, public: bool = False,
+                       max_message_chars: Optional[int] = None, messages_per_minute: Optional[int] = None,
+                       message_burst: Optional[int] = None) -> Channel:
+        """Creates a channel (private unless `public=True`) and joins it. Share `channel.address`.
+
+        The limits are fixed for the channel's lifetime; any left out take the hub's defaults.
+        Longer messages fail with 'bad_request', faster ones with 'rate_limited' (see retry_after).
+        """
+        limits = {k: v for k, v in (("maxMessageChars", max_message_chars), ("messagesPerMinute", messages_per_minute),
+                                    ("messageBurst", message_burst)) if v is not None}
         return self._track(self.request("channel.create", name=name, topic=topic,
-                                        visibility="public" if public else "private"))
+                                        visibility="public" if public else "private", limits=limits or None))
 
     def join_channel(self, address: str) -> Channel:
         """Joins a channel by its address (xt_...). Raises quota_exceeded when it is full."""
@@ -582,6 +602,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("channel_name", metavar="name", nargs="?")
     p.add_argument("--topic")
     p.add_argument("--public", action="store_true")
+    p.add_argument("--max-chars", type=int, help="longest message allowed in this channel (hub default if omitted)")
+    p.add_argument("--rate", type=int, help="messages per minute each member may send")
+    p.add_argument("--burst", type=int, help="messages a member may send at once before the rate applies")
     p.add_argument("--message", help="post an opening message")
     p = sub.add_parser("history", help="show recent messages in a channel")
     p.add_argument("address")
@@ -609,7 +632,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 for c in ct.list_channels(scope="public", limit=args.limit).get("channels", []):
                     print(f"{c['id']}  {c.get('name', '')}  ({c.get('memberCount', 0)}/{c.get('maxMembers', '?')})  {c.get('topic', '')}")
             elif args.cmd == "create":
-                ch = ct.create_channel(args.channel_name, topic=args.topic, public=args.public)
+                ch = ct.create_channel(args.channel_name, topic=args.topic, public=args.public,
+                                       max_message_chars=args.max_chars, messages_per_minute=args.rate,
+                                       message_burst=args.burst)
                 if args.message:
                     ch.send(args.message)
                 print(ch.address)

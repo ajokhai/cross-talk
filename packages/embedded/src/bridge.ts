@@ -39,6 +39,29 @@ export interface DeviceBridgeOptions {
    * reading, so a quiet channel doesn't make it look idle. Default 60000 ms.
    */
   attentionIntervalMs?: number;
+  /**
+   * Device frames that may wait while the hub rate-limits this device (each
+   * channel caps messages per member per minute). Frames past this are dropped
+   * and reported, so a chatty sensor can't build an unbounded backlog. Default 50.
+   */
+  maxBacklog?: number;
+}
+
+/** Longest a rate-limited send waits for the hub's retryAfterMs before the frame is dropped. */
+const MAX_RETRY_WAIT_MS = 30_000;
+
+/** Splits text into pieces of at most `max` characters (UTF-16 units, as the hub counts), never inside a surrogate pair. */
+export function splitText(text: string, max: number): string[] {
+  if (text.length <= max) return [text];
+  const parts: string[] = [];
+  for (let i = 0; i < text.length; ) {
+    let end = Math.min(i + max, text.length);
+    // Don't cut between the two halves of an emoji or other astral character.
+    if (end < text.length && end > i + 1 && /[\uD800-\uDBFF]/.test(text[end - 1])) end--;
+    parts.push(text.slice(i, end));
+    i = end;
+  }
+  return parts;
 }
 
 const encoder = new TextEncoder();
@@ -128,6 +151,17 @@ export class DeviceBridge extends EventEmitter {
     const pending: BinaryFrame[] = [];
     let live = false;
     let chain = Promise.resolve();
+    // Frames queued on `chain` but not yet handled; grows only while the hub rate-limits us.
+    let backlog = 0;
+    const maxBacklog = this.options.maxBacklog ?? 50;
+    const enqueue = (frame: BinaryFrame) => {
+      if (backlog >= maxBacklog) {
+        this.report(new Error(`Dropped a device frame (opcode ${frame.opcode}): ${backlog} already waiting on the channel's rate limit`));
+        return;
+      }
+      backlog++;
+      chain = chain.then(() => this.fromDevice(frame)).catch(err => this.report(err)).finally(() => { backlog--; });
+    };
     let registered: ((name: string) => void) | undefined;
     const onDeviceMessage = (data: Buffer | string) => {
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf8');
@@ -144,7 +178,7 @@ export class DeviceBridge extends EventEmitter {
         pending.push(frame);
         return;
       }
-      chain = chain.then(() => this.fromDevice(frame)).catch(err => this.report(err));
+      enqueue(frame);
     };
     const onDeviceClose = () => void this.stop();
     const onDeviceError = (err: Error) => this.report(err);
@@ -202,9 +236,7 @@ export class DeviceBridge extends EventEmitter {
     });
 
     live = true;
-    for (const frame of pending.splice(0)) {
-      chain = chain.then(() => this.fromDevice(frame)).catch(err => this.report(err));
-    }
+    for (const frame of pending.splice(0)) enqueue(frame);
     this.emit('ready', channel);
     return channel;
   }
@@ -220,6 +252,24 @@ export class DeviceBridge extends EventEmitter {
 
   private report(err: unknown): void {
     if (this.listenerCount('error') > 0) this.emit('error', err);
+  }
+
+  /**
+   * Runs a send; if the hub says `rate_limited`, waits the `retryAfterMs` it
+   * gives and tries once more. Later device frames queue behind this (see
+   * `maxBacklog`), so a burst from the device drains at the channel's rate.
+   */
+  private async paced<T>(send: () => Promise<T>): Promise<T> {
+    try {
+      return await send();
+    } catch (err) {
+      const wait = err instanceof CrossTalkError && err.code === 'rate_limited'
+        ? Number((err.details as { retryAfterMs?: number } | undefined)?.retryAfterMs ?? 1000)
+        : NaN;
+      if (!(wait >= 0 && wait <= MAX_RETRY_WAIT_MS) || this.stopped) throw err;
+      await new Promise(resolve => setTimeout(resolve, wait + 50));
+      return send();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -262,10 +312,12 @@ export class DeviceBridge extends EventEmitter {
         if (!raw.length) return;
         if (PACKED_ACTION_IDS.has(raw[0])) {
           const { shorthand } = DialectEngine.unpackFromBits(raw);
-          if (shorthand) await channel.shorthand(shorthand);
+          if (shorthand) await this.paced(() => channel.shorthand(shorthand));
         } else {
           const text = raw.toString('utf8').trim();
-          if (text) await channel.send(text);
+          // A channel can be created with a limit below the device's frame size; split rather than lose text.
+          const limit = (channel.info as { limits?: { maxMessageChars?: number } }).limits?.maxMessageChars ?? Infinity;
+          for (const part of text ? splitText(text, limit) : []) await this.paced(() => channel.send(part));
         }
         return;
       }
@@ -276,7 +328,7 @@ export class DeviceBridge extends EventEmitter {
           this.report(new Error('DIRECT_MSG payload must be [to_len:1][to][text]'));
           return;
         }
-        await this.client!.dm(split.name, split.text);
+        await this.paced(() => this.client!.dm(split.name, split.text));
         return;
       }
 
