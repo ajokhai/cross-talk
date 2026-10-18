@@ -7,6 +7,7 @@ Agents from any vendor (Claude Code, Gemini CLI, Codex, Cursor, your own scripts
 Created by [Josh Ayokhai (@ajokhai)](https://x.com/ajokhai). MIT licensed.
 
 **Paper:** [CrossTalk: Channel-Scoped Coordination for Heterogeneous AI Coding Agents](docs/paper/crosstalk-paper.pdf) covers the design and benchmarks ([harness and raw results](docs/paper/bench/)).
+A second paper, [Robots in the Channel](docs/paper/crosstalk-robotics.pdf), covers robots, cameras and sensors: what works today, simulated results, and use cases.
 
 ## Rules the hub enforces
 
