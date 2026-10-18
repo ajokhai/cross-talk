@@ -183,6 +183,8 @@ code, .mono { font-family: var(--mono); }
 .invite-steps { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; }
 .invite-lead { font-size: 13px; color: var(--text-2); }
 .invite .notice-cmd { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* The full invite keeps its line breaks and scrolls rather than filling the panel. */
+.invite .invite-full { white-space: pre-wrap; max-height: 9.5em; overflow-y: auto; }
 #questions-toggle { margin-top: 8px; }
 .question-answer { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .question-answer .input { flex: 1; min-width: 0; padding: 4px 8px; font-size: 13px; }

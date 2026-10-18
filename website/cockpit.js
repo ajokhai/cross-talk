@@ -877,6 +877,35 @@
     renderInvite(ch);
   }
 
+  // invite:start — a plain-JS copy of inviteText() in src/client/invite.ts; test/cockpit-invite.test.ts keeps them identical.
+  /** The invite to paste to any agent, even one that has never heard of CrossTalk. */
+  function inviteText(address, hub) {
+    const http = hub.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
+    let host = '';
+    try { host = new URL(hub).hostname.replace(/^\[|\]$/g, ''); } catch { /* not a URL: treat as remote */ }
+    const local = host === 'localhost' || host === '::1' || host.startsWith('127.');
+    const firstTime = local
+      ? ["- This hub runs on someone's machine (localhost), so you must be on that machine to reach it."]
+      : [
+          `- Make HTTP requests only: follow https://cross-talk-sandy.vercel.app/llms.txt using hub ${http} (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
+          `- MCP client (claude.ai and similar): add the connector ${http}/mcp?name=<your-name>&channel=${address}`,
+        ];
+    return [
+      "You're invited to a CrossTalk conversation: a shared channel where AI agents and devices message each other and lock files before editing.",
+      `Channel: ${address}`,
+      `Hub: ${hub}`,
+      'Ways to connect: WebSocket or HTTP to the hub, an MCP connector, or, for hardware, serial/UART, Bluetooth serial or radio through crosstalk-bridge.',
+      '',
+      `If you already have CrossTalk (crosstalk_* tools or the crosstalk command): join ${address} on ${hub}, say hello, and keep listening with crosstalk_wait.`,
+      '',
+      'First time? Pick the one that matches how you can connect:',
+      `- Run shell commands: npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz, then: crosstalk up ${address} --url ${hub} --name <your-name>`,
+      ...firstTime,
+      `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see https://github.com/ajokhai/cross-talk/tree/main/packages/embedded), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`,
+    ].join('\n');
+  }
+  // invite:end
+
   /** How to bring agents into the open conversation, until someone else is in it. */
   function renderInvite(ch) {
     const box = $('invite');
@@ -886,8 +915,8 @@
     if (box.dataset.address === address && !box.hidden) return;
     const hub = state.hub || DEFAULT_URL;
     const web = hub.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
-    const row = (lead, text) => {
-      const code = el('code', { class: 'notice-cmd', text });
+    const row = (lead, text, extra = '') => {
+      const code = el('code', { class: `notice-cmd${extra}`, text });
       const btn = el('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'Copy', onclick: () => copyText(text, btn, code) });
       return el('li', null, el('div', { class: 'invite-lead', text: lead }), el('div', { class: 'notice-row' }, code, btn));
     };
@@ -896,6 +925,7 @@
         el('h3', { text: 'Invite your agents' }),
         el('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'Hide', onclick: () => { state.inviteHidden.add(address); renderInvite(ch); } })),
       el('ol', { class: 'invite-steps' },
+        row('Any agent, even one new to CrossTalk:', inviteText(address, hub), ' invite-full'),
         row('Tell an agent that has CrossTalk set up (Claude Code, Gemini CLI, Cursor…):',
           `Join CrossTalk channel ${address} on ${hub} and say hello.`),
         row('Claude on claude.ai: Settings › Connectors › Add custom connector, with this URL:',
