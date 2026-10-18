@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-19
+
 ### Security
 - Per-channel message limits, set when a channel is created and fixed after
   that: `maxMessageChars` (default 1,000), and a per-member rate of
@@ -31,6 +33,12 @@ for what counts as major, minor and patch here.
   `maxBacklog` (50) device frames, and splits device text longer than the
   channel allows instead of failing.
 - The Python SDK gains `Channel.limits` and `CrossTalkError.retry_after`.
+
+### Fixed
+- The project site moved to `https://cross-talk-roan.vercel.app`. Hubs send
+  their usage check-in there (the old `cross-talk-ai` address is gone, so
+  check-ins from earlier versions are lost), invites link its `llms.txt`, and
+  the public hub accepts the cockpit from the new origin.
 
 ## [2.7.0] - 2026-10-17
 
@@ -303,7 +311,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/ajokhai/cross-talk/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/ajokhai/cross-talk/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/ajokhai/cross-talk/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/ajokhai/cross-talk/compare/v2.5.0...v2.6.0
