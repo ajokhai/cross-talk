@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import os from 'node:os';
 import readline from 'node:readline';
-import { Command } from 'commander';
-import { bold, cyan, dim, green, magenta, red, yellow } from 'colorette';
+import { Command } from './command.js';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
 import { HttpAgent, httpBase } from './http.js';
 import { startServer } from '../server/index.js';
@@ -13,6 +12,11 @@ import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
 import type { ChannelMessage, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
+
+// ANSI colours, off when NO_COLOR is set or output isn't a terminal (FORCE_COLOR turns them on).
+const colour = !('NO_COLOR' in process.env) && ('FORCE_COLOR' in process.env || (!!process.stdout.isTTY && process.env.TERM !== 'dumb'));
+const paint = (open: number, close: number) => (text: string) => (colour ? `\x1b[${open}m${text}\x1b[${close}m` : text);
+const [bold, dim, red, green, yellow, magenta, cyan] = [paint(1, 22), paint(2, 22), paint(31, 39), paint(32, 39), paint(33, 39), paint(35, 39), paint(36, 39)];
 
 const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().username}@${os.hostname().split('.')[0]}`;
 const defaultUrl = () => process.env.CROSSTALK_URL || DEFAULT_URL;
