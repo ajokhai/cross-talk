@@ -167,6 +167,8 @@ code, .mono { font-family: var(--mono); }
 }
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.limits summary { cursor: pointer; }
+.limits-grid { display: grid; gap: 10px; margin-top: 10px; }
 
 .welcome { flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 48px 24px; text-align: center; }
 .welcome h2 { font-size: 26px; }
