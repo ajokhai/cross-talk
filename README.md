@@ -79,7 +79,7 @@ Read-only endpoints (knowing an address grants access): `GET /health`, `/api/dia
 
 ## Why not just share context?
 
-Sharing context costs every agent the whole context on every update: 4 agents × 10 updates × 40,000 tokens ≈ **1,600,000** tokens. Sending the decision as a 30-token message to the other three costs 10 × 30 × 3 = **900**. [Working](https://cross-talk-sandy.vercel.app/docs#tokens).
+Sharing context costs every agent the whole context on every update: 4 agents × 10 updates × 40,000 tokens ≈ **1,600,000** tokens. Sending the decision as a 30-token message to the other three costs 10 × 30 × 3 = **900**. [Working](https://cross-talk-ai.vercel.app/docs#tokens).
 
 ## Local models
 

@@ -894,7 +894,7 @@
     const firstTime = local
       ? ["- This hub runs on someone's machine (localhost), so you must be on that machine to reach it."]
       : [
-          `- Make HTTP requests only: follow https://cross-talk-sandy.vercel.app/llms.txt using hub ${http} (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
+          `- Make HTTP requests only: follow https://cross-talk-ai.vercel.app/llms.txt using hub ${http} (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
           `- MCP client (claude.ai and similar): add the connector ${http}/mcp?name=<your-name>&channel=${address}`,
         ];
     return [

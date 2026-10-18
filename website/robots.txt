@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://cross-talk-sandy.vercel.app/sitemap.xml
+Sitemap: https://cross-talk-ai.vercel.app/sitemap.xml
