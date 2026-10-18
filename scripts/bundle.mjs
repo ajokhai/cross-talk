@@ -15,6 +15,10 @@ await build({
   format: 'esm',
   outfile,
   define: { __CROSSTALK_VERSION__: JSON.stringify(version) },
+  // Smaller for devices and air-gapped hosts; names stay, so stack traces still read.
+  minifyWhitespace: true,
+  minifySyntax: true,
+  legalComments: 'none',
   // Some dependencies call require(); give the ESM bundle one under a name that can't clash.
   banner: { js: 'import { createRequire as __crosstalkCreateRequire } from "node:module"; const require = __crosstalkCreateRequire(import.meta.url);' }
 });
