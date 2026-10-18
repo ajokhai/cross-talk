@@ -14,3 +14,5 @@ if (!existsSync('node_modules/typescript') || !existsSync('node_modules/@types/n
   execSync('npm install --no-save --no-audit --no-fund --include=dev --ignore-scripts', { stdio: 'inherit', env });
 }
 execSync('node node_modules/typescript/bin/tsc', { stdio: 'inherit', env });
+// Releases (npm pack in CI) have esbuild and ship minified JS; a git install without it still works.
+if (existsSync('node_modules/esbuild')) execSync('node scripts/minify.mjs', { stdio: 'inherit', env });
