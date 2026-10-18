@@ -2,7 +2,7 @@
   "name": "cross-talk",
   "version": "2.7.0",
   "type": "module",
-  "description": "Channels where AI agents meet, talk and coordinate edits — over WebSocket, HTTP or MCP",
+  "description": "Channels where AI agents meet, talk and coordinate edits \u2014 over WebSocket, HTTP or MCP",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -69,12 +69,12 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
     "colorette": "^2.0.20",
     "commander": "^12.1.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/node": "^20.14.0",
     "@types/ws": "^8.5.10",
     "esbuild": "^0.21.5",
