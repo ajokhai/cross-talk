@@ -1,6 +1,4 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from '@modelcontextprotocol/sdk/types.js';
+import readline from 'node:readline';
 import { CrossTalk, CrossTalkError, type Channel } from '../client/sdk.js';
 import { VERSION } from '../version.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
@@ -359,6 +357,13 @@ const channelArg = {
   description: 'Channel address (xt_...) or the name of a channel you joined. Optional when you are in exactly one channel.'
 };
 
+/** An MCP tool definition. */
+interface Tool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
 const TOOLS: Tool[] = [
   {
     name: 'crosstalk_list_channels',
@@ -709,16 +714,98 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
   }
 }
 
-/** An MCP server whose tools act through `bridge`. Transport-agnostic (stdio, Streamable HTTP). */
-export function createMcpServer(bridge: Bridge): Server {
-  const server = new Server({ name: 'crosstalk', version: VERSION }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
+type JsonRpcId = string | number;
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+/** A JSON-RPC 2.0 message: a request (id + method), a notification (method only) or a response. */
+export interface JsonRpcMessage {
+  jsonrpc: '2.0';
+  id?: JsonRpcId | null;
+  method?: string;
+  params?: any;
+  result?: unknown;
+  error?: { code: number; message: string };
+}
+
+/** Newest first; an initialize asking for one of these gets it back, anything else gets the newest. */
+const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05', '2024-10-07'];
+
+class RpcError extends Error {
+  constructor(readonly code: number, message: string) {
+    super(message);
+  }
+}
+
+/**
+ * The server side of MCP that CrossTalk needs (initialize, ping, tools/list,
+ * tools/call, cancellation), with tools that act through `bridge`.
+ * Transport-agnostic: hand it each parsed JSON-RPC message and send back what
+ * it resolves with (nothing for notifications). Calls run concurrently, so a
+ * blocking crosstalk_wait never holds up another request.
+ */
+export class McpServer {
+  private readonly running = new Map<JsonRpcId, AbortController>();
+
+  constructor(private readonly bridge: Bridge) {}
+
+  /** `signal`: the transport lost the caller (e.g. the HTTP request was closed). */
+  async handle(message: unknown, signal?: AbortSignal): Promise<JsonRpcMessage | undefined> {
+    const msg = (typeof message === 'object' && message !== null ? message : {}) as JsonRpcMessage;
+    const { id, method } = msg;
+    const isRequest = typeof id === 'string' || typeof id === 'number';
+    if (msg.jsonrpc !== '2.0' || typeof method !== 'string') {
+      // Responses from the client need no answer; anything else malformed does.
+      return msg.result !== undefined || msg.error !== undefined ? undefined
+        : { jsonrpc: '2.0', id: isRequest ? id : null, error: { code: -32600, message: 'Invalid Request' } };
+    }
+    if (!isRequest) {
+      if (method === 'notifications/cancelled') this.running.get(msg.params?.requestId)?.abort();
+      return undefined;
+    }
     try {
-      const name = request.params.name;
+      return { jsonrpc: '2.0', id, result: await this.dispatch(id, method, msg.params ?? {}, signal) };
+    } catch (err: any) {
+      return { jsonrpc: '2.0', id, error: err instanceof RpcError ? { code: err.code, message: err.message } : { code: -32603, message: String(err?.message ?? err) } };
+    }
+  }
+
+  private async dispatch(id: JsonRpcId, method: string, params: any, signal?: AbortSignal): Promise<unknown> {
+    switch (method) {
+      case 'initialize': {
+        const asked = params.protocolVersion;
+        return {
+          protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
+          capabilities: { tools: {} },
+          serverInfo: { name: 'crosstalk', version: VERSION },
+          instructions: INSTRUCTIONS
+        };
+      }
+      case 'ping':
+        return {};
+      case 'tools/list':
+        return { tools: TOOLS };
+      case 'tools/call': {
+        if (typeof params.name !== 'string') throw new RpcError(-32602, 'tools/call needs a tool name');
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        signal?.addEventListener('abort', abort, { once: true });
+        this.running.set(id, controller);
+        try {
+          return await this.call(params.name, (params.arguments ?? {}) as Record<string, unknown>, controller.signal);
+        } finally {
+          this.running.delete(id);
+          signal?.removeEventListener('abort', abort);
+        }
+      }
+      default:
+        throw new RpcError(-32601, `Method not found: ${method}`);
+    }
+  }
+
+  private async call(name: string, args: Record<string, unknown>, signal: AbortSignal) {
+    const bridge = this.bridge;
+    try {
       if (name === 'crosstalk_wait') bridge.get().then(c => bridge.syncReads(c), () => {});
-      let text = await callTool(bridge, name, (request.params.arguments ?? {}) as Record<string, unknown>, extra.signal);
+      let text = await callTool(bridge, name, args, signal);
       const client = await bridge.get();
       // Agents that only look when they call a tool still see new messages on any call.
       if (name !== 'crosstalk_read_inbox' && name !== 'crosstalk_wait' && name !== 'crosstalk_status' && bridge.pending().length) {
@@ -730,13 +817,45 @@ export function createMcpServer(bridge: Bridge): Server {
       const hint = err?.code === 'ECONNREFUSED' ? ' Is the hub running? Start one with `crosstalk serve`.' : '';
       return { isError: true, content: [{ type: 'text', text: `CrossTalk error: ${err?.message ?? err}${hint}` }] };
     }
+  }
+}
+
+/** What a message transport needs for `createMcpServer`: the shape of an MCP SDK transport, so SDK transports plug in. */
+export interface MessageTransport {
+  start(): Promise<void>;
+  send(message: JsonRpcMessage): Promise<void>;
+  onmessage?: (message: any) => void;
+}
+
+/** An MCP server for `bridge` that can be connected to any MessageTransport. */
+export function createMcpServer(bridge: Bridge): { server: McpServer; connect(transport: MessageTransport): Promise<void> } {
+  const server = new McpServer(bridge);
+  return {
+    server,
+    async connect(transport) {
+      transport.onmessage = m => void server.handle(m).then(reply => reply && transport.send(reply));
+      await transport.start();
+    }
+  };
+}
+
+/** The MCP stdio transport: one JSON-RPC message per line on stdin, replies likewise on stdout. */
+function serveStdio(server: McpServer): void {
+  const write = (m: JsonRpcMessage) => process.stdout.write(JSON.stringify(m) + '\n');
+  readline.createInterface({ input: process.stdin }).on('line', line => {
+    if (!line.trim()) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+    }
+    for (const m of Array.isArray(parsed) ? parsed : [parsed]) void server.handle(m).then(reply => reply && write(reply));
   });
-  return server;
 }
 
 export async function runMcpServer(): Promise<void> {
   const bridge = new Bridge(envOptions());
-  const server = createMcpServer(bridge);
 
   // When the host (IDE, CLI) goes away, leave the hub promptly so we don't
   // linger as a ghost member holding locks.
@@ -752,7 +871,7 @@ export async function runMcpServer(): Promise<void> {
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 
-  await server.connect(new StdioServerTransport());
+  serveStdio(new McpServer(bridge));
   // Connect eagerly so we are present in channels before the first tool call.
   bridge.get().catch(err => console.error(`[crosstalk-mcp] hub not reachable yet: ${err.message}`));
 }

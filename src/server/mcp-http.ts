@@ -1,8 +1,6 @@
-import crypto, { webcrypto } from 'node:crypto';
+import crypto from 'node:crypto';
 import type http from 'node:http';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { Bridge, createMcpServer } from '../mcp/server.js';
+import { Bridge, McpServer, type JsonRpcMessage } from '../mcp/server.js';
 import { CLIENT_HEADER, INTERNAL_HEADER } from './internal.js';
 
 /**
@@ -10,10 +8,11 @@ import { CLIENT_HEADER, INTERNAL_HEADER } from './internal.js';
  * spawn `crosstalk-mcp` (claude.ai connectors, cloud sessions) get the same
  * tools. Each MCP session is one CrossTalk agent, connected back to this hub
  * over loopback and tagged with the real client's address.
+ *
+ * Every POST is answered with plain JSON (the spec lets the server pick JSON
+ * over an event stream). There are no server-initiated messages, so GET
+ * (the optional standalone stream) is refused with 405.
  */
-
-// The MCP SDK uses the Web Crypto global, which Node 18 doesn't have.
-if (!globalThis.crypto) (globalThis as any).crypto = webcrypto;
 
 const MAX_BODY_BYTES = 1024 * 1024;
 /** An MCP session with no requests for this long is closed and its agent leaves. */
@@ -22,7 +21,7 @@ const MAX_SESSIONS = 500;
 const MAX_SESSIONS_PER_ADDRESS = 16;
 
 interface McpSession {
-  transport: StreamableHTTPServerTransport;
+  server: McpServer;
   bridge: Bridge;
   address: string;
   lastSeen: number;
@@ -69,7 +68,6 @@ export function createMcpEndpoint(opts: { hubUrl: string; token?: string; secret
     if (!session) return;
     sessions.delete(id);
     await session.bridge.close().catch(() => {});
-    await session.transport.close().catch(() => {});
   };
 
   const reaper = setInterval(() => {
@@ -87,46 +85,59 @@ export function createMcpEndpoint(opts: { hubUrl: string; token?: string; secret
     async handle(req, res, url, address) {
       req.socket.setTimeout(0);
       const id = req.headers['mcp-session-id'];
-      const existing = typeof id === 'string' ? sessions.get(id) : undefined;
-      if (existing) {
-        existing.lastSeen = Date.now();
-        const body = req.method === 'POST' ? await readBody(req) : undefined;
-        await existing.transport.handleRequest(req, res, body);
+      let session = typeof id === 'string' ? sessions.get(id) : undefined;
+      if (typeof id === 'string' && !session) return error(res, 404, 'Unknown or expired MCP session; reconnect');
+      if (req.method === 'DELETE') {
+        if (!session) return error(res, 400, 'No MCP session to end');
+        await end(id as string);
+        res.writeHead(200).end();
         return;
       }
-      if (typeof id === 'string') return error(res, 404, 'Unknown or expired MCP session; reconnect');
-      if (req.method !== 'POST') return error(res, 400, 'Start a session with an initialize request');
-
-      const body = await readBody(req);
-      if (!isInitializeRequest(body)) return error(res, 400, 'Start a session with an initialize request');
-      if (sessions.size >= MAX_SESSIONS) return error(res, 429, 'Hub is at capacity');
-      if ([...sessions.values()].filter(s => s.address === address).length >= MAX_SESSIONS_PER_ADDRESS) {
-        return error(res, 429, 'Too many MCP sessions from your address');
+      if (req.method !== 'POST') {
+        res.writeHead(405, { Allow: 'POST, DELETE' }).end();
+        return;
       }
 
-      // ?name=claude&channel=xt_... (the agent name and channels to join on connect).
-      const bridge = new Bridge({
-        name: cleanName(url.searchParams.get('name')) || 'claude',
-        role: cleanName(url.searchParams.get('role')) || 'agent',
-        url: opts.hubUrl,
-        token: opts.token,
-        headers: { [INTERNAL_HEADER]: opts.secret, [CLIENT_HEADER]: address },
-        channels: (url.searchParams.get('channel') ?? '').split(','),
-        remote: true
-      });
-      const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => crypto.randomUUID(),
-        onsessioninitialized: sid => {
-          sessions.set(sid, { transport, bridge, address, lastSeen: Date.now() });
+      const body = await readBody(req);
+      const messages = Array.isArray(body) ? body : [body];
+      if (!session) {
+        const init = messages.length === 1 && (messages[0] as JsonRpcMessage | undefined)?.method === 'initialize';
+        if (!init) return error(res, 400, 'Start a session with an initialize request');
+        if (sessions.size >= MAX_SESSIONS) return error(res, 429, 'Hub is at capacity');
+        if ([...sessions.values()].filter(s => s.address === address).length >= MAX_SESSIONS_PER_ADDRESS) {
+          return error(res, 429, 'Too many MCP sessions from your address');
         }
-      });
-      transport.onclose = () => {
-        if (transport.sessionId) void end(transport.sessionId);
-      };
-      await createMcpServer(bridge).connect(transport);
-      await transport.handleRequest(req, res, body);
-      // Join the hub now, so the agent is present before its first tool call.
-      bridge.get().catch(() => {});
+        // ?name=claude&channel=xt_... (the agent name and channels to join on connect).
+        const bridge = new Bridge({
+          name: cleanName(url.searchParams.get('name')) || 'claude',
+          role: cleanName(url.searchParams.get('role')) || 'agent',
+          url: opts.hubUrl,
+          token: opts.token,
+          headers: { [INTERNAL_HEADER]: opts.secret, [CLIENT_HEADER]: address },
+          channels: (url.searchParams.get('channel') ?? '').split(','),
+          remote: true
+        });
+        const sid = crypto.randomUUID();
+        session = { server: new McpServer(bridge), bridge, address, lastSeen: Date.now() };
+        sessions.set(sid, session);
+        res.setHeader('Mcp-Session-Id', sid);
+        // Join the hub now, so the agent is present before its first tool call.
+        bridge.get().catch(() => {});
+      }
+      session.lastSeen = Date.now();
+
+      // The client hung up mid-call (e.g. cancelled a crosstalk_wait): stop waiting.
+      const gone = new AbortController();
+      res.on('close', () => res.writableFinished || gone.abort());
+      const live = session;
+      const replies = (await Promise.all(messages.map(m => live.server.handle(m, gone.signal)))).filter(r => r !== undefined);
+      if (res.destroyed) return;
+      if (!replies.length) {
+        res.writeHead(202).end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(Array.isArray(body) ? replies : replies[0]));
     },
 
     async close() {
