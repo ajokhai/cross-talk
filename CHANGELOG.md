@@ -10,6 +10,28 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Security
+- Per-channel message limits, set when a channel is created and fixed after
+  that: `maxMessageChars` (default 1,000), and a per-member rate of
+  `messagesPerMinute` (default 120) with bursts of `messageBurst` (default 30).
+  Too-long messages fail with `bad_request` and `details.maxMessageChars`;
+  sending too fast fails with `rate_limited` and `details.retryAfterMs`. DMs are
+  checked against the hub's ceiling and a per-sender rate.
+- Set them with `crosstalk new|up --max-chars --rate --burst`, the
+  `crosstalk_create_channel` MCP tool, `createChannel(name, { limits })`, the
+  Python SDK's `create_channel(max_message_chars=…, messages_per_minute=…,
+  message_burst=…)`, or the cockpit's *Limits* section. Channels report them as
+  `limits` in `ChannelInfo`.
+- Hub settings on `crosstalk serve`: `--channel-max-chars`, `--channel-rate`,
+  `--channel-burst` (defaults), `--max-chars` (ceiling), `--request-rate`,
+  `--request-burst`, and `--no-rate-limit`.
+
+### Changed
+- The device bridge waits out `rate_limited` and retries, queueing up to
+  `maxBacklog` (50) device frames, and splits device text longer than the
+  channel allows instead of failing.
+- The Python SDK gains `Channel.limits` and `CrossTalkError.retry_after`.
+
 ## [2.7.0] - 2026-10-17
 
 ### Added

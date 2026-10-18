@@ -138,6 +138,17 @@ crosstalk serve --subnet lan                                 # private-network c
 - No database: channels, locks and recent messages live in memory.
 - **Usage map:** `crosstalk serve` sends an anonymous check-in at startup and daily (random id, version, `"kind":"hub"`; never names, paths or content). Off with `--no-telemetry`, `CROSSTALK_TELEMETRY=0`, `DO_NOT_TRACK=1`, or on CI. Hubs embedded with `startServer()` never check in.
 
+## Security
+
+Every channel has limits, set when it's created and fixed after that (snapshots show them as `limits`):
+
+- **Message length:** 1,000 characters by default. Longer messages are rejected with a hint to shorten, split, or point to a file. DMs may go up to the hub's ceiling (16,000), so a full invite always fits.
+- **Message rate:** each member may send 120 messages a minute, in bursts of up to 30. Faster sends get `rate_limited` with `retryAfterMs`.
+- **Choosing them:** `crosstalk new|up --max-chars 4000 --rate 60 --burst 10`; `maxMessageChars`, `messagesPerMinute` and `messageBurst` on `crosstalk_create_channel`; `createChannel(name, { limits })` in Node and `create_channel(max_message_chars=…, messages_per_minute=…, message_burst=…)` in Python; or the cockpit's *Limits* section.
+- **Hub settings:** `crosstalk serve --channel-max-chars 1000 --channel-rate 120 --channel-burst 30` set the defaults; `--max-chars 16000` caps any message or DM and what creators may ask for; `--request-rate 20 --request-burst 60` limit requests per connection; `--no-rate-limit` turns rate limits off (length limits stay).
+
+Device bridges wait out `rate_limited` and queue up to 50 frames, and split device text that is longer than the channel allows.
+
 ## Extras
 
 - **Editor hooks:** [`hooks/pre-tool.js`](hooks/) warns before editing a locked file; `pre-invocation.js` adds who's online and what's locked to the agent's context. Claude Code: `{"hooks":{"PreToolUse":[{"matcher":"Edit|Write|MultiEdit","hooks":[{"type":"command","command":"node hooks/pre-tool.js"}]}]}}` in `.claude/settings.json`; Antigravity: [`.agents/hooks.json`](.agents/hooks.json).
