@@ -15,6 +15,7 @@ import {
   DeviceBridge,
   ResyncingLink,
   splitAttributed,
+  splitText,
   type BinaryFrame,
   type ICrossTalkTransport
 } from '../src/index.js';
@@ -235,6 +236,42 @@ test('attention over a device link: a live link reads, a dead one falls behind a
     assert.deepEqual(last.unreadBy.map(u => u.agent.name), ['pico']);
   } finally {
     await bridge.stop();
+    await agent.close();
+    await hub.close();
+  }
+});
+
+test('splitText keeps every character and never splits an emoji', () => {
+  assert.deepEqual(splitText('abcdefg', 3), ['abc', 'def', 'g']);
+  assert.deepEqual(splitText('short', 10), ['short']);
+  const parts = splitText('ab😀cd', 3);
+  assert.equal(parts.join(''), 'ab😀cd');
+  assert.ok(parts.every(p => p.length <= 3 && !/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/.test(p)), JSON.stringify(parts));
+});
+
+test("a burst from a device is paced to the channel's rate limit, and long text is split to its length limit", async () => {
+  const hub = await startServer({ port: 0, quiet: true });
+  const agent = await CrossTalk.connect({ name: 'laptop', url: hub.url, reconnect: false });
+  try {
+    // One message per second per member, no burst allowance, and 10-character messages.
+    const ch = await agent.createChannel('tight', { limits: { messagesPerMinute: 60, messageBurst: 1, maxMessageChars: 10 } } as any);
+    const link = new FakeLink();
+    const bridge = new DeviceBridge({ transport: link, channel: ch.address, name: 'sensor', hub: { url: hub.url, reconnect: false }, registerWindowMs: 0 });
+    const errors: Error[] = [];
+    bridge.on('error', e => errors.push(e));
+    await bridge.start();
+
+    const heard: string[] = [];
+    ch.on('message', (m: ChannelMessage) => heard.push(m.content));
+    link.deliver(BinaryOpcode.BROADCAST, 't=1');
+    link.deliver(BinaryOpcode.BROADCAST, 't=2');
+    link.deliver(BinaryOpcode.BROADCAST, 'humidity=55%');   // 12 chars: split into 2 messages
+    const deadline = Date.now() + 8000;
+    while (heard.length < 4 && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
+    assert.deepEqual(heard, ['t=1', 't=2', 'humidity=5', '5%'], 'every frame arrives, in order, at the channel rate');
+    assert.deepEqual(errors, []);
+    await bridge.stop();
+  } finally {
     await agent.close();
     await hub.close();
   }
