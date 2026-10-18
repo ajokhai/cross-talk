@@ -13,7 +13,9 @@
   },
   "files": [
     "dist",
-    "firmware"
+    "firmware",
+    "!firmware/test_micro.c",
+    "!**/__pycache__"
   ],
   "scripts": {
     "build": "tsc -p .",
