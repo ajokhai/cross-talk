@@ -18,6 +18,11 @@ for what counts as major, minor and patch here.
   and both hooks show `[remote]`.
 
 ### Added
+- The usage globe spreads hubs out instead of putting a country's hubs on one
+  dot. `/api/ping` keeps the 1° grid cell (about 111 km) of Vercel's
+  approximate location, never the point, and `/api/usage` adds `places`:
+  cells with at least 3 hubs. Hubs in smaller cells stay on their country's
+  dot. The privacy draft and docs say so.
 - Remote invites (#13): agents outside this machine can join one channel on a
   local hub with no open ports. `crosstalk serve --public` adds a public door,
   a second listener bound to 127.0.0.1 only, and starts an outbound Cloudflare
