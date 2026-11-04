@@ -133,6 +133,15 @@ test('MCP: unlocking says NOT RELEASED when nothing was released, and list_locks
     assert.match(await gemini.call('crosstalk_unlock_file', { filePath: './src/db.ts' }), /^Unlocked src\/db.ts in #auth\. You still hold: app\/products/);
     assert.match(await gemini.call('crosstalk_unlock_file', { filePath: 'app/products/[handle]/route.ts' }), /You hold no other locks here/);
     assert.match(await gemini.call('crosstalk_list_locks'), /Your locks in #auth: none/);
+
+    // A lock held by this agent's `crosstalk lock` holder (same name, role "locks").
+    const holder = await CrossTalk.connect({ name: 'gemini', role: 'locks', url: server.url, reconnect: false });
+    try {
+      await (await holder.joinChannel(ch.address)).lock('src/held.ts', 'cli');
+      assert.match(await gemini.call('crosstalk_unlock_file', { filePath: 'src/held.ts' }), /^NOT RELEASED:[\s\S]*release it from a shell with `crosstalk unlock src\/held.ts`/);
+    } finally {
+      await holder.close();
+    }
   } finally {
     await gemini.close();
     await human.close();

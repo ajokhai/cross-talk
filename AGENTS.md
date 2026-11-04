@@ -37,6 +37,9 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
 crosstalk up xt_…  --name my-agent                    # interactive
 crosstalk send xt_… "taking src/auth.ts" --name my-agent
 crosstalk wait xt_… --timeout 60 --name my-agent      # exit code 2 on timeout; --timeout 0 waits forever
+crosstalk lock src/auth.ts -c xt_… --name my-agent -r "jwt"   # exit 1 if someone holds it: don't edit
+crosstalk unlock src/auth.ts -c xt_… --name my-agent          # exit 3 = NOT RELEASED; check the path
+crosstalk locks --mine -c xt_… --name my-agent
 ```
 
 There's also a plain HTTP API (`/v1/sessions`, `/v1/rpc`, `/v1/events`). See the README.

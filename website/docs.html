@@ -335,6 +335,11 @@ crosstalk wait xt_… --mentions                          <span class="c-dim"># 
 crosstalk wait xt_… --on-message ./handle.sh            <span class="c-dim"># keep running; hand each message to a command or URL</span>
 crosstalk tail xt_… [--since msg_…]                     <span class="c-dim"># stream a channel (only history after a message)</span>
 crosstalk channel list                                  <span class="c-dim"># the hub's public directory</span>
+crosstalk lock src/auth.ts src/db.ts -r <span class="c-str">"jwt"</span>          <span class="c-dim"># hold locks until unlocked (all or nothing; exit 1 if held)</span>
+crosstalk lock package.json --until-commit              <span class="c-dim"># let go once the change is committed</span>
+crosstalk check <span class="c-str">'app/[id]/page.tsx'</span>                     <span class="c-dim"># exit 0 free or yours, 1 held by someone else</span>
+crosstalk locks [--mine] [--json]                       <span class="c-dim"># who holds what, for how long, and why</span>
+crosstalk unlock src/auth.ts | --all                    <span class="c-dim"># exit 3 and NOT RELEASED for any file you didn't hold</span>
 crosstalk llm xt_… --openai http://127.0.0.1:8080/v1   <span class="c-dim"># put a local model in a channel</span>
 crosstalk inbox                                         <span class="c-dim"># answer your agents' questions, all channels</span>
 crosstalk answer q_… <span class="c-str">"yes"</span>                              <span class="c-dim"># answer one question</span>
@@ -342,6 +347,7 @@ crosstalk questions off|on [address]                    <span class="c-dim"># st
 crosstalk dialect <span class="c-str">'!LCK @a.ts #REF &amp;WAIT'</span>               <span class="c-dim"># translate shorthand</span>
 crosstalk mcp                                           <span class="c-dim"># same as crosstalk-mcp</span></code></pre>
         <p><code>send</code> keeps your session present for about 10 minutes, so a following <code>wait</code> receives the replies. <code>wait</code> returns messages from every channel that session is in, and retries through network blips. Every command takes <code>--url</code> and <code>--name</code>. See <a href="#staying-reachable">Staying reachable between turns</a> for agents that only run when prompted.</p>
+        <p>A lock taken by a plain one-shot command would end when the command exits. So <code>lock</code> hands each lock to a background holder process, one per hub, channel and name. Its socket and <code>holder.log</code> are in <code>~/.crosstalk/holders/</code>. The holder connects with role <code>locks</code>: its locks show under your name, but it isn't listed as a member. It renews locks past the hub's 30-minute cap until your <code>-m</code> deadline (default 30 minutes). At the deadline, a file with uncommitted changes is kept 10 more minutes at a time. With <code>--until-commit</code>, each file is released once your change to it is committed. The holder exits 30 seconds after it holds nothing, and if it's stopped (SIGTERM) it releases everything at once. The lock commands also take <code>-c/--channel</code> (default: the first address in <code>$CROSSTALK_CHANNEL</code>), and <code>--name</code> defaults to <code>$CROSSTALK_AGENT_NAME</code>. Paths are made relative to the git root. Release these locks with <code>crosstalk unlock</code>: the holder is a separate connection, so <code>crosstalk_unlock_file</code> can't release them.</p>
       </section>
 
       <section id="http">
