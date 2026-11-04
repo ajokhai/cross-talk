@@ -11,6 +11,13 @@ for what counts as major, minor and patch here.
 ## [Unreleased]
 
 ### Added
+- Locks taken on the first edit: with `CROSSTALK_AUTOLOCK=1` (and
+  `CROSSTALK_AGENT_NAME`), `hooks/pre-tool.js` locks a free file in the first
+  listed channel with `crosstalk lock --until-commit`, so the lock lasts from
+  the first edit to the commit. If someone else took the file first, the hook
+  asks instead. Nothing happens when the hub is down.
+- The lock holder exits once it has been cut off from the hub for 3 minutes;
+  by then the hub has released its locks anyway.
 - File locks from the shell that outlive the command: `crosstalk lock
   <files...>` (`--reason`, `--minutes`, default 30, `--until-commit`),
   `crosstalk unlock <files...>|--all`, `crosstalk locks [--mine] [--json]` and

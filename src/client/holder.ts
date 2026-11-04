@@ -71,6 +71,8 @@ const EXTEND_MS = 10 * 60_000;
 /** A holder that holds nothing exits after this long. */
 const IDLE_EXIT_MS = Number(process.env.CROSSTALK_HOLDER_IDLE_MS) || 30_000;
 const TICK_MS = Number(process.env.CROSSTALK_HOLDER_TICK_MS) || 5_000;
+/** Cut off from the hub this long, the hub has released our locks anyway (after its grace period), so the holder exits. */
+const GONE_EXIT_MS = Number(process.env.CROSSTALK_HOLDER_GONE_MS) || 3 * 60_000;
 
 export function holderDir(): string {
   return process.env.CROSSTALK_HOLDERS_DIR || path.join(os.homedir(), '.crosstalk', 'holders');
@@ -172,6 +174,8 @@ export async function runHolder(target: HolderTarget): Promise<void> {
   const held = new Map<string, Entry>();
   let lastRequest = Date.now();
   let stopping = false;
+  let disconnectedAt: number | undefined;
+  ct.on('disconnected', () => (disconnectedAt ??= Date.now()));
 
   const lease = (e: Entry) => Math.max(5, Math.min(MAX_LEASE_S, Math.ceil((e.deadline - Date.now()) / 1000) + 60));
 
@@ -213,12 +217,17 @@ export async function runHolder(target: HolderTarget): Promise<void> {
   });
   ct.on('channel.lost', () => void stop('the hub no longer has this channel'));
   ct.on('reconnected', () => {
+    disconnectedAt = undefined;
     const again = ct.channels.get(target.channel);
     if (again) ch = again;
   });
 
   const tick = async () => {
     const now = Date.now();
+    if (disconnectedAt !== undefined) {
+      if (now - disconnectedAt > GONE_EXIT_MS) await stop('cut off from the hub');
+      return;
+    }
     for (const e of [...held.values()]) {
       const live = ch.locks.get(e.file);
       if (!live || live.holder.id !== ct.agent.id) {

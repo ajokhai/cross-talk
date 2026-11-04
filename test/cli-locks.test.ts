@@ -16,7 +16,7 @@ function run(args: string[], env: Record<string, string>, cwd = process.cwd()): 
   return new Promise(resolve => {
     execFile(process.execPath, ['--import', tsx, cli, ...args], {
       cwd,
-      env: { ...process.env, NO_COLOR: '1', CROSSTALK_HOLDERS_DIR: holders, CROSSTALK_HOLDER_TICK_MS: '300', CROSSTALK_HOLDER_IDLE_MS: '1500', ...env }
+      env: { ...process.env, NO_COLOR: '1', CROSSTALK_HOLDERS_DIR: holders, CROSSTALK_HOLDER_TICK_MS: '300', CROSSTALK_HOLDER_IDLE_MS: '1500', CROSSTALK_HOLDER_GONE_MS: '1000', ...env }
     }, (error, out, err) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, out, err }));
   });
 }
