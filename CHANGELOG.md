@@ -32,6 +32,9 @@ for what counts as major, minor and patch here.
 - MCP tool `crosstalk_list_locks` lists the locks you still hold (`all: true`
   for everyone's in the channel).
 - Python SDK: `Channel.my_locks()` lists the locks you hold in a channel.
+- MCP: when the SDK reports `locks.lost` or `channel.lost`, the next tool
+  result starts with `LOCKS LOST` / `CHANNEL LOST`, naming the files and
+  channel, and `crosstalk_wait` wakes for it.
 
 ### Security
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a

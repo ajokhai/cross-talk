@@ -1,6 +1,6 @@
 import path from 'node:path';
 import readline from 'node:readline';
-import { CrossTalk, CrossTalkError, type Channel } from '../client/sdk.js';
+import { CrossTalk, CrossTalkError, type Channel, type ChannelLost, type LocksLost } from '../client/sdk.js';
 import { VERSION } from '../version.js';
 import { inviteText } from '../client/invite.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
@@ -26,7 +26,9 @@ type InboxItem =
   /** The outcome of one of this agent's own questions, set by the hub (not by another agent). */
   | { kind: 'answer'; at: number; question: UserQuestion }
   /** One of this agent's own claims missed its heartbeat, set by the hub. */
-  | { kind: 'nudge'; at: number; claim: TaskClaim };
+  | { kind: 'nudge'; at: number; claim: TaskClaim }
+  /** State this agent lost (locks, a channel) when the hub couldn't resume it, set by this process's own SDK. */
+  | { kind: 'alert'; at: number; channel: string; text: string };
 
 const INBOX_LIMIT = 500;
 /** Longest single crosstalk_wait. Short enough that the agent's own user is never kept waiting long. */
@@ -122,6 +124,24 @@ export class Bridge {
       const text = describeEvent(f);
       if (text) this.push({ kind: 'event', at: Date.now(), channel: text.channel, text: text.text });
     });
+    // The hub couldn't resume this agent (it restarted without state, or the
+    // grace period passed): say so plainly instead of letting locks vanish.
+    client.on('locks.lost', (lost: LocksLost) => {
+      const byChannel = new Map<string, string[]>();
+      for (const l of lost.locks) byChannel.set(l.channel, [...(byChannel.get(l.channel) ?? []), l.file]);
+      for (const [channel, files] of byChannel) {
+        this.push({
+          kind: 'alert', at: Date.now(), channel,
+          text: `LOCKS LOST: the hub couldn't resume your session, so you no longer hold ${files.join(', ')}. Re-lock with crosstalk_lock_file before editing again, and check that nobody else changed them.`
+        });
+      }
+    });
+    client.on('channel.lost', (lost: ChannelLost) => {
+      this.push({
+        kind: 'alert', at: Date.now(), channel: lost.channel,
+        text: `CHANNEL LOST: the hub no longer has #${lost.name} (${lost.channel}), probably because it restarted without its saved state. You are no longer in it, and its locks are gone. Ask your user for a new address, or create a channel and share it.`
+      });
+    });
     client.on('error', () => {});
 
     // Join before publishing the client, so a tool call that arrives early
@@ -151,7 +171,7 @@ export class Bridge {
       const keep: InboxItem[] = [];
       out = [];
       for (const item of this.inbox) {
-        const ch = item.kind === 'message' ? item.message.channel : item.kind === 'event' ? item.channel : undefined;
+        const ch = item.kind === 'message' ? item.message.channel : item.kind === 'event' || item.kind === 'alert' ? item.channel : undefined;
         (ch === undefined || ch === channel ? out : keep).push(item);
       }
       this.inbox = keep;
@@ -198,7 +218,7 @@ export class Bridge {
   /** Waits until something conversational (a message or DM, not just presence) is unread. */
   async waitForActivity(channel: string | undefined, timeoutMs: number, signal?: AbortSignal): Promise<void> {
     const ready = () => this.inbox.some(i =>
-      i.kind === 'dm' || i.kind === 'answer' || i.kind === 'nudge' || (i.kind === 'message' && (!channel || i.message.channel === channel)));
+      i.kind === 'dm' || i.kind === 'answer' || i.kind === 'nudge' || i.kind === 'alert' || (i.kind === 'message' && (!channel || i.message.channel === channel)));
     if (ready() || signal?.aborted) return;
     await new Promise<void>(resolve => {
       const done = () => {
@@ -267,6 +287,8 @@ function formatItem(item: InboxItem, client?: CrossTalk): string {
     }
     case 'event':
       return `[${time(item.at)}] ${label(client, item.channel)} · ${body(item.text)}`;
+    case 'alert':
+      return `[${time(item.at)}] ${label(client, item.channel)} ${item.text}`;
     case 'answer':
       return formatOutcome(item.question, client);
     case 'nudge': {
@@ -293,8 +315,9 @@ function formatOutcome(q: UserQuestion, client?: CrossTalk): string {
 
 function formatInbox(items: InboxItem[], client: CrossTalk): string {
   // Hub-verified items first, outside the untrusted block.
-  const answers = items.filter(i => i.kind === 'answer' || i.kind === 'nudge');
-  const rest = items.filter(i => i.kind !== 'answer' && i.kind !== 'nudge');
+  const trusted = (i: InboxItem) => i.kind === 'answer' || i.kind === 'nudge' || i.kind === 'alert';
+  const answers = items.filter(trusted);
+  const rest = items.filter(i => !trusted(i));
   return [
     ...answers.map(i => formatItem(i, client)),
     ...(rest.length ? [UNTRUSTED, ...rest.map(i => formatItem(i, client))] : [])
