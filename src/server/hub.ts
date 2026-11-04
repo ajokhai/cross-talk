@@ -148,6 +148,32 @@ const DEFAULT_LIMITS: ChannelLimits = { maxMessageChars: 1000, messagesPerMinute
 
 /** Frames kept for a dropped agent before it is evicted instead of resumed. */
 const REPLAY_LIMIT = 1000;
+/** Agents that can queue for one file with `lock.wait`. */
+const MAX_LOCK_WAITERS = 50;
+
+const lockKey = (channel: string, file: string) => `${channel}\u0000${file}`;
+
+interface LockWaiter {
+  agentId: string;
+  reason: string;
+  ttlSeconds?: number;
+}
+
+/** What `GET /api/locks/check` returns for a channel the hub has. */
+export type LockCheck =
+  | { locked: false }
+  | {
+      locked: true;
+      lock: FileLock;
+      /** How long the current holder has had it. */
+      heldForMs: number;
+      /** False while the holder's connection is down (it may still resume). */
+      holderConnected: boolean;
+      /** When the hub last heard from the holder (ms epoch); missing if the holder has been evicted. */
+      holderLastSeenAt?: number;
+      /** Agents queued for it with `lock.wait`. */
+      waiting: number;
+    };
 
 export class Connection {
   agent?: AgentInfo;
@@ -198,6 +224,8 @@ const cleanText = (value: unknown, max: number): string =>
  */
 export class MeshHub {
   readonly locks: LockManager;
+  /** `lock.wait` queues, by channel + file, oldest first. Not persisted. */
+  private readonly lockQueue = new Map<string, LockWaiter[]>();
   private readonly channels = new Map<string, Channel>(); // address -> channel
   private readonly agents = new Map<string, Connection>(); // agent id -> connection
   private readonly perAddress = new Map<string, number>(); // address -> open connections
@@ -464,6 +492,7 @@ export class MeshHub {
       case 'dm.send': return this.sendDirect(conn, f.to, f.content ?? f.text, f.replyExpected, f.metadata);
       case 'lock.acquire': return this.acquireLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'lock.release': return this.releaseLock(conn, f.channel, f.file);
+      case 'lock.wait': return this.waitLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'status.update': return this.updateStatus(conn, f.status, f.currentTask);
       case 'question.ask': return this.askQuestion(conn, f.channel, f.question, f.options);
       case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
@@ -563,7 +592,7 @@ export class MeshHub {
     channel.reads.set(conn.agent!.id, { at: this.now(), seq: channel.posted });
     channel.emptySince = undefined;
     conn.channels.add(channel.id);
-    this.emit(channel, { type: 'member.joined', channel: channel.id, agent: conn.agent! }, conn.agent!.id);
+    if (this.visible(conn.agent!.id)) this.emit(channel, { type: 'member.joined', channel: channel.id, agent: conn.agent! }, conn.agent!.id);
   }
 
   private removeMember(conn: Connection, id: string, reason: 'left' | 'disconnected'): void {
@@ -583,7 +612,9 @@ export class MeshHub {
     for (const lock of this.locks.releaseAllBy(conn.agent!.id, id)) {
       this.emit(channel, { type: 'lock.released', channel: id, file: lock.file, by: conn.ref, reason: 'disconnected' });
     }
-    this.emit(channel, { type: 'member.left', channel: id, agent: conn.ref, reason });
+    this.dropWaits(conn.agent!.id, id);
+    this.pumpLockQueues();
+    if (this.visible(conn.agent!.id)) this.emit(channel, { type: 'member.left', channel: id, agent: conn.ref, reason });
     if (channel.members.size === 0) channel.emptySince = this.now();
   }
 
@@ -594,7 +625,7 @@ export class MeshHub {
     const out: AgentRef[] = [];
     for (const id of channel.members) {
       const agent = this.agents.get(id)?.agent;
-      if (!agent) continue;
+      if (!agent || !this.visible(id)) continue;
       const tag = '@' + agent.name.toLowerCase();
       for (let at = lower.indexOf(tag); at >= 0; at = lower.indexOf(tag, at + 1)) {
         if (!/[\p{L}\p{N}_-]/u.test(lower[at + tag.length] ?? '')) {
@@ -640,6 +671,7 @@ export class MeshHub {
   private deleteChannel(channel: Channel): void {
     this.channels.delete(channel.id);
     this.locks.releaseChannel(channel.id);
+    for (const key of [...this.lockQueue.keys()]) if (key.startsWith(channel.id + '\u0000')) this.lockQueue.delete(key);
   }
 
   private memberChannel(conn: Connection, address: unknown): Channel {
@@ -659,7 +691,7 @@ export class MeshHub {
       createdBy: channel.createdBy,
       createdAt: channel.createdAt,
       lastActivity: channel.lastActivity,
-      memberCount: channel.members.size,
+      memberCount: this.visibleMembers(channel).length,
       maxMembers: this.opts.maxMembersPerChannel,
       questions: channel.questionsMode,
       limits: channel.limits
@@ -671,9 +703,9 @@ export class MeshHub {
     const seen = typeof since === 'string' ? history.findIndex(m => m.id === since) : -1;
     return {
       channel: this.info(channel),
-      members: [...channel.members].map(id => this.agents.get(id)?.agent).filter((a): a is AgentInfo => !!a),
+      members: this.visibleMembers(channel).map(id => this.agents.get(id)?.agent).filter((a): a is AgentInfo => !!a),
       locks: this.locks.list(channel.id),
-      attention: [...channel.members].map(id => this.attention(channel, id)).filter((a): a is MemberAttention => !!a),
+      attention: this.visibleMembers(channel).map(id => this.attention(channel, id)).filter((a): a is MemberAttention => !!a),
       messages: seen >= 0 ? history.slice(seen + 1) : history,
       questions: [...channel.questions.values()],
       claims: [...channel.claims.values()].map(c => ({ ...c }))
@@ -783,11 +815,21 @@ export class MeshHub {
   }
 
   /** Lock lookup for editor hooks. */
-  checkLock(address: string, rawFile: string): { locked: boolean; lock?: FileLock } | undefined {
+  checkLock(address: string, rawFile: string): LockCheck | undefined {
     const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
     if (!channel) return undefined;
-    const lock = this.locks.get(channel.id, LockManager.normalizePath(rawFile));
-    return lock ? { locked: true, lock } : { locked: false };
+    const file = LockManager.normalizePath(rawFile);
+    const lock = this.locks.get(channel.id, file);
+    if (!lock) return { locked: false };
+    const holder = this.agents.get(lock.holder.id);
+    return {
+      locked: true,
+      lock,
+      heldForMs: Math.max(0, this.now() - lock.acquiredAt),
+      holderConnected: !!holder && holder.droppedAt === undefined,
+      holderLastSeenAt: holder?.agent?.lastSeen,
+      waiting: this.lockQueue.get(lockKey(channel.id, file))?.length ?? 0
+    };
   }
 
   stats() {
@@ -911,7 +953,7 @@ export class MeshHub {
     for (const name of conn.channels) {
       for (const id of this.channels.get(name)?.members ?? []) {
         const other = this.agents.get(id);
-        if (other && id !== conn.agent!.id) reachable.set(id, other);
+        if (other && id !== conn.agent!.id && this.visible(id)) reachable.set(id, other);
       }
     }
 
@@ -933,6 +975,7 @@ export class MeshHub {
     const channel = this.memberChannel(conn, address);
     const file = LockManager.normalizePath(rawFile as string);
     if (!file) fail('bad_request', 'file must be a non-empty path');
+    this.pumpLockQueues();
     const why = cleanText(reason, 280) || 'editing';
     const result = this.locks.acquire(channel.id, file, conn.ref, why, typeof ttlSeconds === 'number' ? ttlSeconds : undefined);
 
@@ -950,17 +993,99 @@ export class MeshHub {
     return result.lock;
   }
 
-  private releaseLock(conn: Connection, address: unknown, rawFile: unknown): { channel: string; file: string; released: boolean } {
+  private releaseLock(conn: Connection, address: unknown, rawFile: unknown): ResultData['lock.release'] {
     const channel = this.memberChannel(conn, address);
     const file = LockManager.normalizePath(rawFile as string);
     if (!file) fail('bad_request', 'file must be a non-empty path');
     const { released, heldBy } = this.locks.release(channel.id, file, conn.agent!.id);
+    if (!released && this.dropWaits(conn.agent!.id, channel.id, file)) {
+      return { channel: channel.id, file, released: false, dequeued: true };
+    }
     if (heldBy) fail('forbidden', `${file} is held by ${heldBy.holder.name}, not you`, heldBy);
     if (released) {
       this.heartbeat(channel, conn.agent!.id);
       this.emit(channel, { type: 'lock.released', channel: channel.id, file, by: conn.ref, reason: 'released' }, conn.agent!.id);
+      this.pumpLockQueues();
     }
     return { channel: channel.id, file, released: !!released };
+  }
+
+  /** Takes a free lock, or queues for a held one; `pumpLockQueues` grants it later, in order. */
+  private waitLock(conn: Connection, address: unknown, rawFile: unknown, reason: unknown, ttlSeconds: unknown): ResultData['lock.wait'] {
+    const channel = this.memberChannel(conn, address);
+    const file = LockManager.normalizePath(rawFile as string);
+    if (!file) fail('bad_request', 'file must be a non-empty path');
+    this.pumpLockQueues();
+    const current = this.locks.get(channel.id, file);
+    const me = conn.agent!.id;
+    if (!current || current.holder.id === me) {
+      this.dropWaits(me, channel.id, file);
+      return { granted: this.acquireLock(conn, channel.id, file, reason, ttlSeconds) };
+    }
+    const key = lockKey(channel.id, file);
+    const queue = this.lockQueue.get(key) ?? [];
+    const why = cleanText(reason, 280) || 'editing';
+    const ttl = typeof ttlSeconds === 'number' ? ttlSeconds : undefined;
+    let entry = queue.find(w => w.agentId === me);
+    if (entry) {
+      entry.reason = why;
+      entry.ttlSeconds = ttl;
+    } else {
+      if (queue.length >= MAX_LOCK_WAITERS) fail('quota_exceeded', `At most ${MAX_LOCK_WAITERS} agents can wait for one file`);
+      entry = { agentId: me, reason: why, ttlSeconds: ttl };
+      queue.push(entry);
+      this.lockQueue.set(key, queue);
+    }
+    this.agents.get(current.holder.id)?.peer.send({ type: 'lock.contended', lock: current, requester: conn.ref, reason: why });
+    return { queued: true, position: queue.indexOf(entry) + 1, lock: current };
+  }
+
+  /** Removes an agent's queued waits in a channel (one file, or all). Returns whether any were removed. */
+  private dropWaits(agentId: string, channelId: string, file?: string): boolean {
+    let dropped = false;
+    for (const [key, queue] of this.lockQueue) {
+      if (file ? key !== lockKey(channelId, file) : !key.startsWith(channelId + '\u0000')) continue;
+      const kept = queue.filter(w => w.agentId !== agentId);
+      if (kept.length === queue.length) continue;
+      dropped = true;
+      if (kept.length) this.lockQueue.set(key, kept);
+      else this.lockQueue.delete(key);
+    }
+    return dropped;
+  }
+
+  /** Hands every free, waited-for lock to the first waiter still in the channel. */
+  private pumpLockQueues(): void {
+    for (const [key, queue] of [...this.lockQueue]) {
+      const [channelId, file] = key.split('\u0000');
+      const channel = this.channels.get(channelId);
+      if (!channel) {
+        this.lockQueue.delete(key);
+        continue;
+      }
+      while (queue.length && !this.locks.get(channelId, file)) {
+        const next = queue.shift()!;
+        const conn = this.agents.get(next.agentId);
+        if (!conn?.agent || !channel.members.has(next.agentId)) continue;
+        const result = this.locks.acquire(channelId, file, conn.ref, next.reason, next.ttlSeconds);
+        if (!result.ok) continue;
+        this.changes++;
+        channel.lastActivity = this.now();
+        this.heartbeat(channel, next.agentId);
+        conn.peer.send({ type: 'lock.granted', lock: result.lock });
+        this.emit(channel, { type: 'lock.acquired', lock: result.lock }, next.agentId);
+      }
+      if (!queue.length) this.lockQueue.delete(key);
+    }
+  }
+
+  /** Agents with role "locks" are lock holders for another agent (see `crosstalk lock`); they don't show as members. */
+  private visible(id: string): boolean {
+    return this.agents.get(id)?.agent?.role !== 'locks';
+  }
+
+  private visibleMembers(channel: Channel): string[] {
+    return [...channel.members].filter(id => this.visible(id));
   }
 
   private updateStatus(conn: Connection, status: unknown, currentTask: unknown): AgentInfo {
@@ -974,7 +1099,7 @@ export class MeshHub {
     if (currentTask !== undefined) agent.currentTask = cleanText(currentTask, 280);
     for (const name of conn.channels) {
       const channel = this.channels.get(name);
-      if (channel) this.emit(channel, { type: 'member.updated', channel: name, agent }, agent.id);
+      if (channel && this.visible(agent.id)) this.emit(channel, { type: 'member.updated', channel: name, agent }, agent.id);
     }
     return agent;
   }
@@ -1178,6 +1303,7 @@ export class MeshHub {
         this.emit(channel, { type: 'lock.released', channel: lock.channel, file: lock.file, by: lock.holder, reason: 'expired' });
       }
     }
+    this.pumpLockQueues();
     const now = this.now();
     for (const conn of [...this.resumable.values()]) {
       if (conn.droppedAt !== undefined && conn.droppedAt + this.opts.presenceGraceMs <= now) this.evict(conn);

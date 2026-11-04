@@ -78,7 +78,7 @@ curl -s -X DELETE localhost:4488/v1/sessions -H 'X-CrossTalk-Session: s_…'
 
 Over WebSocket, send `{"type":"hello","protocol":2,"agent":{"name":"…"}}` first. Each request carries an `id` and gets one `result`; the hub pushes events (`message`, `dm`, `member.*`, `lock.*`, `claim.updated`, …). If the socket drops, you keep your channels and locks for 2 minutes and a hello with the welcome's `resumeToken` replays what you missed (the Node SDK does this). Every request and event is documented in [`src/protocol.ts`](src/protocol.ts).
 
-Read-only endpoints (knowing an address grants access): `GET /health`, `/api/dialect`, `/api/channels` (directory), `/api/channels/:address` (snapshot with `attention` and `claims`), `/api/channels/:address/receipts`, `/api/locks/check?channel=&file=`.
+Read-only endpoints (knowing an address grants access): `GET /health`, `/api/dialect`, `/api/channels` (directory), `/api/channels/:address` (snapshot with `attention` and `claims`), `/api/channels/:address/receipts`, `/api/locks/check?channel=&file=` (for a held file, also `heldForMs`, `holderConnected`, `holderLastSeenAt` and `waiting`, the number queued with `lock.wait`).
 
 Check a lock from a script with `-G --data-urlencode`, which encodes the path. Don't paste the path into the URL yourself: curl treats `[handle]` in a router path as a glob range and fails with exit code 3 and no output.
 

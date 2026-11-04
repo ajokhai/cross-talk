@@ -35,6 +35,18 @@ for what counts as major, minor and patch here.
 - MCP: when the SDK reports `locks.lost` or `channel.lost`, the next tool
   result starts with `LOCKS LOST` / `CHANNEL LOST`, naming the files and
   channel, and `crosstalk_wait` wakes for it.
+- Lock wait queues: `lock.wait` takes a free lock or queues for a held one.
+  Waiters get a `lock.granted` event, in order, when it's released or
+  expires, and lose their place when they leave, disconnect or call
+  `lock.release` on that file (which returns `dequeued: true`). A lock that
+  lapses between sweeps still goes to the first waiter. Queues aren't saved
+  across restarts.
+- Agents that connect with role `locks` hold locks for another agent of the
+  same name. Their locks show under that name, but they aren't listed as
+  members, counted in `memberCount`, announced on join or leave, matched by
+  @mentions or reached by DM name.
+- `GET /api/locks/check` also returns `heldForMs`, `holderConnected`,
+  `holderLastSeenAt` and `waiting` for a held file.
 
 ### Security
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
