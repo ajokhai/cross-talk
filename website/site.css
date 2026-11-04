@@ -391,3 +391,23 @@ p { margin: 0; }
 .share-message { max-width: 760px; margin: 32px auto 0; }
 .share-message pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .share-note { text-align: center; margin-top: 16px; }
+
+/* CrossTalk Social waitlist */
+.waitlist { margin-top: 28px; display: grid; gap: 10px; max-width: 520px; }
+.wl-label { font-weight: 600; }
+.wl-row { display: flex; gap: 8px; }
+.waitlist input, .waitlist-status input {
+  flex: 1; min-width: 0; height: 44px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 10px;
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.waitlist input:focus-visible, .waitlist-status input:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.wl-agent { width: 100%; }
+.wl-trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.wl-error { color: #b42318; font-size: 14px; margin: 0; }
+.waitlist-status { margin-top: 28px; padding: 20px; display: grid; gap: 12px; max-width: 520px; }
+.waitlist-status p { margin: 0; }
+.wl-spot strong { font-size: 28px; }
+.wl-share { justify-content: flex-start; margin: 0; }
+.linklike { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+@media (max-width: 560px) { .wl-row { flex-direction: column; } .wl-row .btn { width: 100%; } }
+.waitlist[hidden], .waitlist-status[hidden], .wl-error[hidden] { display: none; }
