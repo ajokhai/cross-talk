@@ -72,7 +72,14 @@ class TransportTests:
         with self.assertRaises(CrossTalkError) as err:
             self.bob_ch.lock("src/b.ts", "me too")
         self.assertEqual(err.exception.code, "lock_held")
-        self.ch.unlock("src/b.ts")
+        self.assertEqual([l["file"] for l in self.ch.my_locks()], ["src/b.ts"])
+        self.assertEqual(self.bob_ch.my_locks(), [])
+        with self.assertRaises(CrossTalkError) as forbidden:
+            self.bob_ch.unlock("src/b.ts")
+        self.assertEqual(forbidden.exception.code, "forbidden")
+        self.assertFalse(self.ch.unlock("$f"))          # nothing held there: reported, not silent
+        self.assertTrue(self.ch.unlock("./src/b.ts"))
+        self.assertFalse(self.ch.unlock("src/b.ts"))    # already released
         self.assertEqual(self.bob_ch.lock("src/b.ts", "now")["holder"]["name"], "Bob")
 
     def test_malformed_event_is_reported_not_fatal(self):

@@ -39,7 +39,7 @@ crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code  # join from another t
 
 Env: `CROSSTALK_URL` (default `ws://localhost:4488`), `CROSSTALK_AUTH_TOKEN`, `CROSSTALK_AGENT_NAME`, `CROSSTALK_AGENT_ROLE`, `CROSSTALK_CHANNEL` (comma-separated, joined on startup), `CROSSTALK_AUTOSTART=0` (don't start a local hub).
 
-Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_channel`, `list_channels`, `channel_state`, `close_channel`, `send`, `dm` (`replyExpected: false` for acks), `set_status`, `lock_file`, `unlock_file`, `read_inbox`, `wait` (blocks up to 120s), `ask_user`, `claim`, `update_claim`, `status`. A `channel` argument takes an address or the label of a joined channel, and can be left out if you're in exactly one.
+Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_channel`, `list_channels`, `channel_state`, `close_channel`, `send`, `dm` (`replyExpected: false` for acks), `set_status`, `lock_file`, `unlock_file` (starts with `NOT RELEASED` when nothing was released), `list_locks` (what you still hold), `read_inbox`, `wait` (blocks up to 120s), `ask_user`, `claim`, `update_claim`, `status`. A `channel` argument takes an address or the label of a joined channel, and can be left out if you're in exactly one.
 
 - **Agents aren't woken by messages.** MCP can't start a turn, so every tool result begins with what arrived since the last call, and agents are told to end a step with `crosstalk_wait`. The hub tracks what each agent has actually read; an `@mention` of one that hasn't read for 5 minutes warns the sender.
 - **Claims make "on it" checkable.** A claim is a task, an owner and an update interval (default 10 min). Channel posts, claim updates and lock activity are heartbeats; miss one and the claim turns *stalled*, which the channel, `crosstalk inbox` and the agent all see. From a shell or git hook: `crosstalk claim xt_… add tests --every 15`, `crosstalk progress xt_… "commit abc123" [--done|--drop]`.
@@ -79,6 +79,13 @@ curl -s -X DELETE localhost:4488/v1/sessions -H 'X-CrossTalk-Session: s_…'
 Over WebSocket, send `{"type":"hello","protocol":2,"agent":{"name":"…"}}` first. Each request carries an `id` and gets one `result`; the hub pushes events (`message`, `dm`, `member.*`, `lock.*`, `claim.updated`, …). If the socket drops, you keep your channels and locks for 2 minutes and a hello with the welcome's `resumeToken` replays what you missed (the Node SDK does this). Every request and event is documented in [`src/protocol.ts`](src/protocol.ts).
 
 Read-only endpoints (knowing an address grants access): `GET /health`, `/api/dialect`, `/api/channels` (directory), `/api/channels/:address` (snapshot with `attention` and `claims`), `/api/channels/:address/receipts`, `/api/locks/check?channel=&file=`.
+
+Check a lock from a script with `-G --data-urlencode`, which encodes the path. Don't paste the path into the URL yourself: curl treats `[handle]` in a router path as a glob range and fails with exit code 3 and no output.
+
+```sh
+curl -sG localhost:4488/api/locks/check \
+  --data-urlencode 'channel=xt_…' --data-urlencode 'file=app/products/[handle]/route.ts'
+```
 
 ## Why not just share context?
 
@@ -154,7 +161,7 @@ Device bridges wait out `rate_limited` and queue up to 50 frames, and split devi
 
 ## Extras
 
-- **Editor hooks:** [`hooks/pre-tool.js`](hooks/) warns before editing a locked file; `pre-invocation.js` adds who's online and what's locked to the agent's context. Claude Code: `{"hooks":{"PreToolUse":[{"matcher":"Edit|Write|MultiEdit","hooks":[{"type":"command","command":"node hooks/pre-tool.js"}]}]}}` in `.claude/settings.json`; Antigravity: [`.agents/hooks.json`](.agents/hooks.json).
+- **Editor hooks:** [`hooks/pre-tool.js`](hooks/) warns before editing a locked file. It prints nothing for an unlocked file, so your client's own permission prompt still applies (v2.8.0 and earlier answered "allow", which skipped that prompt). For a locked file it answers "ask" with the holder's name; `pre-invocation.js` adds who's online and what's locked to the agent's context. Claude Code: `{"hooks":{"PreToolUse":[{"matcher":"Edit|Write|MultiEdit","hooks":[{"type":"command","command":"node hooks/pre-tool.js"}]}]}}` in `.claude/settings.json`; Antigravity: [`.agents/hooks.json`](.agents/hooks.json).
 - **XDialect shorthand:** `!LCK @src/auth.ts #REF "jwt sessions" ~300 &WAIT` expands to English; post with `shorthand.send` / `ch.shorthand()`, translate with `crosstalk dialect '<expr>'`. `!LCK`/`!REL` take real locks. Dictionary at `GET /api/dialect`.
 - **Add-on packages** in [`packages/`](packages/) (not on npm yet): [`embedded`](packages/embedded/README.md) (`crosstalk-bridge` puts devices on serial, BLE or TCP into a channel, plus C, MicroPython and Arduino firmware), [`gibberlink`](packages/gibberlink) (FSK audio packets in metadata), [`airgap`](packages/airgap) (single-file offline installer), [`dialect-zh`](packages/dialect-zh) (XDialect ⇄ Chinese).
 - **Website and cockpit** (browser view of a hub) are in [`website/`](website/README.md), not the npm package.

@@ -29,12 +29,25 @@ for what counts as major, minor and patch here.
 - `lock.release` returns `released: boolean`. `Channel.unlock()` returns that
   result, so a release that freed nothing can be told apart from one that
   did. New `Channel.myLocks()` lists the locks you hold.
+- MCP tool `crosstalk_list_locks` lists the locks you still hold (`all: true`
+  for everyone's in the channel).
+- Python SDK: `Channel.my_locks()` lists the locks you hold in a channel.
 
 ### Security
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
   file is unlocked. In Claude Code that answer skipped the user's permission
   prompt for every edit. The hook now prints nothing unless another agent
   holds the file, and then asks.
+
+### Fixed
+- `crosstalk_unlock_file` no longer reports success when nothing was released.
+  When you held no lock on that path, or someone else holds it, the result
+  starts with `NOT RELEASED` and lists the locks you still hold.
+- Python SDK: `unlock()` returns `True` when it released a lock and `False`
+  when you held none on that path, instead of always returning `None`.
+- Docs: lock checks over HTTP use `curl -G --data-urlencode`, because curl
+  reads `[handle]` in a raw path as a glob and fails with exit code 3. The
+  docs also say that `pre-tool.js` prints nothing for unlocked files.
 
 ## [2.8.0] - 2026-10-19
 
