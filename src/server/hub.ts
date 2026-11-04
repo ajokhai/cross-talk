@@ -19,6 +19,8 @@ import {
   type RequestFrame,
   type ResultData,
   type ServerFrame,
+  type Slot,
+  type SlotHold,
   type TaskClaim,
   type UserQuestion
 } from '../protocol.js';
@@ -119,6 +121,15 @@ interface Channel {
   limits: ChannelLimits;
   /** Per member: its message allowance here. */
   senders: Map<string, Bucket>;
+  /** Counted semaphores by name. */
+  slots: Map<string, SlotState>;
+}
+
+interface SlotState {
+  name: string;
+  capacity: number;
+  holds: SlotHold[];
+  waiters: { agentId: string; ttlSeconds?: number }[];
 }
 
 /** A token bucket: `burst` at once, refilled at `perSecond`. */
@@ -148,8 +159,11 @@ const DEFAULT_LIMITS: ChannelLimits = { maxMessageChars: 1000, messagesPerMinute
 
 /** Frames kept for a dropped agent before it is evicted instead of resumed. */
 const REPLAY_LIMIT = 1000;
-/** Agents that can queue for one file with `lock.wait`. */
+/** Agents that can queue for one file with `lock.wait`, or for one slot. */
 const MAX_LOCK_WAITERS = 50;
+const MAX_SLOTS_PER_CHANNEL = 100;
+const MAX_SLOT_CAPACITY = 64;
+const SLOT_NAME = /^[A-Za-z0-9._:-]{1,64}$/;
 
 const lockKey = (channel: string, file: string) => `${channel}\u0000${file}`;
 
@@ -493,6 +507,8 @@ export class MeshHub {
       case 'lock.acquire': return this.acquireLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'lock.release': return this.releaseLock(conn, f.channel, f.file);
       case 'lock.wait': return this.waitLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
+      case 'slot.acquire': return this.acquireSlot(conn, f.channel, f.name, f.capacity, f.ttlSeconds);
+      case 'slot.release': return this.releaseSlot(conn, f.channel, f.name);
       case 'status.update': return this.updateStatus(conn, f.status, f.currentTask);
       case 'question.ask': return this.askQuestion(conn, f.channel, f.question, f.options);
       case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
@@ -543,6 +559,7 @@ export class MeshHub {
       posted: 0,
       reads: new Map(),
       claims: new Map(),
+      slots: new Map(),
       limits: fixed,
       senders: new Map()
     };
@@ -614,6 +631,7 @@ export class MeshHub {
     }
     this.dropWaits(conn.agent!.id, id);
     this.pumpLockQueues();
+    this.dropSlotsOf(channel, conn.agent!.id);
     if (this.visible(conn.agent!.id)) this.emit(channel, { type: 'member.left', channel: id, agent: conn.ref, reason });
     if (channel.members.size === 0) channel.emptySince = this.now();
   }
@@ -708,7 +726,8 @@ export class MeshHub {
       attention: this.visibleMembers(channel).map(id => this.attention(channel, id)).filter((a): a is MemberAttention => !!a),
       messages: seen >= 0 ? history.slice(seen + 1) : history,
       questions: [...channel.questions.values()],
-      claims: [...channel.claims.values()].map(c => ({ ...c }))
+      claims: [...channel.claims.values()].map(c => ({ ...c })),
+      slots: [...channel.slots.values()].map(slot => this.slotView(channel, slot))
     };
   }
 
@@ -1088,6 +1107,133 @@ export class MeshHub {
     return [...channel.members].filter(id => this.visible(id));
   }
 
+  // -------------------------------------------------------------------------
+  // Slots: counted semaphores for shared resources
+  // -------------------------------------------------------------------------
+
+  private slotView(channel: Channel, slot: SlotState): Slot {
+    return {
+      channel: channel.id,
+      name: slot.name,
+      capacity: slot.capacity,
+      holders: slot.holds.map(h => ({ ...h, holder: { ...h.holder } })),
+      waiting: slot.waiters.length
+    };
+  }
+
+  private acquireSlot(conn: Connection, address: unknown, rawName: unknown, rawCapacity: unknown, ttlSeconds: unknown): ResultData['slot.acquire'] {
+    const channel = this.memberChannel(conn, address);
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+    if (!SLOT_NAME.test(name)) fail('bad_request', 'slot name must be 1-64 letters, digits, ".", "_", ":" or "-"');
+    const capacity = Number(rawCapacity);
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_SLOT_CAPACITY) {
+      fail('bad_request', `capacity must be a whole number from 1 to ${MAX_SLOT_CAPACITY}`);
+    }
+    this.pumpSlots(channel);
+    let slot = channel.slots.get(name);
+    if (!slot) {
+      if (channel.slots.size >= MAX_SLOTS_PER_CHANNEL) fail('quota_exceeded', `A channel can have at most ${MAX_SLOTS_PER_CHANNEL} slots`);
+      slot = { name, capacity, holds: [], waiters: [] };
+      channel.slots.set(name, slot);
+    } else if (capacity > slot.capacity) {
+      fail('bad_request', `Slot "${name}" has capacity ${slot.capacity}, set by its first holder; asked for ${capacity}`, this.slotView(channel, slot));
+    }
+    const me = conn.agent!.id;
+    const ttl = typeof ttlSeconds === 'number' ? ttlSeconds : undefined;
+    const now = this.now();
+    this.heartbeat(channel, me);
+
+    const held = slot.holds.find(h => h.holder.id === me);
+    if (held) {
+      held.expiresAt = now + this.locks.clampTtl(ttl) * 1000;
+      return { granted: this.slotView(channel, slot) };
+    }
+    const place = slot.waiters.findIndex(w => w.agentId === me);
+    // pumpSlots above gave any free place to the queue, so one left over is nobody's.
+    if (slot.holds.length < slot.capacity && !slot.waiters.length) {
+      slot.holds.push({ holder: conn.ref, acquiredAt: now, expiresAt: now + this.locks.clampTtl(ttl) * 1000 });
+      channel.lastActivity = now;
+      this.emit(channel, { type: 'slot.updated', slot: this.slotView(channel, slot) }, me);
+      return { granted: this.slotView(channel, slot) };
+    }
+    if (place >= 0) {
+      slot.waiters[place].ttlSeconds = ttl;
+    } else {
+      if (slot.waiters.length >= MAX_LOCK_WAITERS) fail('quota_exceeded', `At most ${MAX_LOCK_WAITERS} agents can wait for one slot`);
+      slot.waiters.push({ agentId: me, ttlSeconds: ttl });
+      this.emit(channel, { type: 'slot.updated', slot: this.slotView(channel, slot) }, me);
+    }
+    return { queued: true, position: slot.waiters.findIndex(w => w.agentId === me) + 1, slot: this.slotView(channel, slot) };
+  }
+
+  private releaseSlot(conn: Connection, address: unknown, rawName: unknown): ResultData['slot.release'] {
+    const channel = this.memberChannel(conn, address);
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+    const slot = channel.slots.get(name);
+    const me = conn.agent!.id;
+    if (!slot) return { channel: channel.id, name, released: false };
+    const holds = slot.holds.length;
+    const waiters = slot.waiters.length;
+    slot.holds = slot.holds.filter(h => h.holder.id !== me);
+    slot.waiters = slot.waiters.filter(w => w.agentId !== me);
+    const released = slot.holds.length < holds;
+    const dequeued = slot.waiters.length < waiters;
+    if (released || dequeued) {
+      this.heartbeat(channel, me);
+      this.emit(channel, { type: 'slot.updated', slot: this.slotView(channel, slot) }, me);
+      this.pumpSlots(channel);
+    }
+    if (!slot.holds.length && !slot.waiters.length) channel.slots.delete(name);
+    return dequeued && !released ? { channel: channel.id, name, released, dequeued } : { channel: channel.id, name, released };
+  }
+
+  /** Drops an agent's places and queued waits in every slot of a channel (it left or was evicted). */
+  private dropSlotsOf(channel: Channel, agentId: string): void {
+    for (const slot of channel.slots.values()) {
+      const before = slot.holds.length + slot.waiters.length;
+      slot.holds = slot.holds.filter(h => h.holder.id !== agentId);
+      slot.waiters = slot.waiters.filter(w => w.agentId !== agentId);
+      if (slot.holds.length + slot.waiters.length < before) {
+        this.changes++;
+        this.emit(channel, { type: 'slot.updated', slot: this.slotView(channel, slot) });
+      }
+    }
+    this.pumpSlots(channel);
+  }
+
+  /** Expires lapsed places, then hands free places to the queue in order. Forgets idle slots. */
+  private pumpSlots(channel: Channel): void {
+    const now = this.now();
+    for (const [name, slot] of channel.slots) {
+      let changed = false;
+      const live = slot.holds.filter(h => h.expiresAt > now);
+      if (live.length < slot.holds.length) {
+        slot.holds = live;
+        changed = true;
+      }
+      const granted: string[] = [];
+      while (slot.holds.length < slot.capacity && slot.waiters.length) {
+        const next = slot.waiters.shift()!;
+        const conn = this.agents.get(next.agentId);
+        changed = true;
+        if (!conn?.agent || !channel.members.has(next.agentId)) continue;
+        slot.holds.push({ holder: conn.ref, acquiredAt: now, expiresAt: now + this.locks.clampTtl(next.ttlSeconds) * 1000 });
+        this.heartbeat(channel, next.agentId);
+        granted.push(next.agentId);
+      }
+      if (changed) {
+        this.changes++;
+        channel.lastActivity = now;
+        const view = this.slotView(channel, slot);
+        for (const id of granted) this.agents.get(id)?.peer.send({ type: 'slot.granted', slot: view });
+        for (const id of channel.members) {
+          if (!granted.includes(id)) this.agents.get(id)?.peer.send({ type: 'slot.updated', slot: view });
+        }
+      }
+      if (!slot.holds.length && !slot.waiters.length) channel.slots.delete(name);
+    }
+  }
+
   private updateStatus(conn: Connection, status: unknown, currentTask: unknown): AgentInfo {
     const agent = conn.agent!;
     if (status !== undefined) {
@@ -1304,6 +1450,7 @@ export class MeshHub {
       }
     }
     this.pumpLockQueues();
+    for (const channel of this.channels.values()) this.pumpSlots(channel);
     const now = this.now();
     for (const conn of [...this.resumable.values()]) {
       if (conn.droppedAt !== undefined && conn.droppedAt + this.opts.presenceGraceMs <= now) this.evict(conn);
@@ -1361,7 +1508,8 @@ export class MeshHub {
         posted: c.posted,
         reads: [...c.reads],
         claims: [...c.claims.values()],
-        limits: c.limits
+        limits: c.limits,
+        slots: [...c.slots.values()].filter(slot => slot.holds.length).map(slot => ({ name: slot.name, capacity: slot.capacity, holds: slot.holds }))
       })),
       agents,
       locks: this.locks.list()
@@ -1387,7 +1535,8 @@ export class MeshHub {
         questions: new Map(c.questions.map(q => [q.id, q])),
         reads: new Map(c.reads),
         claims: new Map(c.claims.map(k => [k.id, k])),
-        senders: new Map()
+        senders: new Map(),
+        slots: new Map()
       });
     }
     let agents = 0;
@@ -1415,6 +1564,15 @@ export class MeshHub {
       if (!channel.members.size) channel.emptySince ??= now;
     }
     const locks = this.locks.restore(state.locks.filter(l => this.channels.get(l.channel)?.members.has(l.holder.id)));
+    // Slot places come back for agents that came back; queues don't survive a restart.
+    for (const c of state.channels) {
+      const channel = this.channels.get(c.id)!;
+      for (const saved of c.slots ?? []) {
+        if (!SLOT_NAME.test(saved?.name) || !Number.isInteger(saved.capacity)) continue;
+        const holds = (saved.holds ?? []).filter(h => h?.holder?.id && channel.members.has(h.holder.id)).map(h => ({ ...h, holder: { ...h.holder } }));
+        if (holds.length) channel.slots.set(saved.name, { name: saved.name, capacity: saved.capacity, holds, waiters: [] });
+      }
+    }
     return { channels: this.channels.size, agents, locks };
   }
 }
@@ -1439,6 +1597,8 @@ export interface PersistedChannel {
   reads: [string, { at: number; seq: number }][];
   claims: TaskClaim[];
   limits: ChannelLimits;
+  /** Slots with holders. Missing from state saved before 2.9. */
+  slots?: { name: string; capacity: number; holds: SlotHold[] }[];
 }
 
 export interface PersistedAgent {
