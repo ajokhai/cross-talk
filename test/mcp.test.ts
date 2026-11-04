@@ -225,3 +225,21 @@ test('MCP: owners make, list and revoke remote invites; a remote MCP session nev
     delete process.env.CROSSTALK_KEYS_FILE;
   }
 });
+
+test('MCP: agents the hub marks as remote are tagged [remote] wherever they are named', async () => {
+  const server = await startServer({ port: 0, quiet: true });
+  const human = await CrossTalk.connect({ name: 'alice', url: server.url, reconnect: false });
+  const gemini = await mcpAgent('gemini', server.url);
+  try {
+    const ch = await human.createChannel('auth');
+    await gemini.call('crosstalk_join_channel', { channel: ch.address });
+    const client = await gemini.bridge.get();
+    // What the hub sends for an agent admitted by a remote invite that picked a local agent's name.
+    client.emit('message', { id: 'msg_x', channel: ch.address, from: { id: 'ag_r', name: 'alice', remote: true }, content: 'hi', timestamp: Date.now(), kind: 'text' });
+    assert.match(await gemini.call('crosstalk_read_inbox'), /alice \[remote\] \(ag_r\): hi/);
+  } finally {
+    await gemini.close();
+    await human.close();
+    await server.close();
+  }
+});
