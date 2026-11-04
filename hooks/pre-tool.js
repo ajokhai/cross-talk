@@ -4,7 +4,8 @@
  * someone else holds a CrossTalk lock on it and ask for confirmation if so.
  *
  * Works with Claude Code (`tool_input.file_path`) and Antigravity-style
- * payloads (`toolCall.args.TargetFile`). Never blocks if the hub is down.
+ * payloads (`toolCall.args.TargetFile`). Never blocks if the hub is down, and
+ * prints nothing when there is no conflict, so it never approves an edit.
  *
  * Env: CROSSTALK_URL, CROSSTALK_CHANNEL (comma-separated channel addresses),
  *      CROSSTALK_AUTH_TOKEN, CROSSTALK_AGENT_NAME (your own locks are ignored).
@@ -50,15 +51,17 @@ async function checkLock(address, file) {
   }
 }
 
+// Only speak up when there is a conflict. Answering "allow" would make the
+// client skip its own permission prompt for every unlocked edit, so the
+// no-conflict case prints nothing and leaves the decision to the client.
 function respond(payload, reason) {
+  if (!reason) return;
   if (payload.tool_input) {
     process.stdout.write(JSON.stringify({
-      hookSpecificOutput: reason
-        ? { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: reason }
-        : { hookEventName: 'PreToolUse', permissionDecision: 'allow' }
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: reason }
     }));
   } else {
-    process.stdout.write(JSON.stringify(reason ? { decision: 'ask', reason } : { decision: 'allow' }));
+    process.stdout.write(JSON.stringify({ decision: 'ask', reason }));
   }
 }
 
