@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import { Command } from './command.js';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
 import { HttpAgent, httpBase } from './http.js';
+import { askHolder, ensureHolder, holderIfRunning, runHolder, type HolderTarget } from './holder.js';
 import { inviteText } from './invite.js';
 import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
@@ -11,7 +14,7 @@ import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
-import type { ChannelLimits, ChannelMessage, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
+import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 
 // ANSI colours, off when NO_COLOR is set or output isn't a terminal (FORCE_COLOR turns them on).
@@ -695,6 +698,168 @@ program
     } catch (err) {
       fail(err);
     }
+  });
+
+// ---------------------------------------------------------------------------
+// File locks from the shell: a background holder keeps them (see holder.ts)
+// ---------------------------------------------------------------------------
+
+const defaultChannel = () => (process.env.CROSSTALK_CHANNEL || '').split(',').map(s => s.trim()).filter(Boolean)[0] ?? '';
+
+function lockTarget(opts: { channel?: string; name: string; url: string }): HolderTarget {
+  const channel = opts.channel || defaultChannel();
+  if (!CrossTalk.isAddress(channel)) fail('Which channel? Pass --channel xt_… or set CROSSTALK_CHANNEL.');
+  return { url: opts.url, channel, name: opts.name, token: process.env.CROSSTALK_AUTH_TOKEN || undefined };
+}
+
+/** The git checkout the CLI runs in, and `file` relative to it with forward slashes (what every lock is keyed by). */
+function repoPath(file: string): { root: string; rel: string } {
+  let root = process.cwd();
+  try {
+    root = execFileSync('git', ['rev-parse', '--show-toplevel'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || root;
+  } catch {}
+  const abs = path.resolve(file);
+  const rel = path.relative(root, abs);
+  return { root, rel: rel.startsWith('..') || path.isAbsolute(rel) ? file : rel.split(path.sep).join('/') };
+}
+
+const holderCommand = () => [process.execPath, ...process.execArgv, process.argv[1], '_lock-holder'];
+const until = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+program
+  .command('lock <files...>')
+  .description('Lock files in a channel until you unlock them, time runs out (kept while a file has uncommitted changes), or --until-commit sees them committed. Exit 1 if someone else holds one; then none are locked')
+  .option('-c, --channel <address>', 'channel address (or $CROSSTALK_CHANNEL)')
+  .option('-r, --reason <text>', 'what you are doing, shown to others', 'editing')
+  .option('-m, --minutes <n>', 'how long to hold them; renewed past the hub\'s 30-minute cap', '30')
+  .option('--until-commit', 'let go of each file as soon as its changes are committed')
+  .option('-n, --name <name>', 'your agent name (or $CROSSTALK_AGENT_NAME)', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (files: string[], opts) => {
+    try {
+      const target = lockTarget(opts);
+      const minutes = Number(opts.minutes);
+      if (!Number.isFinite(minutes) || minutes <= 0) fail('--minutes must be a positive number');
+      const paths = files.map(repoPath);
+      await ensureHolder(target, holderCommand());
+      const res = await askHolder(target, { op: 'lock', files: paths.map(p => p.rel), root: paths[0].root, reason: opts.reason, minutes, untilCommit: !!opts.untilCommit });
+      if (!res.ok) {
+        if (res.lock) {
+          console.error(red(`✖ HELD ${res.lock.file} by ${res.lock.holder.name} since ${ago(res.lock.acquiredAt)}: ${res.lock.reason}`));
+          console.error(dim('  Nothing was locked. Wait for it, or ask them in the channel.'));
+        } else console.error(red(`✖ ${res.message}`));
+        process.exit(1);
+      }
+      for (const l of res.locks ?? []) {
+        console.log(green(`🔒 locked ${l.file}`) + dim(l.untilCommit ? ` until it is committed (at most until ${until(l.deadline)})` : ` until ${until(l.deadline)}`));
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('unlock [files...]')
+  .description('Release locks taken with `crosstalk lock`. Prints NOT RELEASED and exits 3 for any file this agent did not hold')
+  .option('-a, --all', 'release every lock you hold in the channel')
+  .option('-c, --channel <address>', 'channel address (or $CROSSTALK_CHANNEL)')
+  .option('-n, --name <name>', 'your agent name (or $CROSSTALK_AGENT_NAME)', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (files: string[], opts) => {
+    try {
+      const target = lockTarget(opts);
+      if (!opts.all && !files.length) fail('Name the files to unlock, or pass --all.');
+      const rels = files.map(f => repoPath(f).rel);
+      const res = await holderIfRunning(target, { op: 'unlock', files: rels, all: !!opts.all });
+      if (!res) {
+        if (opts.all) return console.log(dim(`${target.name} holds no locks from \`crosstalk lock\` here.`));
+        for (const f of rels) console.error(red(`✖ NOT RELEASED ${f}: no \`crosstalk lock\` holder is running for ${target.name} (locks taken over MCP are released there)`));
+        process.exit(3);
+      }
+      if (!res.ok) fail(res.message);
+      let missed = 0;
+      for (const r of res.results ?? []) {
+        if (r.released) console.log(green(`🔓 released ${r.file}`));
+        else {
+          missed++;
+          console.error(red(`✖ NOT RELEASED ${r.file}: ${r.note ?? 'not held'}`));
+        }
+      }
+      if (opts.all && !res.results?.length) console.log(dim('Nothing to release.'));
+      if (missed) process.exit(3);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('locks')
+  .description('List the locks in a channel: who holds each, for how long, and why')
+  .option('--mine', 'only yours')
+  .option('--json', 'print raw JSON')
+  .option('-c, --channel <address>', 'channel address (or $CROSSTALK_CHANNEL)')
+  .option('-n, --name <name>', 'your agent name (or $CROSSTALK_AGENT_NAME)', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async opts => {
+    try {
+      const target = lockTarget(opts);
+      const headers: Record<string, string> = target.token ? { 'X-CrossTalk-Token': target.token } : {};
+      const res = await fetch(`${httpBase(target.url)}/api/channels/${encodeURIComponent(target.channel)}`, { headers });
+      if (res.status === 404) fail('No conversation at that address');
+      if (!res.ok) fail(`Hub answered HTTP ${res.status}`);
+      const snap = (await res.json()) as ChannelSnapshot;
+      const mine = (l: FileLock) => l.holder.name.toLowerCase() === target.name.toLowerCase();
+      const held = await holderIfRunning(target, { op: 'list' }).catch(() => undefined);
+      const extra = new Map((held?.ok ? held.locks ?? [] : []).map(l => [l.file, l]));
+      const locks = snap.locks.filter(l => !opts.mine || mine(l)).sort((a, b) => a.file.localeCompare(b.file));
+      if (opts.json) return console.log(JSON.stringify(locks.map(l => ({ ...l, holderProcess: extra.get(l.file) })), null, 2));
+      if (!locks.length) return console.log(dim(opts.mine ? `${target.name} holds no locks here.` : 'No locks in this channel.'));
+      for (const l of locks) {
+        const h = mine(l) ? extra.get(l.file) : undefined;
+        const plan = h ? (h.untilCommit ? `until committed, at most ${until(h.deadline)}` : `until ${until(h.deadline)}`) + (h.extended ? `, extended ${h.extended}× for uncommitted changes` : '') : `lease ends ${until(l.expiresAt)}`;
+        console.log(`${yellow('🔒')} ${bold(l.file)} ${dim('—')} ${mine(l) ? green(l.holder.name + ' (you)') : cyan(l.holder.name)} ${dim(`since ${ago(l.acquiredAt)}, ${plan}`)}: ${l.reason}`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('check <file>')
+  .description('Is this file locked by someone else? Exit 0 if free or yours, 1 if another agent holds it')
+  .option('-c, --channel <address>', 'channel address (or $CROSSTALK_CHANNEL)')
+  .option('-n, --name <name>', 'your agent name (or $CROSSTALK_AGENT_NAME)', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (file: string, opts) => {
+    try {
+      const target = lockTarget(opts);
+      const rel = repoPath(file).rel;
+      const params = new URLSearchParams({ channel: target.channel, file: rel }); // encodes [brackets] and spaces
+      const headers: Record<string, string> = target.token ? { 'X-CrossTalk-Token': target.token } : {};
+      const res = await fetch(`${httpBase(target.url)}/api/locks/check?${params}`, { headers });
+      if (!res.ok) fail(`Hub answered HTTP ${res.status}`);
+      const status = (await res.json()) as { locked: boolean; lock?: FileLock };
+      if (!status.locked || !status.lock) return console.log(green(`free ${rel}`));
+      if (status.lock.holder.name.toLowerCase() === target.name.toLowerCase()) return console.log(green(`yours ${rel}`) + dim(`: ${status.lock.reason}`));
+      console.log(red(`HELD ${rel} by ${status.lock.holder.name} since ${ago(status.lock.acquiredAt)}: ${status.lock.reason}`));
+      process.exit(1);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+/** The background process behind `crosstalk lock`; not for direct use. */
+program
+  .command('_lock-holder')
+  .description('(internal) hold file locks for `crosstalk lock`')
+  .option('--url <url>', 'hub URL', defaultUrl())
+  .option('--channel <address>', 'channel address')
+  .option('--name <name>', 'agent name', defaultName())
+  .action(async opts => {
+    await runHolder({ url: opts.url, channel: opts.channel, name: opts.name, token: process.env.CROSSTALK_AUTH_TOKEN || undefined }).catch(err => {
+      console.error(`holder failed: ${(err as Error).message}`);
+      process.exit(1);
+    });
   });
 
 program
