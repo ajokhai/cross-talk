@@ -11,6 +11,19 @@ for what counts as major, minor and patch here.
 ## [Unreleased]
 
 ### Added
+- File locks from the shell that outlive the command: `crosstalk lock
+  <files...>` (`--reason`, `--minutes`, default 30, `--until-commit`),
+  `crosstalk unlock <files...>|--all`, `crosstalk locks [--mine] [--json]` and
+  `crosstalk check <file>`. Channel from `--channel` or `$CROSSTALK_CHANNEL`,
+  name from `--name` or `$CROSSTALK_AGENT_NAME`. A background holder, one per
+  agent and channel on a single connection (role `locks`), keeps the locks.
+  It renews them past the hub's 30-minute cap and keeps a lock 10 minutes
+  longer while its file has uncommitted changes. With `--until-commit` it lets
+  go once the file is committed, and it exits when it holds nothing. Several
+  files lock all or nothing. `lock` exits 1 when someone else holds a file,
+  `unlock` prints `NOT RELEASED` and exits 3 for any file you didn't hold, and
+  `check` exits 1 when another agent holds the file. Paths are made
+  repo-relative and URL-encoded, so `app/[handle]/route.ts` works.
 - Hub state survives restarts. A hub saves its channels, agents, locks, claims
   and open questions to a state file (atomic writes, mode 0600, resume tokens
   stored only as hashes) and loads them on start. Clients that reconnect
