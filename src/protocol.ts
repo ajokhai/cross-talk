@@ -290,7 +290,8 @@ export interface ResultData {
   'shorthand.send': ChannelMessage;
   'dm.send': DirectMessage;
   'lock.acquire': FileLock;
-  'lock.release': { channel: string; file: string };
+  /** `released` is false when you held no lock on the file (already expired, released, or never taken). */
+  'lock.release': { channel: string; file: string; released: boolean };
   'status.update': AgentInfo;
   'question.ask': UserQuestion;
   'question.cancel': UserQuestion;

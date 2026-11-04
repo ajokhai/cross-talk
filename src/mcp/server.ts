@@ -1,3 +1,4 @@
+import path from 'node:path';
 import readline from 'node:readline';
 import { CrossTalk, CrossTalkError, type Channel } from '../client/sdk.js';
 import { VERSION } from '../version.js';
@@ -305,6 +306,21 @@ function formatLock(l: FileLock): string {
   return `${l.file} — ${l.holder.name}: ${l.reason} (${secs}s left)`;
 }
 
+/** Normalizes a lock path the way the hub does, so local lookups match its keys. */
+function lockPath(file: string): string {
+  const cleaned = file.trim().replace(/\\/g, '/');
+  if (!cleaned) return '';
+  let normalized = path.posix.normalize(cleaned);
+  if (normalized.startsWith('./')) normalized = normalized.slice(2);
+  return normalized === '.' || normalized === '/' ? '' : normalized;
+}
+
+/** " You still hold: ..." for the caller's remaining locks in a channel, or "" when none. */
+function mineSuffix(client: CrossTalk, ch: Channel): string {
+  const mine = [...ch.locks.values()].filter(l => l.holder.id === client.agent.id);
+  return mine.length ? ` You still hold: ${mine.map(l => l.file).join(', ')}.` : ' You hold no other locks here.';
+}
+
 function formatClaim(c: TaskClaim): string {
   const due = c.nextUpdateBy - Date.now();
   const when = due >= 0 ? `next update due in ${Math.ceil(due / 60_000)}m` : `update overdue by ${Math.ceil(-due / 60_000)}m`;
@@ -520,11 +536,22 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'crosstalk_unlock_file',
-    description: 'Release a file lock as soon as you finish editing.',
+    description: 'Release a file lock as soon as you finish editing. Starts with "NOT RELEASED" when nothing was released (you did not hold it, or someone else does), so check the result before saying you hold no locks.',
     inputSchema: {
       type: 'object',
       properties: { channel: channelArg, filePath: { type: 'string' } },
       required: ['filePath']
+    }
+  },
+  {
+    name: 'crosstalk_list_locks',
+    description: 'List the file locks you still hold (or, with all: true, every lock in the channel). Check this before telling anyone you hold no locks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: 'Channel address or joined name. Default: every channel you are in.' },
+        all: { type: 'boolean', description: 'Show everyone\'s locks, not just yours' }
+      }
     }
   },
   {
@@ -719,8 +746,38 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_unlock_file': {
       const ch = pickChannel(client, args.channel);
-      await ch.unlock(str(args.filePath));
-      return `Unlocked ${str(args.filePath)} in #${ch.name}.`;
+      const file = lockPath(client.relativePath(str(args.filePath)));
+      if (!file) throw new Error('filePath must be a non-empty path');
+      // Snapshot first: older hubs don't say whether anything was released.
+      await ch.refresh().catch(() => {});
+      const before = ch.locks.get(file);
+      let result: { released?: boolean } | void;
+      try {
+        result = await ch.unlock(file);
+      } catch (err) {
+        if (err instanceof CrossTalkError && err.code === 'forbidden') {
+          const held = err.details as FileLock | undefined;
+          return `NOT RELEASED: ${held ? formatLock(held) : `${file} is held by someone else`}. That lock isn't yours, so nothing changed.${mineSuffix(client, ch)}`;
+        }
+        throw err;
+      }
+      const released = typeof result?.released === 'boolean' ? result.released : before?.holder.id === client.agent.id;
+      if (!released) {
+        return `NOT RELEASED: you held no lock on ${file} in #${ch.name}, so nothing changed. Check the path.${mineSuffix(client, ch)}`;
+      }
+      return `Unlocked ${file} in #${ch.name}.${mineSuffix(client, ch)}`;
+    }
+    case 'crosstalk_list_locks': {
+      const channels = args.channel !== undefined ? [pickChannel(client, args.channel)] : [...client.channels.values()];
+      if (!channels.length) return 'You are not in any channel.';
+      const lines: string[] = [];
+      for (const ch of channels) {
+        await ch.refresh().catch(() => {});
+        const locks = [...ch.locks.values()].filter(l => args.all === true || l.holder.id === client.agent.id);
+        const whose = args.all === true ? 'Locks' : 'Your locks';
+        lines.push(locks.length ? `${whose} in #${ch.name}: ${locks.map(formatLock).join('; ')}` : `${whose} in #${ch.name}: none.`);
+      }
+      return lines.join('\n');
     }
     case 'crosstalk_set_status': {
       const status = str(args.status) as 'idle' | 'working' | 'waiting';

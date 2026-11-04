@@ -30,7 +30,7 @@ function setup(options: ConstructorParameters<typeof MeshHub>[0] = {}) {
       return (res as any).error as { code: string; message: string; details?: any };
     };
     const events = (type?: string) => inbox.filter(f => !type || f.type === type) as any[];
-    return { conn, id: welcome.agent.id, name, ok, err, events, inbox };
+    return { conn, id: welcome.agent.id, name, resumeToken: welcome.resumeToken!, ok, err, events, inbox };
   };
 
   return { hub, agent, tick: (ms: number) => (clock += ms) };
@@ -292,7 +292,7 @@ test('a dropped agent stays present for the grace period and resumes as itself',
   const snap = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'auth' });
   await b.ok({ type: 'channel.join', channel: snap.channel.id });
   await b.ok({ type: 'lock.acquire', channel: snap.channel.id, file: 'src/auth.ts', reason: 'jwt' });
-  const token = b.conn.resumeToken!;
+  const token = b.resumeToken;
   assert.ok(token);
 
   hub.drop(b.conn);
@@ -335,7 +335,7 @@ test('a dropped agent that never comes back leaves when the grace period ends', 
   assert.equal(left.length, 1);
   assert.equal(left[0].reason, 'disconnected');
   assert.equal(a.events('lock.released').length, 1);
-  const token = b.conn.resumeToken!;
+  const token = b.resumeToken;
   const conn = hub.connect({ send: () => {}, close: () => {} }, '10.0.0.1');
   assert.notEqual(hub.hello(conn, { type: 'hello', protocol: PROTOCOL_VERSION, agent: { name: 'bob' }, resume: token }).agent.id, b.id);
 });

@@ -136,6 +136,18 @@ export class LockManager {
     }
   }
 
+  /** Puts back saved locks (after a hub restart). Ones already past their expiry are announced by the next sweep. Returns how many were loaded. */
+  restore(locks: FileLock[]): number {
+    let n = 0;
+    for (const lock of locks) {
+      const file = LockManager.normalizePath(lock?.file);
+      if (!file || typeof lock.channel !== 'string' || !lock.holder?.id) continue;
+      this.locks.set(this.key(lock.channel, file), { ...lock, file, holder: { ...lock.holder } });
+      n++;
+    }
+    return n;
+  }
+
   sweepExpired(): FileLock[] {
     const now = this.now();
     const expired: FileLock[] = [];

@@ -27,6 +27,19 @@ import {
 
 export const DEFAULT_URL = 'ws://localhost:4488';
 
+/** A reconnect couldn't resume your agent, so the hub released every lock it held. Lock them again if you still need them. */
+export interface LocksLost {
+  locks: FileLock[];
+  reason: 'not_resumed';
+}
+
+/** The hub no longer has a channel you were in (it restarted without saved state, or the channel was deleted while you were away). */
+export interface ChannelLost {
+  channel: string;
+  name: string;
+  reason: 'hub_restarted';
+}
+
 /**
  * Maps `localhost` to 127.0.0.1. The hub binds IPv4 loopback by default, and
  * Node 18 resolves `localhost` to ::1 first without falling back, so a plain
@@ -257,12 +270,24 @@ export class Channel extends EventEmitter {
     return lock;
   }
 
-  async unlock(file: string): Promise<void> {
-    const { file: released } = await this.client.request('lock.release', {
+  /**
+   * Releases your lock on a file. `released` is false when you held none
+   * (it had expired, was already released, or was never taken); older hubs
+   * leave it undefined. Rejects with 'forbidden' when someone else holds it.
+   */
+  async unlock(file: string): Promise<{ channel: string; file: string; released?: boolean }> {
+    const result = await this.client.request('lock.release', {
       channel: this.address,
       file: this.client.relativePath(file)
     });
-    this.locks.delete(released);
+    this.locks.delete(result.file);
+    return result;
+  }
+
+  /** Locks you hold in this channel, from the live view. */
+  myLocks(): FileLock[] {
+    const me = this.client.agent?.id;
+    return [...this.locks.values()].filter(l => l.holder.id === me);
   }
 
   /**
@@ -333,7 +358,11 @@ export class Channel extends EventEmitter {
  * ```
  *
  * Events: 'message' (ChannelMessage, any channel), 'dm' (DirectMessage),
- * 'event' (every raw ServerFrame), 'disconnected', 'reconnected', 'error'.
+ * 'event' (every raw ServerFrame), 'disconnected', 'reconnected', 'error',
+ * and after a reconnect that couldn't resume (the hub restarted without its
+ * state, or the grace period passed): 'locks.lost' (LocksLost: the locks you
+ * held, now released) and 'channel.lost' (ChannelLost: a channel the hub no
+ * longer has, so you are no longer in it).
  */
 export class CrossTalk extends EventEmitter {
   agent!: AgentInfo;
@@ -346,6 +375,8 @@ export class CrossTalk extends EventEmitter {
   private reconnectDelay = 500;
   /** Lets a reconnect carry on as the same agent (same id, channels, locks) within the hub's grace period. */
   private resumeToken?: string;
+  /** Set when connect() found no hub on a localhost URL and started one in this process (autoStart). */
+  hostedHub?: { url: string; stateFile?: string };
   /** Messages and DMs not yet consumed by waitForMessage(), so nothing arriving between calls is lost. */
   private unread: Array<ChannelMessage | DirectMessage> = [];
   private readonly wakeWaiters = new Set<() => void>();
@@ -380,7 +411,12 @@ export class CrossTalk extends EventEmitter {
       const { startServer } = await import('../server/index.js');
       const port = Number(new URL(client.options.url).port) || 4488;
       try {
-        await startServer({ port, quiet: true });
+        const hub = await startServer({ port, quiet: true });
+        client.hostedHub = { url: hub.url, stateFile: hub.stateFile };
+        // Every other agent on this machine now depends on this process; say so.
+        console.error(`[crosstalk] no hub was running on ${hub.url}, so this process (pid ${process.pid}) started one. ` +
+          `It stops when this process exits${hub.stateFile ? `; channels and locks are saved to ${hub.stateFile} and come back when a hub starts again` : ''}. ` +
+          'Run `crosstalk serve` for a hub that outlives sessions.');
       } catch (startErr: any) {
         // Another process won the race to start a hub; just use theirs.
         if (startErr?.code !== 'EADDRINUSE') throw startErr;
@@ -495,7 +531,10 @@ export class CrossTalk extends EventEmitter {
     setTimeout(async () => {
       if (this.closed) return;
       try {
+        const before = this.agent?.id;
+        const held = [...this.channels.values()].flatMap(ch => [...ch.locks.values()].filter(l => l.holder.id === before));
         await this.open();
+        const resumed = this.agent.id === before;
         // Resumed within the grace period: same agent, and missed frames were
         // replayed. Otherwise this is a new agent id. Either way, rejoining
         // (a no-op for channels we're still in) refreshes every snapshot.
@@ -504,8 +543,18 @@ export class CrossTalk extends EventEmitter {
             channel.apply(await this.request('channel.join', { channel: channel.address }));
           } catch (err) {
             this.channels.delete(channel.address);
-            this.report(err);
+            if (err instanceof CrossTalkError && err.code === 'not_found') {
+              const lost: ChannelLost = { channel: channel.address, name: channel.name, reason: 'hub_restarted' };
+              this.emit('channel.lost', lost);
+              channel.emit('lost', lost);
+            } else {
+              this.report(err);
+            }
           }
+        }
+        if (!resumed && held.length) {
+          const lost: LocksLost = { locks: held, reason: 'not_resumed' };
+          this.emit('locks.lost', lost);
         }
         this.emit('reconnected', this.agent);
       } catch {
