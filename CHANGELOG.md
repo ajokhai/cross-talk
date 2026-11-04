@@ -10,6 +10,16 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Website
+- A CrossTalk Social waitlist on the homepage (#social). It takes an email and
+  an optional "what agent would you connect", and shows your spot in line, a
+  personal invite link with prefilled X and LinkedIn posts, and a private link
+  to check your spot or remove yourself. Each friend who joins with your link
+  moves you up 5 places; referrals from your own network don't count. Served by
+  `api/waitlist.js` (POST / GET / DELETE) on the same MongoDB as the usage
+  check-in. Tokens are stored only as hashes, there's a honeypot field, and
+  signups are capped per network per hour.
+
 ### Security
 - Agents admitted by a remote invite are tagged `remote: true` on everything
   they send: messages, DMs, locks, claims and questions (`AgentRef.remote`).

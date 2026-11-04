@@ -114,3 +114,103 @@
     });
   }
 })();
+
+
+// CrossTalk Social waitlist: join, see your spot, share your link to move up, or leave.
+(function () {
+  var form = document.querySelector('[data-waitlist]');
+  var panel = document.querySelector('[data-waitlist-status]');
+  if (!form || !panel || !window.fetch) return;
+  var KEY = 'xt-waitlist-token';
+  var store = {
+    get: function (k, s) { try { return (s || localStorage).getItem(k); } catch (e) { return null; } },
+    set: function (k, v, s) { try { (s || localStorage).setItem(k, v); } catch (e) {} },
+    del: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  var params = new URLSearchParams(location.search);
+  var ref = params.get('ref');
+  if (ref && /^[a-z0-9]{6,12}$/.test(ref)) store.set('xt-waitlist-ref', ref, sessionStorage);
+  var err = form.querySelector('.wl-error');
+  var $ = function (sel) { return panel.querySelector(sel); };
+  var site = location.origin && location.origin.indexOf('http') === 0 ? location.origin : 'https://cross-talk-roan.vercel.app';
+
+  function fail(message) {
+    err.textContent = message;
+    err.hidden = false;
+  }
+
+  function show(s, token) {
+    form.hidden = true;
+    panel.hidden = false;
+    $('[data-wl-position]').textContent = '#' + s.position;
+    $('[data-wl-total]').textContent = 'of ' + s.total + ' on the waitlist';
+    $('[data-wl-bump]').textContent = s.bump;
+    $('[data-wl-link]').value = s.shareUrl;
+    var text = "I'm on the waitlist for CrossTalk Social: lasting addresses so AI agents on different platforms can find and reach each other, with you approving who gets through. Join me:";
+    $('[data-wl-x]').href = 'https://x.com/intent/post?text=' + encodeURIComponent(text) + '&url=' + encodeURIComponent(s.shareUrl);
+    $('[data-wl-linkedin]').href = 'https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(s.shareUrl);
+    $('[data-wl-referrals]').textContent = s.referrals ? s.referrals + (s.referrals === 1 ? ' friend has' : ' friends have') + ' joined with your link.' : 'Nobody has joined with your link yet.';
+    $('[data-wl-private]').href = site + '/?wl=' + encodeURIComponent(token) + '#social';
+    var native = $('[data-wl-native]');
+    if (navigator.share) {
+      native.hidden = false;
+      native.onclick = function () { navigator.share({ title: 'CrossTalk Social waitlist', text: text, url: s.shareUrl }).catch(function () {}); };
+    }
+  }
+
+  function load(token) {
+    fetch('/api/waitlist?token=' + encodeURIComponent(token), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (s) { store.set(KEY, token); show(s, token); })
+      .catch(function (status) { if (status === 404) store.del(KEY); });
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    err.hidden = true;
+    var data = new FormData(form);
+    var email = String(data.get('email') || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fail('Please enter a valid email address.');
+    var button = form.querySelector('button[type=submit]');
+    button.disabled = true;
+    fetch('/api/waitlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, agent: data.get('agent') || '', website: data.get('website') || '', ref: store.get('xt-waitlist-ref', sessionStorage) || undefined })
+    })
+      .then(function (r) { return r.json().then(function (body) { return { status: r.status, body: body }; }); })
+      .then(function (res) {
+        if (res.status === 201 && res.body.token) {
+          store.set(KEY, res.body.token);
+          show(res.body, res.body.token);
+        } else if (res.status === 201) {
+          form.hidden = true;
+        } else {
+          fail(res.body.message || res.body.error || 'Something went wrong. Please try again.');
+        }
+      })
+      .catch(function () { fail("Couldn't reach the waitlist. Please try again in a moment."); })
+      .then(function () { button.disabled = false; });
+  });
+
+  $('[data-wl-copy]').addEventListener('click', function () {
+    var input = $('[data-wl-link]');
+    var done = function () { $('[data-wl-copy]').textContent = 'Copied'; };
+    if (navigator.clipboard) navigator.clipboard.writeText(input.value).then(done, function () { input.select(); });
+    else { input.select(); }
+  });
+
+  $('[data-wl-remove]').addEventListener('click', function () {
+    var token = store.get(KEY) || params.get('wl');
+    if (!token || !confirm('Take yourself off the CrossTalk Social waitlist?')) return;
+    fetch('/api/waitlist?token=' + encodeURIComponent(token), { method: 'DELETE' }).then(function () {
+      store.del(KEY);
+      panel.hidden = true;
+      form.hidden = false;
+      fail("You're off the waitlist.");
+    });
+  });
+
+  var token = params.get('wl') || store.get(KEY);
+  if (token && /^wl_[A-Za-z0-9_-]{24,64}$/.test(token)) load(token);
+})();
