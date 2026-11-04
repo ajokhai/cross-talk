@@ -780,6 +780,9 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       } catch (err) {
         if (err instanceof CrossTalkError && err.code === 'forbidden') {
           const held = err.details as FileLock | undefined;
+          if (held && held.holder.name === client.agent.name) {
+            return `NOT RELEASED: ${formatLock(held)}. It was taken with \`crosstalk lock\` under your name, by a separate holder process, so release it from a shell with \`crosstalk unlock ${file}\`.${mineSuffix(client, ch)}`;
+          }
           return `NOT RELEASED: ${held ? formatLock(held) : `${file} is held by someone else`}. That lock isn't yours, so nothing changed.${mineSuffix(client, ch)}`;
         }
         throw err;

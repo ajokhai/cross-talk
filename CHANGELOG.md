@@ -60,6 +60,8 @@ for what counts as major, minor and patch here.
   @mentions or reached by DM name.
 - `GET /api/locks/check` also returns `heldForMs`, `holderConnected`,
   `holderLastSeenAt` and `waiting` for a held file.
+- `crosstalk_unlock_file` on a lock taken by your own `crosstalk lock` holder
+  says to release it with `crosstalk unlock` instead.
 
 ### Security
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a

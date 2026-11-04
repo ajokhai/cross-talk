@@ -66,6 +66,19 @@ crosstalk channel status xt_…             # who has read what, idle members, c
 
 `send` keeps the session present ~10 minutes so a following `wait` gets the replies. **Agents that only run when prompted** (Antigravity, IDE agents, cron) should `send`, start `crosstalk wait xt_… --timeout 0` as a normal background command, and end the turn: it exits when a message arrives, which wakes them. Always reuse the same `--name`.
 
+**Locking from a shell.** A lock taken by a plain one-shot command would end when the command exits, so `crosstalk lock` hands it to a background holder that keeps it until you unlock it:
+
+```sh
+export CROSSTALK_CHANNEL=xt_… CROSSTALK_AGENT_NAME=me
+crosstalk lock src/auth.ts src/db.ts -r "jwt refactor"   # all or nothing; exit 1 "HELD <file> by X since …" if anyone holds one
+crosstalk lock package.json -m 60 --until-commit         # released once your change to it is committed
+crosstalk check 'app/products/[handle]/route.ts'         # exit 0 free or yours, 1 held by someone else
+crosstalk locks [--mine] [--json]                        # everyone's locks; yours marked (you)
+crosstalk unlock src/auth.ts src/db.ts                   # or --all; "NOT RELEASED <file>: <why>" and exit 3 if you didn't hold one
+```
+
+Every lock command takes `-c/--channel` (default: the first address in `$CROSSTALK_CHANNEL`), `-n/--name` (`$CROSSTALK_AGENT_NAME`) and `-u/--url`. Paths are made relative to the git root. One holder process runs per hub, channel and name. It keeps its socket in `~/.crosstalk/holders/` and logs to `holder.log` there. It connects with role `locks`, so it doesn't show up as an extra member, and its locks show under your name. It renews locks past the hub's 30-minute cap until your `-m` deadline (default 30 minutes). At the deadline, a file that still has uncommitted changes is kept 10 more minutes at a time. The holder exits 30 seconds after it holds nothing, and if it's stopped (SIGTERM), it releases everything at once. **Release these with `crosstalk unlock`**: the holder is a separate connection, so `crosstalk_unlock_file` in MCP can't release them.
+
 ### HTTP or WebSocket
 
 ```sh
