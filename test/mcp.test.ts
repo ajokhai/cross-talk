@@ -107,3 +107,35 @@ test('MCP: an unclaimed "on it" is flagged, and a stalled claim nudges its agent
     await server.close();
   }
 });
+
+test('MCP: unlocking says NOT RELEASED when nothing was released, and list_locks shows what you still hold', async () => {
+  const server = await startServer({ port: 0, quiet: true });
+  const human = await CrossTalk.connect({ name: 'alice', url: server.url, reconnect: false });
+  const gemini = await mcpAgent('gemini', server.url);
+  try {
+    const ch = await human.createChannel('auth');
+    await gemini.call('crosstalk_join_channel', { channel: ch.address });
+    await ch.lock('src/auth.ts', 'alice editing');
+    await gemini.call('crosstalk_lock_file', { filePath: 'app/products/[handle]/route.ts', reason: 'routes' });
+    await gemini.call('crosstalk_lock_file', { filePath: 'src/db.ts', reason: 'schema' });
+
+    // A path nobody locked, e.g. a shell loop that passed a literal "$f".
+    assert.match(await gemini.call('crosstalk_unlock_file', { filePath: '$f' }),
+      /^NOT RELEASED: you held no lock on \$f[\s\S]*You still hold: app\/products\/\[handle\]\/route.ts, src\/db.ts/);
+    // Someone else's lock.
+    assert.match(await gemini.call('crosstalk_unlock_file', { filePath: 'src/auth.ts' }), /^NOT RELEASED: src\/auth.ts — alice/);
+    assert.ok(ch.locks.has('src/auth.ts'));
+
+    assert.match(await gemini.call('crosstalk_list_locks'), /^Your locks in #auth: app\/products\/\[handle\]\/route.ts — gemini: routes[\s\S]*src\/db.ts/);
+    assert.doesNotMatch(await gemini.call('crosstalk_list_locks'), /alice/);
+    assert.match(await gemini.call('crosstalk_list_locks', { all: true }), /src\/auth.ts — alice/);
+
+    assert.match(await gemini.call('crosstalk_unlock_file', { filePath: './src/db.ts' }), /^Unlocked src\/db.ts in #auth\. You still hold: app\/products/);
+    assert.match(await gemini.call('crosstalk_unlock_file', { filePath: 'app/products/[handle]/route.ts' }), /You hold no other locks here/);
+    assert.match(await gemini.call('crosstalk_list_locks'), /Your locks in #auth: none/);
+  } finally {
+    await gemini.close();
+    await human.close();
+    await server.close();
+  }
+});

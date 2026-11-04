@@ -144,6 +144,8 @@ program
   .option('--max-chars <n>', 'ceiling for any message or DM, and for what a channel creator can ask for', '16000')
   .option('--request-rate <perSecond>', 'requests per second per connection', '20')
   .option('--request-burst <n>', 'requests a connection may make back to back', '60')
+  .option('--state <file>', 'save channels, agents and locks here so a restart keeps them (default for a localhost hub: ~/.crosstalk/hub-<port>.json, or $CROSSTALK_STATE_FILE)')
+  .option('--no-state', 'keep everything in memory: a restart drops every channel and lock')
   .option('--no-rate-limit', 'don\'t enforce rate limits (only for hubs where every client is trusted); length limits still apply')
   .action(async opts => {
     const n = (flag: string, value: string) => {
@@ -151,13 +153,14 @@ program
       if (!Number.isInteger(v) || v < 1) fail(`--${flag} must be a whole number of at least 1`);
       return v;
     };
-    await startServer({
+    const running = await startServer({
       port: Number(opts.port),
       host: opts.host,
       token: opts.token,
       allowedSubnets: opts.subnet,
       allowedOrigins: opts.allowOrigin,
       trustProxy: opts.trustProxy || undefined,
+      stateFile: opts.state === false ? false : typeof opts.state === 'string' ? opts.state : undefined,
       hub: {
         maxMessageChars: n('max-chars', opts.maxChars),
         channelLimits: {
@@ -169,6 +172,12 @@ program
         rateLimits: opts.rateLimit
       }
     }).catch(fail);
+    if (running) {
+      // Save state and close cleanly, so a restart picks up exactly where this one stopped.
+      const stop = () => void running.close().finally(() => process.exit(0));
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+    }
     startTelemetry({ enabled: opts.telemetry, log: line => console.log(`[crosstalk] ${line}`) });
   });
 

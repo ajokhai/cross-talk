@@ -153,7 +153,7 @@ export class Connection {
   agent?: AgentInfo;
   readonly channels = new Set<string>();
   /** @internal */ released = false;
-  /** @internal Secret that lets a reconnecting client take over this agent. */ resumeToken?: string;
+  /** @internal SHA-256 (hex) of the secret that lets a reconnecting client take over this agent. */ resumeToken?: string;
   /** @internal Set while the transport is gone but the agent is still present. */ droppedAt?: number;
   /** @internal Frames to send right after a resumed client's welcome. */ replay?: ServerFrame[];
   /** @internal Allowance for DMs this agent sends. */ dms: Bucket;
@@ -201,7 +201,8 @@ export class MeshHub {
   private readonly channels = new Map<string, Channel>(); // address -> channel
   private readonly agents = new Map<string, Connection>(); // agent id -> connection
   private readonly perAddress = new Map<string, number>(); // address -> open connections
-  private readonly resumable = new Map<string, Connection>(); // resume token -> connection (live or dropped)
+  private readonly resumable = new Map<string, Connection>(); // resume token hash -> connection (live or dropped)
+  private changes = 0;
   private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now' | 'channelLimits'>> & { channelLimits: ChannelLimits };
   private readonly onMessage?: (message: ChannelMessage) => void;
   private readonly now: () => number;
@@ -293,7 +294,7 @@ export class MeshHub {
     if (frame.protocol !== PROTOCOL_VERSION) {
       fail('bad_request', `Unsupported protocol ${frame.protocol}; this hub speaks ${PROTOCOL_VERSION}`);
     }
-    const previous = typeof frame.resume === 'string' ? this.resumable.get(frame.resume) : undefined;
+    const previous = typeof frame.resume === 'string' && frame.resume ? this.resumable.get(MeshHub.hashToken(frame.resume)) : undefined;
     if (previous?.agent) {
       const agent = this.takeOver(conn, previous);
       return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION, resumeToken: this.issueResumeToken(conn), resumed: true };
@@ -321,9 +322,20 @@ export class MeshHub {
 
   private issueResumeToken(conn: Connection): string {
     const token = crypto.randomBytes(24).toString('base64url');
-    conn.resumeToken = token;
-    this.resumable.set(token, conn);
+    conn.resumeToken = MeshHub.hashToken(token);
+    this.resumable.set(conn.resumeToken, conn);
+    this.changes++;
     return token;
+  }
+
+  /** Resume tokens are kept, and saved, only as hashes. */
+  static hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  /** Goes up whenever hub state changes; a persistence layer saves when it moves. */
+  get revision(): number {
+    return this.changes;
   }
 
   /**
@@ -366,6 +378,12 @@ export class MeshHub {
     if (conn.released) return;
     if (!conn.agent || !conn.resumeToken || this.opts.presenceGraceMs <= 0) return this.disconnect(conn);
     this.release(conn);
+    this.park(conn);
+  }
+
+  /** Holds a transport-less agent present, buffering what it misses until it resumes or the grace period ends. */
+  private park(conn: Connection): void {
+    this.changes++;
     conn.droppedAt = this.now();
     const replay: ServerFrame[] = (conn.replay = []);
     conn.peer = {
@@ -393,6 +411,7 @@ export class MeshHub {
     conn.droppedAt = undefined;
     conn.replay = undefined;
     if (!conn.agent) return;
+    this.changes++;
     for (const name of [...conn.channels]) this.removeMember(conn, name, 'disconnected');
     this.agents.delete(conn.agent.id);
     conn.agent = undefined;
@@ -406,6 +425,7 @@ export class MeshHub {
       if (!conn.agent) fail('not_registered', 'Send "hello" first');
       if (this.opts.rateLimits && !conn.take(this.now())) fail('rate_limited', 'Too many requests; slow down');
       conn.agent!.lastSeen = this.now();
+      this.changes++;
       const data = await this.dispatch(conn, frame as unknown as RequestFrame);
       return { type: 'result', id, ok: true, data };
     } catch (err) {
@@ -930,7 +950,7 @@ export class MeshHub {
     return result.lock;
   }
 
-  private releaseLock(conn: Connection, address: unknown, rawFile: unknown): { channel: string; file: string } {
+  private releaseLock(conn: Connection, address: unknown, rawFile: unknown): { channel: string; file: string; released: boolean } {
     const channel = this.memberChannel(conn, address);
     const file = LockManager.normalizePath(rawFile as string);
     if (!file) fail('bad_request', 'file must be a non-empty path');
@@ -940,7 +960,7 @@ export class MeshHub {
       this.heartbeat(channel, conn.agent!.id);
       this.emit(channel, { type: 'lock.released', channel: channel.id, file, by: conn.ref, reason: 'released' }, conn.agent!.id);
     }
-    return { channel: channel.id, file };
+    return { channel: channel.id, file, released: !!released };
   }
 
   private updateStatus(conn: Connection, status: unknown, currentTask: unknown): AgentInfo {
@@ -1152,6 +1172,7 @@ export class MeshHub {
   /** Expires stale locks and deletes channels that have been empty too long. */
   sweep(): void {
     for (const lock of this.locks.sweepExpired()) {
+      this.changes++;
       const channel = this.channels.get(lock.channel);
       if (channel) {
         this.emit(channel, { type: 'lock.released', channel: lock.channel, file: lock.file, by: lock.holder, reason: 'expired' });
@@ -1166,6 +1187,7 @@ export class MeshHub {
         if (claim.status !== 'active' || claim.nextUpdateBy > now) continue;
         // Everyone sees it, the owner's inbox included; the claimant gets it too, as a nudge.
         claim.status = 'stalled';
+        this.changes++;
         this.emit(channel, { type: 'claim.updated', claim: { ...claim } });
       }
       // Allowances outlive leaving the channel (so rejoining doesn't reset them), not the agent.
@@ -1174,7 +1196,136 @@ export class MeshHub {
     for (const channel of [...this.channels.values()]) {
       if (channel.members.size > 0 || channel.emptySince === undefined) continue;
       const ttl = channel.history.length ? this.opts.emptyChannelTtlMs : this.opts.unusedChannelTtlMs;
-      if (channel.emptySince + ttl <= now) this.deleteChannel(channel);
+      if (channel.emptySince + ttl <= now) {
+        this.deleteChannel(channel);
+        this.changes++;
+      }
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Persistence: channels, agents, locks, claims and questions survive a restart
+  // -------------------------------------------------------------------------
+
+  /** Everything needed to carry on after a restart. Rate allowances and transports are not kept. */
+  exportState(): HubState {
+    const agents: PersistedAgent[] = [];
+    for (const conn of new Set([...this.agents.values(), ...this.resumable.values()])) {
+      if (!conn.agent || !conn.resumeToken) continue;
+      agents.push({ agent: { ...conn.agent }, resumeTokenHash: conn.resumeToken, channels: [...conn.channels] });
+    }
+    return {
+      version: 1,
+      savedAt: this.now(),
+      channels: [...this.channels.values()].map(c => ({
+        id: c.id,
+        name: c.name,
+        topic: c.topic,
+        visibility: c.visibility,
+        createdBy: c.createdBy,
+        createdFrom: c.createdFrom,
+        createdAt: c.createdAt,
+        lastActivity: c.lastActivity,
+        members: [...c.members],
+        history: c.history,
+        emptySince: c.emptySince,
+        ownerKeyHash: c.ownerKeyHash.toString('hex'),
+        questionsMode: c.questionsMode,
+        questions: [...c.questions.values()],
+        posted: c.posted,
+        reads: [...c.reads],
+        claims: [...c.claims.values()],
+        limits: c.limits
+      })),
+      agents,
+      locks: this.locks.list()
+    };
+  }
+
+  /**
+   * Loads saved state into an empty hub. Every saved agent comes back as if
+   * its transport had just dropped: present, holding its channels, locks and
+   * claims, for `graceMs` (default: the presence grace period). A client that
+   * reconnects with its resume token in that time carries on as the same
+   * agent; one that doesn't is evicted as usual, and its locks are released
+   * with a notice to the channel.
+   */
+  restoreState(state: HubState, graceMs = this.opts.presenceGraceMs): { channels: number; agents: number; locks: number } {
+    if (state?.version !== 1) throw new Error(`Unsupported hub state version ${String(state?.version)}`);
+    if (this.channels.size || this.agents.size) throw new Error('restoreState needs an empty hub');
+    for (const c of state.channels) {
+      this.channels.set(c.id, {
+        ...c,
+        members: new Set(),
+        ownerKeyHash: Buffer.from(c.ownerKeyHash, 'hex'),
+        questions: new Map(c.questions.map(q => [q.id, q])),
+        reads: new Map(c.reads),
+        claims: new Map(c.claims.map(k => [k.id, k])),
+        senders: new Map()
+      });
+    }
+    let agents = 0;
+    const now = this.now();
+    for (const saved of state.agents) {
+      const channels = saved.channels.filter(id => this.channels.has(id));
+      if (!channels.length) continue;
+      const conn = new Connection({ send: () => {}, close: () => {} }, 'restored', this.opts.rateLimit, now, this.opts.channelLimits);
+      conn.released = true; // holds no per-address slot until it resumes
+      conn.agent = saved.agent;
+      conn.resumeToken = saved.resumeTokenHash;
+      for (const id of channels) {
+        conn.channels.add(id);
+        this.channels.get(id)!.members.add(saved.agent.id);
+      }
+      this.agents.set(saved.agent.id, conn);
+      this.resumable.set(conn.resumeToken, conn);
+      this.park(conn);
+      // Evicted once `graceMs` has passed, however long the hub's own grace period is.
+      conn.droppedAt = now - this.opts.presenceGraceMs + graceMs;
+      agents++;
+    }
+    for (const channel of this.channels.values()) {
+      for (const [id] of channel.reads) if (!channel.members.has(id)) channel.reads.delete(id);
+      if (!channel.members.size) channel.emptySince ??= now;
+    }
+    const locks = this.locks.restore(state.locks.filter(l => this.channels.get(l.channel)?.members.has(l.holder.id)));
+    return { channels: this.channels.size, agents, locks };
+  }
+}
+
+export interface PersistedChannel {
+  id: string;
+  name: string;
+  topic: string;
+  visibility: ChannelVisibility;
+  createdBy: AgentRef;
+  createdFrom: string;
+  createdAt: number;
+  lastActivity: number;
+  members: string[];
+  history: ChannelMessage[];
+  emptySince?: number;
+  /** Hex SHA-256 of the owner key. */
+  ownerKeyHash: string;
+  questionsMode: 'on' | 'off';
+  questions: UserQuestion[];
+  posted: number;
+  reads: [string, { at: number; seq: number }][];
+  claims: TaskClaim[];
+  limits: ChannelLimits;
+}
+
+export interface PersistedAgent {
+  agent: AgentInfo;
+  /** Hex SHA-256 of the agent's current resume token; the token itself is never saved. */
+  resumeTokenHash: string;
+  channels: string[];
+}
+
+export interface HubState {
+  version: 1;
+  savedAt: number;
+  channels: PersistedChannel[];
+  agents: PersistedAgent[];
+  locks: FileLock[];
 }

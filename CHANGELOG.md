@@ -10,6 +10,26 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- Hub state survives restarts. A hub saves its channels, agents, locks, claims
+  and open questions to a state file (atomic writes, mode 0600, resume tokens
+  stored only as hashes) and loads them on start. Clients that reconnect
+  within 5 minutes resume as the same agent, holding the same locks. Agents
+  that don't come back are evicted as usual, and their locks are released with
+  a notice. The default file for a localhost hub on a fixed port, auto-started
+  hubs included, is `~/.crosstalk/hub-<port>.json`. Set it with
+  `crosstalk serve --state <file>` or `$CROSSTALK_STATE_FILE`, and turn it off
+  with `--no-state` or `CROSSTALK_STATE_FILE=off`. `crosstalk serve` saves on
+  SIGINT/SIGTERM.
+- SDK: after a reconnect that couldn't resume, `CrossTalk` emits `locks.lost`
+  (`{ locks, reason: 'not_resumed' }`) and `channel.lost`
+  (`{ channel, name, reason: 'hub_restarted' }`) instead of failing quietly.
+- SDK: an auto-started hub prints a notice to stderr naming the process that
+  now hosts it, and `CrossTalk.hostedHub` records it.
+- `lock.release` returns `released: boolean`. `Channel.unlock()` returns that
+  result, so a release that freed nothing can be told apart from one that
+  did. New `Channel.myLocks()` lists the locks you hold.
+
 ### Security
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
   file is unlocked. In Claude Code that answer skipped the user's permission

@@ -1,7 +1,10 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type Peer } from './hub.js';
+import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type HubState, type Peer } from './hub.js';
 import { SubnetGuard } from './subnet.js';
 import { CLIENT_HEADER, INTERNAL_HEADER } from './internal.js';
 import type { McpEndpoint } from './mcp-http.js';
@@ -35,6 +38,33 @@ export interface ServerOptions {
   sessionTtlMs?: number;
   hub?: HubOptions;
   quiet?: boolean;
+  /**
+   * Where the hub saves channels, agents, locks, claims and questions, so a
+   * restart doesn't drop them: clients that reconnect within the grace period
+   * carry on as the same agent, holding the same locks. `false` keeps
+   * everything in memory. Defaults to $CROSSTALK_STATE_FILE ("off" disables),
+   * else ~/.crosstalk/hub-<port>.json for a hub bound to loopback on a fixed
+   * port (auto-started hubs included), else in memory.
+   */
+  stateFile?: string | false;
+  /** How long agents restored from the state file have to reconnect. Default 5 minutes. */
+  restoreGraceMs?: number;
+}
+
+/** The state file a hub on `host:port` uses unless told otherwise, or undefined for none. */
+export function defaultStateFile(host: string, port: number): string | undefined {
+  const env = process.env.CROSSTALK_STATE_FILE?.trim();
+  if (env) return env === 'off' || env === '0' ? undefined : env;
+  if (!port || !SubnetGuard.isLoopbackHost(host)) return undefined;
+  return path.join(os.homedir(), '.crosstalk', `hub-${port}.json`);
+}
+
+/** Writes atomically (temp file + rename), readable only by this user. */
+function saveState(file: string, state: HubState): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+  fs.renameSync(tmp, file);
 }
 
 export interface RunningServer {
@@ -42,6 +72,8 @@ export interface RunningServer {
   server: http.Server;
   wss: WebSocketServer;
   url: string;
+  /** Where state is saved, if anywhere. */
+  stateFile?: string;
   close(): Promise<void>;
 }
 
@@ -431,13 +463,40 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   }, 30_000);
   heartbeat.unref();
 
+  const stateFile = options.stateFile === false ? undefined : options.stateFile ?? defaultStateFile(host, port);
+  let savedRevision = -1;
+  const persist = () => {
+    if (!stateFile || hub.revision === savedRevision) return;
+    try {
+      const revision = hub.revision;
+      saveState(stateFile, hub.exportState());
+      savedRevision = revision;
+    } catch (err) {
+      log(`could not save state to ${stateFile}: ${(err as Error).message}`);
+    }
+  };
+
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
       server.off('error', reject);
+      // Only the process that won the port reads the state file, and it does
+      // so before any client can say hello.
+      if (stateFile) {
+        try {
+          const state = JSON.parse(fs.readFileSync(stateFile, 'utf8')) as HubState;
+          const restored = hub.restoreState(state, options.restoreGraceMs ?? 5 * 60 * 1000);
+          log(`restored ${restored.channels} channel(s), ${restored.agents} agent(s) and ${restored.locks} lock(s) from ${stateFile}`);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') log(`ignoring state in ${stateFile}: ${(err as Error).message}`);
+        }
+        savedRevision = hub.revision;
+      }
       resolve();
     });
   });
+  const saver = setInterval(persist, 1000);
+  saver.unref();
 
   const address = server.address();
   boundPort = typeof address === 'object' && address ? address.port : port;
@@ -462,7 +521,11 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     server,
     wss,
     url,
+    stateFile,
     close: async () => {
+      // Save before tearing down connections, which would evict every agent.
+      clearInterval(saver);
+      persist();
       clearInterval(heartbeat);
       clearInterval(reaper);
       hub.stop();
