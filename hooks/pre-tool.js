@@ -104,7 +104,7 @@ if (file && targets.length) {
     const lock = status?.locked ? status.lock : null;
     if (status && target === targets[0]) reachable = true;
     if (lock && lock.holder.name.toLowerCase() !== me) {
-      reason = `CrossTalk: ${lock.file} is locked by ${JSON.stringify(lock.holder.name.slice(0, 40))} (reason: ${JSON.stringify(lock.reason.slice(0, 80))}). Coordinate in the channel before editing.`;
+      reason = `CrossTalk: ${lock.file} is locked by ${JSON.stringify(lock.holder.name.slice(0, 40))}${lock.holder.remote ? ' (a remote agent, outside this machine)' : ''} (reason: ${JSON.stringify(lock.reason.slice(0, 80))}). Coordinate in the channel before editing.`;
       break;
     }
     if (lock && target === targets[0]) mine = true;

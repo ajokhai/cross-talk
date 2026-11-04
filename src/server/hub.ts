@@ -213,7 +213,7 @@ export class Connection {
   }
 
   get ref(): AgentRef {
-    return { id: this.agent!.id, name: this.agent!.name };
+    return this.agent!.remote ? { id: this.agent!.id, name: this.agent!.name, remote: true } : { id: this.agent!.id, name: this.agent!.name };
   }
 
   /** Returns false when the connection has exhausted its rate budget. */

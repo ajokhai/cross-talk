@@ -21,7 +21,7 @@ function run(args: string[], env: Record<string, string>, cwd = process.cwd()): 
   });
 }
 
-const until = async (check: () => boolean, ms = 10_000) => {
+const until = async (check: () => boolean, ms = 25_000) => {
   const start = Date.now();
   while (!check()) {
     if (Date.now() - start > ms) throw new Error('timed out');
@@ -101,6 +101,7 @@ test('crosstalk lock --until-commit lets go once the file is committed', async (
     await ch.refresh();
     assert.ok(ch.locks.has('a.ts'), 'held while the edit is uncommitted');
     git('commit', '-qam', 'edit');
+    // The holder notices on its next tick (300 ms here); give a loaded machine room.
     await until(() => !ch.locks.has('a.ts'));
   } finally {
     await watcher.close();

@@ -27,13 +27,15 @@ const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().u
 const defaultUrl = () => process.env.CROSSTALK_URL || DEFAULT_URL;
 
 const time = (ts: number) => dim(new Date(ts).toLocaleTimeString());
+/** An agent's name, flagged when it joined from outside this machine with a remote invite (#13). */
+const who = (ref: { name: string; remote?: boolean }) => bold(cyan(ref.name)) + (ref.remote ? ' ' + yellow('[remote]') : '');
 
 function formatMessage(m: ChannelMessage | DirectMessage, label?: string): string {
   if ('channel' in m) {
     const body = m.kind === 'shorthand' && m.shorthand ? `${yellow(m.shorthand.raw)} ${dim(`(${m.content})`)}` : m.content;
-    return `${time(m.timestamp)} ${label ? dim('#' + label) + ' ' : ''}${bold(cyan(m.from.name))}: ${body}`;
+    return `${time(m.timestamp)} ${label ? dim('#' + label) + ' ' : ''}${who(m.from)}: ${body}`;
   }
-  return `${time(m.timestamp)} ${magenta('DM')} ${bold(cyan(m.from.name))} ${dim(`(${m.from.id})`)}: ${m.content}`;
+  return `${time(m.timestamp)} ${magenta('DM')} ${who(m.from)} ${dim(`(${m.from.id})`)}: ${m.content}`;
 }
 
 function fail(err: unknown): never {
@@ -106,7 +108,7 @@ const ago = (ts: number) => {
 function formatQuestion(q: UserQuestion, channels: Channel[]): string {
   const ch = channels.find(c => c.address === q.channel);
   const lines = [
-    `${yellow('?')} ${dim('#' + (ch?.name ?? q.channel))} ${bold(cyan(q.from.name))} ${dim(`asked ${ago(q.createdAt)} · ${q.id}`)}`,
+    `${yellow('?')} ${dim('#' + (ch?.name ?? q.channel))} ${who(q.from)} ${dim(`asked ${ago(q.createdAt)} · ${q.id}`)}`,
     `  ${q.question}`
   ];
   if (q.options.length) lines.push('  ' + q.options.map((o, i) => `${bold(String(i + 1))}) ${o}`).join('   '));
@@ -438,7 +440,7 @@ program
         print('');
         show();
       } else {
-        print(dim(`+ new question from ${q.from.name} (${queue.length} waiting)`));
+        print(dim(`+ new question from ${q.from.name}${q.from.remote ? ' [remote]' : ''} (${queue.length} waiting)`));
         rl.prompt(true);
       }
     });
