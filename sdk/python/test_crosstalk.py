@@ -82,6 +82,22 @@ class TransportTests:
         self.assertFalse(self.ch.unlock("src/b.ts"))    # already released
         self.assertEqual(self.bob_ch.lock("src/b.ts", "now")["holder"]["name"], "Bob")
 
+    def test_slots(self):
+        name = f"heavy-{time.time_ns()}"
+        self.assertIn("granted", self.ch.slot_acquire(name, capacity=1))
+        queued = self.bob_ch.slot_acquire(name, capacity=1)
+        self.assertEqual((queued["queued"], queued["position"]), (True, 1))
+        threading.Timer(0.3, lambda: self.ch.slot_release(name)).start()
+        granted = self.bob_ch.slot_acquire(name, capacity=1, wait=5)
+        self.assertEqual([h["holder"]["name"] for h in granted["granted"]["holders"]], ["Bob"])
+        self.assertTrue(self.bob_ch.slot_release(name))
+        self.assertFalse(self.bob_ch.slot_release(name))
+        self.assertIn("granted", self.ch.slot_acquire(name, capacity=1))
+        with self.assertRaises(CrossTalkError) as timeout:
+            self.bob_ch.slot_acquire(name, capacity=1, wait=0.3)
+        self.assertEqual(timeout.exception.code, "timeout")
+        self.ch.slot_release(name)
+
     def test_malformed_event_is_reported_not_fatal(self):
         errors = []
         self.alice.on("error", errors.append)

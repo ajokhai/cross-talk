@@ -7,6 +7,7 @@ import { Command } from './command.js';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
 import { HttpAgent, httpBase } from './http.js';
 import { askHolder, ensureHolder, holderIfRunning, runHolder, type HolderTarget } from './holder.js';
+import { parseSize, runWithSlot } from './slots.js';
 import { inviteText } from './invite.js';
 import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
@@ -843,6 +844,38 @@ program
       if (status.lock.holder.name.toLowerCase() === target.name.toLowerCase()) return console.log(green(`yours ${rel}`) + dim(`: ${status.lock.reason}`));
       console.log(red(`HELD ${rel} by ${status.lock.holder.name} since ${ago(status.lock.acquiredAt)}: ${status.lock.reason}`));
       process.exit(1);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('run <command...>')
+  .description('Run a heavy command (a build, a full test suite) only while holding one of a slot\'s places, so at most --max run at once across every agent in the channel. Queues when the slot is full; exits with the command\'s code. Put the command after --')
+  .option('-s, --slot <name>', 'slot name, e.g. heavy or test-server')
+  .option('--max <n>', 'places in the slot (the first holder fixes it)', '2')
+  .option('--min-free-disk <size>', 'refuse to start (exit 1) below this much free disk, e.g. 5G')
+  .option('--ttl <seconds>', 'lease, renewed every third of it while the command runs', '300')
+  .option('-c, --channel <address>', 'channel address (or $CROSSTALK_CHANNEL)')
+  .option('-n, --name <name>', 'your agent name (or $CROSSTALK_AGENT_NAME)', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (command: string[], opts) => {
+    try {
+      const target = lockTarget(opts);
+      if (!opts.slot) fail('Which slot? Pass --slot <name>, e.g. --slot heavy.');
+      const max = Number(opts.max);
+      if (!Number.isInteger(max) || max < 1 || max > 64) fail('--max must be a whole number from 1 to 64');
+      const ttl = Number(opts.ttl);
+      if (!Number.isFinite(ttl) || ttl <= 0) fail('--ttl must be a positive number of seconds');
+      const code = await runWithSlot({
+        ...target,
+        slot: opts.slot,
+        max,
+        ttlSeconds: ttl,
+        minFreeBytes: opts.minFreeDisk ? parseSize(opts.minFreeDisk) : undefined,
+        command
+      });
+      process.exit(code);
     } catch (err) {
       fail(err);
     }

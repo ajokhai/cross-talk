@@ -39,7 +39,7 @@ crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code  # join from another t
 
 Env: `CROSSTALK_URL` (default `ws://localhost:4488`), `CROSSTALK_AUTH_TOKEN`, `CROSSTALK_AGENT_NAME`, `CROSSTALK_AGENT_ROLE`, `CROSSTALK_CHANNEL` (comma-separated, joined on startup), `CROSSTALK_AUTOSTART=0` (don't start a local hub).
 
-Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_channel`, `list_channels`, `channel_state`, `close_channel`, `send`, `dm` (`replyExpected: false` for acks), `set_status`, `lock_file`, `unlock_file` (starts with `NOT RELEASED` when nothing was released), `list_locks` (what you still hold), `read_inbox`, `wait` (blocks up to 120s), `ask_user`, `claim`, `update_claim`, `status`. A `channel` argument takes an address or the label of a joined channel, and can be left out if you're in exactly one.
+Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_channel`, `list_channels`, `channel_state`, `close_channel`, `send`, `dm` (`replyExpected: false` for acks), `set_status`, `lock_file`, `unlock_file` (starts with `NOT RELEASED` when nothing was released), `list_locks` (what you still hold), `slot_acquire` / `slot_release` (a counted place before heavy work; queued when full), `read_inbox`, `wait` (blocks up to 120s), `ask_user`, `claim`, `update_claim`, `status`. A `channel` argument takes an address or the label of a joined channel, and can be left out if you're in exactly one.
 
 - **Agents aren't woken by messages.** MCP can't start a turn, so every tool result begins with what arrived since the last call, and agents are told to end a step with `crosstalk_wait`. The hub tracks what each agent has actually read; an `@mention` of one that hasn't read for 5 minutes warns the sender.
 - **Claims make "on it" checkable.** A claim is a task, an owner and an update interval (default 10 min). Channel posts, claim updates and lock activity are heartbeats; miss one and the claim turns *stalled*, which the channel, `crosstalk inbox` and the agent all see. From a shell or git hook: `crosstalk claim xt_… add tests --every 15`, `crosstalk progress xt_… "commit abc123" [--done|--drop]`.
@@ -78,6 +78,14 @@ crosstalk unlock src/auth.ts src/db.ts                   # or --all; "NOT RELEAS
 ```
 
 Every lock command takes `-c/--channel` (default: the first address in `$CROSSTALK_CHANNEL`), `-n/--name` (`$CROSSTALK_AGENT_NAME`) and `-u/--url`. Paths are made relative to the git root. One holder process runs per hub, channel and name. It keeps its socket in `~/.crosstalk/holders/` and logs to `holder.log` there. It connects with role `locks`, so it doesn't show up as an extra member, and its locks show under your name. It renews locks past the hub's 30-minute cap until your `-m` deadline (default 30 minutes). At the deadline, a file that still has uncommitted changes is kept 10 more minutes at a time. The holder exits 30 seconds after it holds nothing, or after 3 minutes cut off from the hub, and if it's stopped (SIGTERM), it releases everything at once. **Release these with `crosstalk unlock`**: the holder is a separate connection, so `crosstalk_unlock_file` in MCP can't release them.
+
+**Capping heavy work.** `crosstalk run` runs a command only while it holds one of a slot's places, so at most `--max` of them run at once across every agent in the channel:
+
+```sh
+crosstalk run --slot heavy --max 2 --min-free-disk 5G -- npm test
+```
+
+When every place is taken, it waits and prints its place in line. It renews its place every third of `--ttl` (default 300 seconds) while the command runs, passes Ctrl-C and SIGTERM on to the command, and releases its place however the command ends. It exits with the command's exit code. It exits 1 without running anything when the hub can't be reached or the disk has less free space than `--min-free-disk`, and 127 when the command can't be started. The first agent to take a slot sets its `--max`. Asking for more is refused until the slot is idle again. Each run is its own connection with role `runner`, so it isn't listed as a member.
 
 ### HTTP or WebSocket
 

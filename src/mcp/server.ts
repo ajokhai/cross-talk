@@ -117,6 +117,10 @@ export class Bridge {
       if (q.from.id === client.agent.id) this.push({ kind: 'answer', at: q.closedAt ?? Date.now(), question: q });
     });
     client.on('event', (f: ServerFrame) => {
+      if (f.type === 'slot.granted') {
+        this.push({ kind: 'alert', at: Date.now(), channel: f.slot.channel, text: `SLOT GRANTED: you now hold a place in slot ${f.slot.name} (${f.slot.holders.length} of ${f.slot.capacity} taken). Run your command now, and release it with crosstalk_slot_release when done.` });
+        return;
+      }
       if (f.type === 'claim.updated' && f.claim.owner.id === client.agent.id) {
         if (f.claim.status === 'stalled') this.push({ kind: 'nudge', at: Date.now(), claim: f.claim });
         return;
@@ -578,6 +582,29 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: 'crosstalk_slot_acquire',
+    description: 'Take one place in a counted slot before running something heavy that others share (a build, the full test suite, a test server), so at most `capacity` run at once. If it is full you are queued, and "SLOT GRANTED" arrives in a later tool result (crosstalk_wait wakes for it). Call again to renew while you work, and release with crosstalk_slot_release as soon as you finish. From a shell, `crosstalk run --slot <name> -- <cmd>` does all of this.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: channelArg,
+        name: { type: 'string', description: 'Slot name, e.g. heavy or test-server' },
+        capacity: { type: 'number', description: 'Places in the slot (default 2). The first holder fixes it.' },
+        ttlSeconds: { type: 'number', description: 'Default 300, max 1800. Call again to renew.' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'crosstalk_slot_release',
+    description: 'Give up your place in a slot, or your place in its queue.',
+    inputSchema: {
+      type: 'object',
+      properties: { channel: channelArg, name: { type: 'string' } },
+      required: ['name']
+    }
+  },
+  {
     name: 'crosstalk_set_status',
     description: 'Tell channel-mates what you are doing.',
     inputSchema: {
@@ -792,6 +819,24 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
         return `NOT RELEASED: you held no lock on ${file} in #${ch.name}, so nothing changed. Check the path.${mineSuffix(client, ch)}`;
       }
       return `Unlocked ${file} in #${ch.name}.${mineSuffix(client, ch)}`;
+    }
+    case 'crosstalk_slot_acquire': {
+      const ch = pickChannel(client, args.channel);
+      const name = str(args.name);
+      const res = await client.request('slot.acquire', { channel: ch.address, name, capacity: Number(args.capacity) || 2, ttlSeconds: Number(args.ttlSeconds) || undefined });
+      if ('granted' in res) {
+        const until = Math.max(...res.granted.holders.filter(h => h.holder.id === client.agent.id).map(h => h.expiresAt));
+        return `You hold a place in slot ${name} in #${ch.name} (${res.granted.holders.length} of ${res.granted.capacity} taken) until ${new Date(until).toISOString()}. Release it with crosstalk_slot_release when done.`;
+      }
+      return `QUEUED: slot ${name} is full (${res.slot.holders.map(h => h.holder.name).join(', ')}). You are number ${res.position} in line. Don't start the heavy work yet: "SLOT GRANTED" will arrive in a later tool result, or call crosstalk_wait.`;
+    }
+    case 'crosstalk_slot_release': {
+      const ch = pickChannel(client, args.channel);
+      const name = str(args.name);
+      const res = await client.request('slot.release', { channel: ch.address, name });
+      if (res.released) return `Released your place in slot ${name}.`;
+      if (res.dequeued) return `Left the queue for slot ${name}.`;
+      return `NOT RELEASED: you held no place in slot ${name} in #${ch.name}, and weren't queued for it.`;
     }
     case 'crosstalk_list_locks': {
       const channels = args.channel !== undefined ? [pickChannel(client, args.channel)] : [...client.channels.values()];

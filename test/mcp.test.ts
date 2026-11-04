@@ -171,3 +171,26 @@ test('MCP: locks and channels lost to a hub restart show up on the next tool cal
     await server.close();
   }
 });
+
+test('MCP: slots queue when full, and the grant arrives as an alert on the next call', async () => {
+  const server = await startServer({ port: 0, quiet: true });
+  const human = await CrossTalk.connect({ name: 'alice', url: server.url, reconnect: false });
+  const gemini = await mcpAgent('gemini', server.url);
+  try {
+    const ch = await human.createChannel('builds');
+    await gemini.call('crosstalk_join_channel', { channel: ch.address });
+    await human.request('slot.acquire', { channel: ch.address, name: 'heavy', capacity: 1 });
+
+    assert.match(await gemini.call('crosstalk_slot_acquire', { name: 'heavy', capacity: 1 }), /^QUEUED: slot heavy is full \(alice\)\. You are number 1/);
+    await human.request('slot.release', { channel: ch.address, name: 'heavy' });
+    await new Promise(r => setTimeout(r, 50));
+    assert.match(await gemini.call('crosstalk_list_locks'), /^New since your last call:[\s\S]*SLOT GRANTED: you now hold a place in slot heavy/);
+    assert.match(await gemini.call('crosstalk_slot_acquire', { name: 'heavy', capacity: 1 }), /You hold a place in slot heavy/);
+    assert.match(await gemini.call('crosstalk_slot_release', { name: 'heavy' }), /^Released your place/);
+    assert.match(await gemini.call('crosstalk_slot_release', { name: 'heavy' }), /^NOT RELEASED/);
+  } finally {
+    await gemini.close();
+    await human.close();
+    await server.close();
+  }
+});
