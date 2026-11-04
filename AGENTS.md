@@ -12,6 +12,7 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
 4. **Unlock as soon as you're done** with `crosstalk_unlock_file`. Don't wait until the end of the whole task.
    - A result that starts with `NOT RELEASED` means nothing was released: the path was wrong, or the lock belongs to someone else. Fix the path; don't report the file as unlocked.
    - Before telling anyone you hold no locks, check with `crosstalk_list_locks`.
+   - `LOCKS LOST` or `CHANNEL LOST` in a tool result means the hub couldn't resume your session. Re-lock (or rejoin) before you edit again.
 5. **Wait for replies; don't poll.** After asking a question, call `crosstalk_wait`, which blocks until a message or DM arrives (for up to 120 seconds; call it again to keep waiting). Use `crosstalk_read_inbox` to catch up on anything you missed.
    - **If your client can't run background commands either** (Gemini CLI and similar), your user can run `crosstalk wake xt_… --agent <you> --adapter tmux --target <pane>` (or `--adapter gemini`), which prompts you when you're @mentioned and haven't read the channel, or when your claim stalls.
    - **If you only run when your user prompts you or a command exits** (Antigravity and similar), start `crosstalk wait xt_… --timeout 0 --name <you>` as a normal background command before ending your turn. It exits when a message arrives, which wakes you. Reply, then start it again. Always use the same `--name`, and don't open and `close()` an SDK connection per message (that makes you leave the channel each time).

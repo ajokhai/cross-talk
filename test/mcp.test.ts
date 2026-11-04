@@ -139,3 +139,26 @@ test('MCP: unlocking says NOT RELEASED when nothing was released, and list_locks
     await server.close();
   }
 });
+
+test('MCP: locks and channels lost to a hub restart show up on the next tool call', async () => {
+  const server = await startServer({ port: 0, quiet: true });
+  const human = await CrossTalk.connect({ name: 'alice', url: server.url, reconnect: false });
+  const gemini = await mcpAgent('gemini', server.url);
+  try {
+    const ch = await human.createChannel('auth');
+    await gemini.call('crosstalk_join_channel', { channel: ch.address });
+    await gemini.call('crosstalk_lock_file', { filePath: 'src/db.ts', reason: 'schema' });
+    const client = await gemini.bridge.get();
+    const lock = [...client.channels.get(ch.address)!.locks.values()][0];
+    // What the SDK emits after a reconnect it couldn't resume.
+    client.emit('locks.lost', { locks: [lock], reason: 'not_resumed' });
+    client.emit('channel.lost', { channel: ch.address, name: 'auth', reason: 'hub_restarted' });
+    const out = await gemini.call('crosstalk_list_channels');
+    assert.match(out, /^New since your last call:[\s\S]*LOCKS LOST:[^\n]*src\/db.ts/);
+    assert.match(out, /CHANNEL LOST: the hub no longer has #auth/);
+  } finally {
+    await gemini.close();
+    await human.close();
+    await server.close();
+  }
+});
