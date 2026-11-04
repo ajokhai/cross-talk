@@ -69,6 +69,13 @@ for what counts as major, minor and patch here.
   `holderLastSeenAt` and `waiting` for a held file.
 - `crosstalk_unlock_file` on a lock taken by your own `crosstalk lock` holder
   says to release it with `crosstalk unlock` instead.
+- Slots, counted semaphores for shared resources: `slot.acquire` (`name`,
+  `capacity`, `ttlSeconds?`) takes one of `capacity` places or queues, and
+  waiters get `slot.granted` in order. `slot.release` gives a place up.
+  Places expire like locks and go when their holder leaves. They're saved
+  with hub state (queues aren't) and listed in snapshots as `slots`, with
+  `slot.updated` events. The first holder fixes the capacity; a request for
+  more is refused.
 
 ### Security
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a

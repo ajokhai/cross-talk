@@ -90,6 +90,29 @@ export interface ChannelInfo {
   limits: ChannelLimits;
 }
 
+/** One holder's share of a slot. */
+export interface SlotHold {
+  holder: AgentRef;
+  acquiredAt: number;
+  expiresAt: number;
+}
+
+/**
+ * A counted semaphore for a shared resource (heavy builds, a test server, a
+ * port range): at most `capacity` agents hold it at once, and the rest queue.
+ * The first `slot.acquire` fixes the capacity; it resets once the slot has no
+ * holders and no waiters.
+ */
+export interface Slot {
+  /** Channel address. */
+  channel: string;
+  name: string;
+  capacity: number;
+  holders: SlotHold[];
+  /** Agents queued for it. */
+  waiting: number;
+}
+
 export interface FileLock {
   /** Channel address. */
   channel: string;
@@ -216,6 +239,8 @@ export interface ChannelSnapshot {
   questions: UserQuestion[];
   /** Active and stalled claims. */
   claims: TaskClaim[];
+  /** Slots in use or waited for. Missing from hubs older than 2.9. */
+  slots?: Slot[];
 }
 
 /** `channel.create` also returns the owner key, once. Keep it private: it answers questions. */
@@ -263,6 +288,17 @@ export type RequestFrame =
    * `lock.release` on that file.
    */
   | { type: 'lock.wait'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
+  /**
+   * Takes one place in slot `name` (letters, digits, `.`, `_`, `:`, `-`; up
+   * to 64 characters), or queues for it when all `capacity` places are
+   * taken. Queued agents get `slot.granted`, in order. Asking again while you
+   * hold a place renews it for `ttlSeconds` (default 300, max 1800). Places
+   * go when you release them, when they expire, or when you leave or
+   * disconnect. `capacity` (1 to 64) must not exceed the slot's current one.
+   */
+  | { type: 'slot.acquire'; id: string; channel: string; name: string; capacity: number; ttlSeconds?: number }
+  /** Gives up your place in a slot, or your place in its queue. */
+  | { type: 'slot.release'; id: string; channel: string; name: string }
   | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string }
   | { type: 'question.ask'; id: string; channel: string; question: string; options?: string[] }
   | { type: 'question.cancel'; id: string; channel: string; question: string }
@@ -301,6 +337,9 @@ export interface ResultData {
   'lock.release': { channel: string; file: string; released: boolean; dequeued?: boolean };
   /** `granted` when the lock was free (or already yours); otherwise your 1-based place in the queue and the lock you're waiting on. */
   'lock.wait': { granted: FileLock } | { queued: true; position: number; lock: FileLock };
+  'slot.acquire': { granted: Slot } | { queued: true; position: number; slot: Slot };
+  /** `released` is false when you held no place; `dequeued` is true if that dropped your place in its queue. */
+  'slot.release': { channel: string; name: string; released: boolean; dequeued?: boolean };
   'status.update': AgentInfo;
   'question.ask': UserQuestion;
   'question.cancel': UserQuestion;
@@ -352,6 +391,10 @@ export type ServerFrame =
   | { type: 'lock.contended'; lock: FileLock; requester: AgentRef; reason: string }
   /** Sent only to the agent that queued with `lock.wait`: the lock is now yours. */
   | { type: 'lock.granted'; lock: FileLock }
+  /** Sent only to the agent that queued with `slot.acquire`: a place is now yours. */
+  | { type: 'slot.granted'; slot: Slot }
+  /** A slot's holders or queue changed. Not sent to the agent whose request caused it. */
+  | { type: 'slot.updated'; slot: Slot }
   | { type: 'channel.updated'; channel: ChannelInfo }
   /** A claim was made, stalled, resumed, finished or dropped. Plain heartbeats are silent. */
   | { type: 'claim.updated'; claim: TaskClaim }
