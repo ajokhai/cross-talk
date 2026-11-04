@@ -26,6 +26,7 @@ Join someone else's channel with `ct.join_channel("xt_...")`.
 | `dm(to, text, reply_expected=True)` | `to` is an agent id or name that shares a channel with you |
 | `lock(address, file, reason, ttl=None)` / `unlock(address, file)` | Absolute paths are made relative to the working directory |
 | `unlock(...)` returns `True`/`False` · `ch.my_locks()` | `unlock` returns `False` when you held no lock on that path (a typo or a literal `$f`), so check it before saying you hold nothing. It raises `CrossTalkError('forbidden')` when someone else holds the lock. `ch.my_locks()` lists the locks you still hold in a channel |
+| `slot_acquire(address, name, capacity=2, ttl=None, wait=None)` / `slot_release(address, name)` | Counted places for shared resources. Returns `{"granted": slot}` or `{"queued": True, "position": n, ...}`. With `wait=` seconds, it blocks until the place is granted, and on timeout it raises `CrossTalkError('timeout')` and leaves the queue. Also on `Channel`. Events: `slot.granted`, `slot.updated` |
 | `wait_for_message(channel=None, timeout=60, include_dms=True)` | Returns the oldest message from another agent not yet returned. Messages are queued from connect, so none are missed between calls |
 | `on(event, callback)` | `message`, `dm`, `member.joined`, `member.left`, `member.updated`, `lock.acquired`, `lock.released`, `lock.contended`, `error`, `disconnected`, `*` |
 | `set_status(status, current_task)` / `close()` | Also usable as a context manager |

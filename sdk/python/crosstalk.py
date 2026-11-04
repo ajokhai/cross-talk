@@ -328,6 +328,13 @@ class Channel:
         """True if a lock was released. False if you held none on that file (check the path)."""
         return self._client.unlock(self.address, file)
 
+    def slot_acquire(self, name: str, capacity: int = 2, ttl: Optional[int] = None,
+                     wait: Optional[float] = None) -> Dict[str, Any]:
+        return self._client.slot_acquire(self.address, name, capacity, ttl, wait)
+
+    def slot_release(self, name: str) -> bool:
+        return self._client.slot_release(self.address, name)
+
     def my_locks(self) -> List[Dict[str, Any]]:
         """The locks you hold in this channel, as of the last update from the hub."""
         me = (self._client.agent or {}).get("id")
@@ -368,6 +375,8 @@ class CrossTalk:
         self._handlers: Dict[str, List[Callable]] = {}
         self._inbox: deque = deque(maxlen=INBOX_LIMIT)
         self._inbox_cond = threading.Condition()
+        self._slot_cond = threading.Condition()
+        self._granted: set = set()
         self.connected = False
 
         agent = {"name": name, "role": role, "environment": environment}
@@ -461,6 +470,12 @@ class CrossTalk:
             self._emit(kind, frame)
         elif kind == "lock.contended":
             self._emit(kind, frame)
+        elif kind in ("slot.granted", "slot.updated"):
+            if kind == "slot.granted":
+                with self._slot_cond:
+                    self._granted.add((frame["slot"]["channel"], frame["slot"]["name"]))
+                    self._slot_cond.notify_all()
+            self._emit(kind, frame["slot"])
         elif kind == "error":
             self._emit("error", _hub_error(frame.get("error")))
 
@@ -551,6 +566,41 @@ class CrossTalk:
         released = result.get("released")
         # Older hubs don't say; fall back to what this client last saw.
         return released if isinstance(released, bool) else held_before
+
+    def slot_acquire(self, channel: str, name: str, capacity: int = 2, ttl: Optional[int] = None,
+                     wait: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Takes one of `capacity` places in a counted slot (for heavy builds, a
+        test server, ...). Returns {"granted": slot} or {"queued": True,
+        "position": n, "slot": slot}. With `wait` (seconds), blocks while
+        queued until the place is granted and returns {"granted": slot}, or
+        raises CrossTalkError('timeout') and gives up the queued place.
+        Call again to renew a place you hold.
+        """
+        with self._slot_cond:
+            self._granted.discard((channel, name))
+        result = self.request("slot.acquire", channel=channel, name=name, capacity=capacity, ttlSeconds=ttl)
+        if "granted" in result or wait is None:
+            return result
+        deadline = time.time() + wait
+        with self._slot_cond:
+            while (channel, name) not in self._granted:
+                left = deadline - time.time()
+                if left <= 0 or not self.connected:
+                    break
+                self._slot_cond.wait(left)
+            granted = (channel, name) in self._granted
+            self._granted.discard((channel, name))
+        if not granted:
+            self.slot_release(channel, name)
+            raise CrossTalkError("timeout", f"slot {name} was not granted within {wait}s")
+        state = self.request("channel.state", channel=channel)
+        slot = next((s for s in state.get("slots") or [] if s["name"] == name), None)
+        return {"granted": slot}
+
+    def slot_release(self, channel: str, name: str) -> bool:
+        """Gives up your place in a slot (or in its queue). True if a place you held was released."""
+        return bool((self.request("slot.release", channel=channel, name=name) or {}).get("released"))
 
     def set_status(self, status: Optional[str] = None, current_task: Optional[str] = None) -> Dict[str, Any]:
         """status is 'idle', 'working' or 'waiting'."""

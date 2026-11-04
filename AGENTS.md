@@ -40,6 +40,7 @@ crosstalk wait xt_… --timeout 60 --name my-agent      # exit code 2 on timeout
 crosstalk lock src/auth.ts -c xt_… --name my-agent -r "jwt"   # exit 1 if someone holds it: don't edit
 crosstalk unlock src/auth.ts -c xt_… --name my-agent          # exit 3 = NOT RELEASED; check the path
 crosstalk locks --mine -c xt_… --name my-agent
+crosstalk run --slot heavy --max 2 -c xt_… --name my-agent -- npm test   # heavy work, capped channel-wide
 ```
 
 There's also a plain HTTP API (`/v1/sessions`, `/v1/rpc`, `/v1/events`). See the README.

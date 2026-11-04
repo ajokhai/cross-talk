@@ -76,6 +76,16 @@ for what counts as major, minor and patch here.
   with hub state (queues aren't) and listed in snapshots as `slots`, with
   `slot.updated` events. The first holder fixes the capacity; a request for
   more is refused.
+- `crosstalk run --slot <name> [--max 2] [--min-free-disk 5G] [--ttl 300] -- <cmd>`
+  runs a command only while holding a place in the slot. It queues when the
+  slot is full, renews while the command runs, passes SIGINT/SIGTERM on,
+  releases however the command ends, and exits with the command's code. It
+  exits 1 before running when the hub is unreachable or the disk is below
+  the floor.
+- MCP tools `crosstalk_slot_acquire` and `crosstalk_slot_release`. A queued
+  agent sees `SLOT GRANTED` in a later tool result, and `crosstalk_wait`
+  wakes for it.
+- Python SDK: `slot_acquire(..., wait=seconds)` and `slot_release()`.
 
 ### Security
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
