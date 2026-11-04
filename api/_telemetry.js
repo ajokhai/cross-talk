@@ -10,6 +10,10 @@ import { createHmac } from 'node:crypto';
 
 export const WINDOW_DAYS = 30;
 const KEEP_DAYS = WINDOW_DAYS + 5;
+/** Grid cells are this many degrees on a side (1° is about 111 km north to south). */
+export const GRID_DEG = 1;
+/** A cell is published only once this many hubs are in it; smaller ones count only toward their country. */
+export const MIN_CELL_HUBS = 3;
 
 export function storeConfigured(env = process.env) {
   return Boolean(env.MONGODB_URI);
@@ -57,9 +61,31 @@ export function countryOf(headers) {
   return /^[A-Z]{2}$/.test(raw) ? raw : 'XX';
 }
 
+/**
+ * The 1° grid cell holding Vercel's approximate location for the request, as
+ * "lat,lon" of the cell's centre (e.g. "37.5,-122.5"), or undefined when
+ * Vercel doesn't know. The precise coordinates are never stored.
+ */
+export function cellOf(headers) {
+  const read = name => {
+    const raw = headers[name];
+    if (raw === undefined || raw === '') return NaN;
+    try {
+      return Number(decodeURIComponent(String(raw)));
+    } catch {
+      return NaN;
+    }
+  };
+  const lat = read('x-vercel-ip-latitude');
+  const lon = read('x-vercel-ip-longitude');
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return undefined;
+  const centre = (v, max) => Math.min(max - GRID_DEG / 2, Math.floor(v / GRID_DEG) * GRID_DEG + GRID_DEG / 2);
+  return `${centre(lat, 90)},${centre(lon, 180)}`;
+}
+
 // ---------------------------------------------------------------------------
 // MongoDB store. Collections:
-//   pings      { _id: "<hub hash>:<YYYY-MM-DD>", hub, country, day }   TTL on day
+//   pings      { _id: "<hub hash>:<YYYY-MM-DD>", hub, country, cell?, day }   TTL on day
 //   ratelimits { _id: "<ip hash>:<hour>", n, at }                       TTL on at
 // ---------------------------------------------------------------------------
 
@@ -88,10 +114,10 @@ export function mongoStore(env = process.env) {
           );
           return doc?.n ?? 1;
         },
-        async addPing({ hub, country, day }) {
+        async addPing({ hub, country, cell, day }) {
           await pings.updateOne(
             { _id: `${hub}:${day.toISOString().slice(0, 10)}` },
-            { $setOnInsert: { hub, country, day } },
+            { $setOnInsert: cell ? { hub, country, cell, day } : { hub, country, day } },
             { upsert: true }
           );
         },
@@ -103,12 +129,18 @@ export function mongoStore(env = process.env) {
               countries: [
                 { $group: { _id: { country: '$country', hub: '$hub' } } },
                 { $group: { _id: '$_id.country', n: { $sum: 1 } } }
+              ],
+              cells: [
+                { $match: { cell: { $type: 'string' } } },
+                { $group: { _id: { country: '$country', cell: '$cell', hub: '$hub' } } },
+                { $group: { _id: { country: '$_id.country', cell: '$_id.cell' }, n: { $sum: 1 } } }
               ]
             } }
           ]).toArray();
           return {
             total: facets.total[0]?.n ?? 0,
-            countries: Object.fromEntries(facets.countries.map(c => [c._id, c.n]))
+            countries: Object.fromEntries(facets.countries.map(c => [c._id, c.n])),
+            cells: facets.cells.map(c => ({ country: c._id.country, cell: c._id.cell, n: c.n }))
           };
         }
       };
@@ -145,17 +177,30 @@ export function storageFailure(err) {
 // ---------------------------------------------------------------------------
 
 /** Records one check-in. Returns false when the IP is over its rate limit. */
-export async function recordPing(store, { id, country, ip, time = Date.now(), limitPerHour = 20, env = process.env }) {
+export async function recordPing(store, { id, country, cell, ip, time = Date.now(), limitPerHour = 20, env = process.env }) {
   const n = await store.hit(`${digest(`ip:${ip}`, env)}:${Math.floor(time / 3600_000)}`);
   if (n > limitPerHour) return false;
-  await store.addPing({ hub: digest(`id:${id}`, env), country, day: utcDay(time) });
+  await store.addPing({ hub: digest(`id:${id}`, env), country, cell, day: utcDay(time) });
   return true;
 }
 
-/** Distinct hubs per country over the last WINDOW_DAYS days (today included). */
+/**
+ * Distinct hubs per country over the last WINDOW_DAYS days (today included),
+ * plus `places`: 1° cells with at least MIN_CELL_HUBS hubs, as
+ * { country, lat, lon, n } at the cell's centre. Hubs in smaller cells, or
+ * with no location, appear only in their country's count.
+ */
 export async function readUsage(store, { time = Date.now() } = {}) {
   const since = new Date(utcDay(time).getTime() - (WINDOW_DAYS - 1) * 86400_000);
-  const { total, countries } = await store.usage(since);
+  const { total, countries, cells = [] } = await store.usage(since);
   delete countries.XX;
-  return { windowDays: WINDOW_DAYS, total, countries };
+  const places = cells
+    .filter(c => c.n >= MIN_CELL_HUBS && c.country !== 'XX' && countries[c.country])
+    .map(c => {
+      const [lat, lon] = c.cell.split(',').map(Number);
+      return { country: c.country, lat, lon, n: c.n };
+    })
+    .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon))
+    .sort((a, b) => b.n - a.n || a.lat - b.lat || a.lon - b.lon);
+  return { windowDays: WINDOW_DAYS, total, countries, places };
 }

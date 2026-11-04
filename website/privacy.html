@@ -73,17 +73,18 @@
     <h3>The daily check-in (telemetry)</h3>
     <p>Unless you turn it off, a running hub sends one request a day to <code>https://cross-talk-roan.vercel.app/api/ping</code>, containing exactly:</p>
     <pre><code>{"id": "&lt;random 32-character id, kept in ~/.crosstalk/telemetry-id&gt;", "v": "&lt;CrossTalk version&gt;", "kind": "hub"}</code></pre>
-    <p>The id is random and not derived from your machine, name or account. When the request arrives, our endpoint also sees your IP address and the country Vercel's network assigns it. Here's what we keep:</p>
+    <p>The id is random and not derived from your machine, name or account. When the request arrives, our endpoint also sees your IP address, plus the country and approximate coordinates that Vercel's network assigns to it. Here's what we keep:</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Data</th><th>How it's stored</th><th>Kept for</th></tr></thead>
       <tbody>
         <tr><td>Install id</td><td>Only as a keyed hash (HMAC with a server secret)</td><td>35 days, then deleted automatically</td></tr>
         <tr><td>Country (two-letter code)</td><td>Next to the hashed id, one record per day</td><td>35 days</td></tr>
+        <tr><td>Area: the 1° grid cell (about 111 km across) that Vercel's approximate location for your IP falls in</td><td>The cell only, next to the hashed id. The precise coordinates aren't stored.</td><td>35 days</td></tr>
         <tr><td>IP address</td><td>Only as a keyed hash (HMAC with a server secret), to rate-limit check-ins</td><td>2 hours</td></tr>
         <tr><td>Version</td><td>Checked for format, not stored</td><td>Not kept</td></tr>
       </tbody>
     </table></div>
-    <p>We use this only to show how many hubs checked in from each country over the last 30 days, which is the map on the home page, served by <code>/api/usage</code>. That endpoint publishes only per-country counts. The records are stored in a MongoDB database. <span class="todo">[Name the database host and region, e.g. MongoDB Atlas, and where it runs.]</span></p>
+    <p>We use this only to show how many hubs checked in from each country over the last 30 days, which is the map on the home page, served by <code>/api/usage</code>. That endpoint publishes per-country counts, and the hub count for a grid cell only once at least 3 hubs are in it. Hubs in smaller cells count only toward their country. The records are stored in a MongoDB database. <span class="todo">[Name the database host and region, e.g. MongoDB Atlas, and where it runs.]</span></p>
     <p><strong>To turn it off</strong>, use any one of: <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code>, or <code>DO_NOT_TRACK=1</code>. It's also off on CI services. The hub prints a line when it starts saying whether telemetry is on and what it sends.</p>
 
     <h2>2. This website</h2>

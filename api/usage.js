@@ -1,6 +1,7 @@
 // GET /api/usage: distinct checked-in hubs per country over the last 30 days,
-// for the globe on the landing page.
-// {"configured":true,"windowDays":30,"total":N,"countries":{"US":12,...}}
+// and 1° cells holding at least 3 of them (`places`), for the globe on the
+// landing page.
+// {"configured":true,"windowDays":30,"total":N,"countries":{"US":12,...},"places":[{"country":"US","lat":37.5,"lon":-122.5,"n":4},...]}
 
 import { WINDOW_DAYS, mongoStore, readUsage, storageFailure, storeConfigured } from './_telemetry.js';
 
@@ -13,7 +14,7 @@ export async function handle(req, res, getStore = mongoStore) {
   }
   let body;
   if (!storeConfigured()) {
-    body = { configured: false, windowDays: WINDOW_DAYS, total: 0, countries: {} };
+    body = { configured: false, windowDays: WINDOW_DAYS, total: 0, countries: {}, places: [] };
   } else {
     try {
       body = { configured: true, ...(await readUsage(await getStore())) };

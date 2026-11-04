@@ -6,12 +6,12 @@ import { handle as ping } from '../api/ping.js';
 // @ts-ignore
 import { handle as usage } from '../api/usage.js';
 // @ts-ignore
-import { parsePing, countryOf, readUsage, recordPing } from '../api/_telemetry.js';
+import { cellOf, parsePing, countryOf, readUsage, recordPing } from '../api/_telemetry.js';
 
 /** In-memory store with the same interface and semantics as mongoStore() in api/_telemetry.js. */
 function memoryStore() {
   const limits = new Map<string, number>();
-  const pings = new Map<string, { hub: string; country: string; day: Date }>();
+  const pings = new Map<string, { hub: string; country: string; cell?: string; day: Date }>();
   return {
     pings,
     limits,
@@ -19,17 +19,20 @@ function memoryStore() {
       limits.set(key, (limits.get(key) ?? 0) + 1);
       return limits.get(key)!;
     },
-    async addPing(doc: { hub: string; country: string; day: Date }) {
+    async addPing(doc: { hub: string; country: string; cell?: string; day: Date }) {
       const _id = `${doc.hub}:${doc.day.toISOString().slice(0, 10)}`;
-      if (!pings.has(_id)) pings.set(_id, doc);  // $setOnInsert
+      if (!pings.has(_id)) pings.set(_id, doc.cell ? doc : { hub: doc.hub, country: doc.country, day: doc.day });  // $setOnInsert
     },
     async usage(since: Date) {
       const recent = [...pings.values()].filter(p => p.day >= since);
       const byCountry: Record<string, Set<string>> = {};
       for (const p of recent) (byCountry[p.country] ??= new Set()).add(p.hub);
+      const byCell: Record<string, Set<string>> = {};
+      for (const p of recent) if (p.cell) (byCell[`${p.country}|${p.cell}`] ??= new Set()).add(p.hub);
       return {
         total: new Set(recent.map(p => p.hub)).size,
-        countries: Object.fromEntries(Object.entries(byCountry).map(([c, s]) => [c, s.size]))
+        countries: Object.fromEntries(Object.entries(byCountry).map(([c, s]) => [c, s.size])),
+        cells: Object.entries(byCell).map(([k, s]) => ({ country: k.split('|')[0], cell: k.split('|')[1], n: s.size }))
       };
     }
   };
@@ -90,7 +93,7 @@ test('without storage, ping is 503 and usage reports an empty, unconfigured map'
   assert.equal((await call(ping, 'POST', body(1))).statusCode, 503);
   const res = await call(usage, 'GET');
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(JSON.parse(res.body), { configured: false, windowDays: 30, total: 0, countries: {} });
+  assert.deepEqual(JSON.parse(res.body), { configured: false, windowDays: 30, total: 0, countries: {}, places: [] });
 });
 
 test('ping rejects bad methods and bodies', withStore(async () => {
@@ -106,7 +109,7 @@ test('distinct hubs are counted per country; repeats and raw ids/IPs are not sto
   }
   const res = await call(usage, 'GET');
   assert.equal(res.headers['cache-control'], 'public, s-maxage=600, stale-while-revalidate=3600');
-  assert.deepEqual(JSON.parse(res.body), { configured: true, windowDays: 30, total: 4, countries: { NG: 1, US: 2 } });
+  assert.deepEqual(JSON.parse(res.body), { configured: true, windowDays: 30, total: 4, countries: { NG: 1, US: 2 }, places: [] });
 
   const stored = JSON.stringify([...mem.pings, ...mem.limits]);
   assert.ok(!stored.includes(id(1)) && !stored.includes('1.1.1.1'), 'no raw id or IP in storage');
@@ -125,7 +128,7 @@ test('the 30-day window drops older pings', async () => {
   await recordPing(mem, { id: id(1), country: 'JP', ip: 'a', time: now - 29 * day });
   await recordPing(mem, { id: id(2), country: 'JP', ip: 'b', time: now - 30 * day });
   await recordPing(mem, { id: id(1), country: 'JP', ip: 'a', time: now });
-  assert.deepEqual(await readUsage(mem, { time: now }), { windowDays: 30, total: 1, countries: { JP: 1 } });
+  assert.deepEqual(await readUsage(mem, { time: now }), { windowDays: 30, total: 1, countries: { JP: 1 }, places: [] });
 });
 
 test('storage failures are reported by category, never by message', async () => {
@@ -137,3 +140,29 @@ test('storage failures are reported by category, never by message', async () => 
   assert.equal(storageFailure({ code: 'ERR_MODULE_NOT_FOUND', message: "Cannot find package 'mongodb' imported from /var/task/api/_telemetry.js" }), 'driver missing: mongodb');
   assert.equal(storageFailure(new Error('boom')), 'other');
 });
+
+test('cellOf rounds Vercel\'s location to the centre of a 1° cell, and ignores junk', () => {
+  assert.equal(cellOf({ 'x-vercel-ip-latitude': '37.7749', 'x-vercel-ip-longitude': '-122.4194' }), '37.5,-122.5');
+  assert.equal(cellOf({ 'x-vercel-ip-latitude': '-33.87', 'x-vercel-ip-longitude': '151.21' }), '-33.5,151.5');
+  assert.equal(cellOf({ 'x-vercel-ip-latitude': '90', 'x-vercel-ip-longitude': '180' }), '89.5,179.5');
+  assert.equal(cellOf({}), undefined);
+  assert.equal(cellOf({ 'x-vercel-ip-latitude': 'abc', 'x-vercel-ip-longitude': '1' }), undefined);
+  assert.equal(cellOf({ 'x-vercel-ip-latitude': '95', 'x-vercel-ip-longitude': '1' }), undefined);
+});
+
+test('places: cells with 3+ hubs are published at the cell centre; smaller ones and precise points never are', withStore(async mem => {
+  const at = (ip: string, lat: string, lon: string) => ({ 'x-vercel-ip-country': 'US', 'x-real-ip': ip, 'x-vercel-ip-latitude': lat, 'x-vercel-ip-longitude': lon });
+  // Three hubs around San Francisco, two around New York, one in Texas, one with no location.
+  const sf = [['37.77', '-122.41'], ['37.33', '-122.03'], ['37.87', '-122.27']];
+  for (const [i, [lat, lon]] of sf.entries()) await call(ping, 'POST', body(10 + i), at(`1.0.0.${i}`, lat, lon));
+  await call(ping, 'POST', body(20), at('2.0.0.1', '40.71', '-74.0'));
+  await call(ping, 'POST', body(21), at('2.0.0.2', '40.73', '-73.99'));
+  await call(ping, 'POST', body(30), at('3.0.0.1', '30.27', '-97.74'));
+  await call(ping, 'POST', body(40), { 'x-vercel-ip-country': 'US', 'x-real-ip': '4.0.0.1' });
+
+  const res = JSON.parse((await call(usage, 'GET')).body);
+  assert.deepEqual(res.countries, { US: 7 });
+  assert.deepEqual(res.places, [{ country: 'US', lat: 37.5, lon: -122.5, n: 3 }]);
+  const stored = JSON.stringify([...mem.pings.values()]);
+  assert.ok(!stored.includes('37.77') && !stored.includes('-122.41'), 'only the cell is stored, not the point');
+}));

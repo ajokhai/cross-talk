@@ -7,8 +7,9 @@
  *   <script src="/globe.js" defer></script>
  *
  * Self-contained canvas renderer (CSP script-src 'self'): orthographic
- * projection, land drawn as dots from /data/land-dots.json, one beacon per
- * country sized by distinct hubs over the last 30 days. Drag to spin. Respects
+ * projection, land drawn as dots from /data/land-dots.json, and beacons sized
+ * by distinct hubs over the last 30 days: one per 1° cell holding 3+ hubs, and
+ * one at each country's centre for the rest. Drag to spin. Respects
  * prefers-reduced-motion, follows the site's light/dark tokens, and stops
  * drawing while off screen.
  */
@@ -263,19 +264,36 @@
     const [dots, countries, usage] = await Promise.all([
       json('/data/land-dots.json'),
       json('/data/countries.json'),
-      json('/api/usage').catch(() => ({ configured: false, total: 0, countries: {} }))
+      json('/api/usage').catch(() => ({ configured: false, total: 0, countries: {}, places: [] }))
     ]);
 
     land = new Float32Array(dots.points.length);
     for (let i = 0; i < dots.points.length; i++) land[i] = (dots.points[i] / dots.scale) * RAD;
 
+    // One beacon per published 1° cell (3+ hubs), and one at each country's
+    // centre for its hubs that aren't in a published cell.
     const counts = Object.entries(usage.countries || {}).filter(([code]) => countries[code]);
-    const max = Math.max(1, ...counts.map(([, n]) => n));
-    markers = counts.map(([code, count]) => ({
-      code, count, name: countries[code][2],
-      lon: countries[code][0] * RAD, lat: countries[code][1] * RAD,
-      r: 2.5 + 4.5 * Math.sqrt(count / max)
-    }));
+    const places = (usage.places || []).filter(p => countries[p.country] && Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    const placed = {};
+    for (const p of places) placed[p.country] = (placed[p.country] || 0) + p.n;
+    const deg = (v, pos, neg) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? pos : neg}`;
+    const raw = [
+      ...places.map(p => ({
+        code: p.country, count: p.n,
+        name: `${countries[p.country][2]}, near ${deg(p.lat, 'N', 'S')} ${deg(p.lon, 'E', 'W')}`,
+        lon: p.lon * RAD, lat: p.lat * RAD
+      })),
+      ...counts
+        .map(([code, count]) => [code, Math.max(0, count - (placed[code] || 0))])
+        .filter(([, rest]) => rest > 0)
+        .map(([code, rest]) => ({
+          code, count: rest,
+          name: placed[code] ? `${countries[code][2]}, elsewhere` : countries[code][2],
+          lon: countries[code][0] * RAD, lat: countries[code][1] * RAD
+        }))
+    ];
+    const max = Math.max(1, ...raw.map(m => m.count));
+    markers = raw.map(m => ({ ...m, r: 2.5 + 4.5 * Math.sqrt(m.count / max) }));
     // Start with the busiest country facing the viewer.
     const busiest = markers.slice().sort((a, b) => b.count - a.count)[0];
     if (busiest) rotation = -busiest.lon;
