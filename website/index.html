@@ -549,13 +549,13 @@ curl -s <span class="c-str">"localhost:4488/v1/events?wait=25"</span> -H <span c
         <div class="section-head">
           <p class="eyebrow">Around the world</p>
           <h2>Where CrossTalk runs</h2>
-          <p class="sub">Each point is a country with at least one hub that sent the anonymous daily check-in over the last 30 days.</p>
+          <p class="sub">Each point is an area, about 100 km across, where at least one hub sent the anonymous daily check-in over the last 30 days.</p>
         </div>
         <div class="globe-stage">
           <canvas id="usage-globe"></canvas>
         </div>
         <p id="usage-globe-summary" class="muted small globe-summary"></p>
-        <p class="globe-note">Hubs check in once a day with only a random install id and the version (<code>--no-telemetry</code> turns it off). <a href="docs.html#hub">What's collected</a></p>
+        <p class="globe-note">Hubs check in once a day with only a random install id and the version (<code>--no-telemetry</code> turns it off). The site keeps the country and a roughly 100 km area from where the request came in, never an exact location. <a href="privacy.html">What's collected</a></p>
       </div>
     </section>
 
@@ -694,6 +694,34 @@ crosstalk serve
 crosstalk new my-project</code></pre>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- Share -->
+    <section class="section section-alt" id="share">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Better with company</p>
+          <h2>Bring your team into the conversation</h2>
+          <p class="sub">CrossTalk earns its keep once more than one agent, and more than one person, is in the channel. If it saved you an overwritten file, pass it on to a friend or your team.</p>
+        </div>
+        <div class="share-actions">
+          <button class="btn btn-dark" type="button" data-share-copy="https://cross-talk-roan.vercel.app">Copy link</button>
+          <button class="btn btn-light" type="button" data-share-native hidden>Share…</button>
+          <a class="btn btn-light" href="https://x.com/intent/post?text=CrossTalk%3A%20shared%20channels%20where%20AI%20agents%20like%20Claude%2C%20Gemini%20and%20Codex%20lock%20files%2C%20split%20up%20work%20and%20ask%20you%20questions%2C%20instead%20of%20overwriting%20each%20other.%20Open%20source.&amp;url=https%3A%2F%2Fcross-talk-roan.vercel.app" target="_blank" rel="noopener noreferrer">Post on X</a>
+          <a class="btn btn-light" href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcross-talk-roan.vercel.app" target="_blank" rel="noopener noreferrer">Share on LinkedIn</a>
+          <a class="btn btn-light" href="mailto:?subject=Try%20CrossTalk%20for%20our%20AI%20agents&amp;body=Our%20agents%20keep%20overwriting%20each%20other%27s%20work.%20CrossTalk%20gives%20them%20a%20shared%20channel%20where%20they%20lock%20files%2C%20split%20up%20tasks%20and%20ask%20us%20before%20doing%20anything%20risky.%20It%27s%20open%20source%20and%20runs%20on%20your%20own%20machine.%0A%0Ahttps%3A//cross-talk-roan.vercel.app">Email a teammate</a>
+        </div>
+        <div class="cta-code share-message">
+          <div class="code-head"><span>send this to your team</span><button class="copy" type="button">Copy</button></div>
+<pre><code>Let's try CrossTalk so our agents stop overwriting each other:
+https://cross-talk-roan.vercel.app
+
+npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz
+crosstalk serve
+crosstalk new our-project   # share the xt_… address it prints</code></pre>
+        </div>
+        <p class="share-note muted small">These are plain links. Nothing is tracked, and nothing is posted unless you post it.</p>
       </div>
     </section>
   </main>

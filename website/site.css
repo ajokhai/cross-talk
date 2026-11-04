@@ -385,3 +385,9 @@ p { margin: 0; }
 .hero-soon { display: inline-flex; align-items: baseline; gap: 6px; color: var(--text-2); text-decoration: none; text-align: left; }
 .hero-soon:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .hero-soon .pill-tag { padding: 1px 8px; font-size: 11px; }
+
+/* Share section */
+.share-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.share-message { max-width: 760px; margin: 32px auto 0; }
+.share-message pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.share-note { text-align: center; margin-top: 16px; }

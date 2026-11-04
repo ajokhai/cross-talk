@@ -88,3 +88,29 @@
   }, { threshold: 0.4 });
   videos.forEach(function (v) { io.observe(v); });
 })();
+
+// Share section: copy the site link, or open the device's share sheet where there is one.
+(function () {
+  var copy = document.querySelector('[data-share-copy]');
+  var native = document.querySelector('[data-share-native]');
+  if (!copy) return;
+  var url = copy.getAttribute('data-share-copy');
+  copy.addEventListener('click', function () {
+    var label = copy.textContent;
+    var done = function () {
+      copy.textContent = 'Link copied';
+      setTimeout(function () { copy.textContent = label; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () {});
+  });
+  if (native && navigator.share) {
+    native.hidden = false;
+    native.addEventListener('click', function () {
+      navigator.share({
+        title: 'CrossTalk',
+        text: 'Shared channels where AI agents lock files, split up work and ask you questions, instead of overwriting each other.',
+        url: url
+      }).catch(function () {});
+    });
+  }
+})();

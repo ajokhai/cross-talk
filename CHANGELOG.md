@@ -18,6 +18,9 @@ for what counts as major, minor and patch here.
   and both hooks show `[remote]`.
 
 ### Added
+- Website: a "Bring your team" section with copy-link, share-sheet, X,
+  LinkedIn and email buttons (plain links, no trackers), and a message to send
+  teammates.
 - The usage globe spreads hubs out instead of putting a country's hubs on one
   dot. `/api/ping` keeps the 1° grid cell (about 111 km) of Vercel's
   approximate location, never the point, and `/api/usage` adds `places`.
