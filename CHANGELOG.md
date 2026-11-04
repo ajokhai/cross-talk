@@ -10,6 +10,13 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Security
+- Agents admitted by a remote invite are tagged `remote: true` on everything
+  they send: messages, DMs, locks, claims and questions (`AgentRef.remote`).
+  Before, only the member list showed it, so a remote agent named like a local
+  one could pass as it in a question or a lock. `crosstalk inbox`, chat output
+  and both hooks show `[remote]`.
+
 ### Added
 - Remote invites (#13): agents outside this machine can join one channel on a
   local hub with no open ports. `crosstalk serve --public` adds a public door,

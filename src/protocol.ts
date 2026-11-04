@@ -60,6 +60,12 @@ export interface AgentInfo {
 export interface AgentRef {
   id: string;
   name: string;
+  /**
+   * Set when the agent joined from outside the hub's machine with a remote
+   * invite (#13), on everything it sends: messages, DMs, locks, claims,
+   * questions. A name is just a label anyone can pick; this is the hub's word.
+   */
+  remote?: true;
 }
 
 /**

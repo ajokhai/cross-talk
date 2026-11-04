@@ -24,8 +24,8 @@ for (const address of addresses) {
     const res = await fetch(`${base}/api/channels/${encodeURIComponent(address)}`, { headers, signal: AbortSignal.timeout(800) });
     if (!res.ok) continue;
     const snap = await res.json();
-    const members = snap.members.map(m => `${quote(m.name, 40)}${m.currentTask ? ` working on ${quote(m.currentTask)}` : ''}`).join(', ');
-    const locks = snap.locks.map(l => `${quote(l.file, 120)} by ${quote(l.holder.name, 40)}`).join(', ');
+    const members = snap.members.map(m => `${quote(m.name, 40)}${m.remote ? ' [remote, outside this machine]' : ''}${m.currentTask ? ` working on ${quote(m.currentTask)}` : ''}`).join(', ');
+    const locks = snap.locks.map(l => `${quote(l.file, 120)} by ${quote(l.holder.name, 40)}${l.holder.remote ? ' [remote]' : ''}`).join(', ');
     lines.push(`${quote(snap.channel.name, 40)} (${address}): ${members || 'nobody'}${locks ? `; locked: ${locks}` : ''}`);
   } catch {}
 }

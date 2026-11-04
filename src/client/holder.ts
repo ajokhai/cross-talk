@@ -139,14 +139,14 @@ export async function ensureHolder(target: HolderTarget, command: string[]): Pro
   fs.closeSync(log);
   const exited = new Promise<number | null>(resolve => child.once('exit', code => resolve(code)));
   const started = Date.now();
-  while (Date.now() - started < 10_000) {
+  while (Date.now() - started < 20_000) {
     if (await holderIfRunning(target, { op: 'ping' }).catch(() => undefined)) return;
     const code = await Promise.race([exited, new Promise<undefined>(r => setTimeout(r, 150))]);
     if (code !== undefined) {
       throw new Error(`The lock holder exited (code ${code}) before it was ready; see ${path.join(holderDir(), 'holder.log')}`);
     }
   }
-  throw new Error(`The lock holder did not start within 10s; see ${path.join(holderDir(), 'holder.log')}`);
+  throw new Error(`The lock holder did not start within 20s; see ${path.join(holderDir(), 'holder.log')}`);
 }
 
 /** True when `file` (repo-relative) has uncommitted changes, staged or not, in the git checkout at `root`. */

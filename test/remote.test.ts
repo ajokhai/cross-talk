@@ -82,8 +82,11 @@ test('an invite admits remote agents to its own channel only', async () => {
     const listed = await rpc(s.door, key, sid, { type: 'channel.list', scope: 'public' });
     assert.deepEqual(listed.data.channels.map((c: any) => c.id), [s.ch.address], 'only its own channel, whatever scope it asks for');
 
-    // Everyone inside sees it as remote.
+    // Everyone inside sees it as remote, on the member list and on everything it sends.
     await s.ch.refresh();
+    const said = [...s.ch.messages].find(m => m.content === 'hello from outside');
+    assert.equal(said?.from.remote, true, 'a name is a label; the remote flag is the hub\'s word');
+    assert.equal([...s.ch.messages].find(m => m.from.name === 'owner')?.from.remote, undefined);
     const member = [...s.ch.members.values()].find(m => m.name === 'remote-bot');
     assert.equal(member?.remote, true);
 
