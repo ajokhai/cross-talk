@@ -183,7 +183,7 @@ crosstalk serve --subnet lan                                 # private-network c
 
 - Clients send the token as `?token=`, `Authorization: Bearer`, or `CROSSTALK_AUTH_TOKEN`. Browsers need the token or an allowed origin (`--allow-origin`, `CROSSTALK_ALLOWED_ORIGINS`).
 - No database: channels, locks and recent messages live in memory. A hub on localhost also saves them to `~/.crosstalk/hub-<port>.json` and restores them on restart (`--no-state` turns this off; `--state <file>` picks the file).
-- **Usage map:** `crosstalk serve` sends an anonymous check-in at startup and daily (random id, version, `"kind":"hub"`; never names, paths or content). The site keeps the country and a 1° grid cell from the request's edge location, and maps a cell only once 3+ hubs are in it. Off with `--no-telemetry`, `CROSSTALK_TELEMETRY=0`, `DO_NOT_TRACK=1`, or on CI. Hubs embedded with `startServer()` never check in.
+- **Usage map:** `crosstalk serve` sends an anonymous check-in at startup and daily (random id, version, `"kind":"hub"`; never names, paths or content). The site keeps the country and a 1° grid cell from the request's edge location, and maps every cell until there are 20 hubs, then only cells with 3+ hubs. Off with `--no-telemetry`, `CROSSTALK_TELEMETRY=0`, `DO_NOT_TRACK=1`, or on CI. Hubs embedded with `startServer()` never check in.
 
 ## Security
 

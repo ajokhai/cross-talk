@@ -8,8 +8,9 @@
  *
  * Self-contained canvas renderer (CSP script-src 'self'): orthographic
  * projection, land drawn as dots from /data/land-dots.json, and beacons sized
- * by distinct hubs over the last 30 days: one per 1° cell holding 3+ hubs, and
- * one at each country's centre for the rest. Drag to spin. Respects
+ * by distinct hubs over the last 30 days: one per published 1° cell (every
+ * cell under 20 hubs, then cells with 3+), and one at each country's centre
+ * for the rest. Drag to spin. Respects
  * prefers-reduced-motion, follows the site's light/dark tokens, and stops
  * drawing while off screen.
  */
@@ -270,7 +271,7 @@
     land = new Float32Array(dots.points.length);
     for (let i = 0; i < dots.points.length; i++) land[i] = (dots.points[i] / dots.scale) * RAD;
 
-    // One beacon per published 1° cell (3+ hubs), and one at each country's
+    // One beacon per published 1° cell, and one at each country's
     // centre for its hubs that aren't in a published cell.
     const counts = Object.entries(usage.countries || {}).filter(([code]) => countries[code]);
     const places = (usage.places || []).filter(p => countries[p.country] && Number.isFinite(p.lat) && Number.isFinite(p.lon));

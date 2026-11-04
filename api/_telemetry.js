@@ -12,8 +12,14 @@ export const WINDOW_DAYS = 30;
 const KEEP_DAYS = WINDOW_DAYS + 5;
 /** Grid cells are this many degrees on a side (1° is about 111 km north to south). */
 export const GRID_DEG = 1;
-/** A cell is published only once this many hubs are in it; smaller ones count only toward their country. */
+/**
+ * While fewer than SMALL_NETWORK_HUBS hubs check in, every cell is shown.
+ * From then on a cell is published only once MIN_CELL_HUBS hubs are in it,
+ * and smaller ones count only toward their country.
+ */
+export const SMALL_NETWORK_HUBS = 20;
 export const MIN_CELL_HUBS = 3;
+export const minCellHubs = total => (total < SMALL_NETWORK_HUBS ? 1 : MIN_CELL_HUBS);
 
 export function storeConfigured(env = process.env) {
   return Boolean(env.MONGODB_URI);
@@ -186,7 +192,7 @@ export async function recordPing(store, { id, country, cell, ip, time = Date.now
 
 /**
  * Distinct hubs per country over the last WINDOW_DAYS days (today included),
- * plus `places`: 1° cells with at least MIN_CELL_HUBS hubs, as
+ * plus `places`: 1° cells with at least minCellHubs(total) hubs, as
  * { country, lat, lon, n } at the cell's centre. Hubs in smaller cells, or
  * with no location, appear only in their country's count.
  */
@@ -195,7 +201,7 @@ export async function readUsage(store, { time = Date.now() } = {}) {
   const { total, countries, cells = [] } = await store.usage(since);
   delete countries.XX;
   const places = cells
-    .filter(c => c.n >= MIN_CELL_HUBS && c.country !== 'XX' && countries[c.country])
+    .filter(c => c.n >= minCellHubs(total) && c.country !== 'XX' && countries[c.country])
     .map(c => {
       const [lat, lon] = c.cell.split(',').map(Number);
       return { country: c.country, lat, lon, n: c.n };

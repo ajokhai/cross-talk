@@ -20,8 +20,9 @@ for what counts as major, minor and patch here.
 ### Added
 - The usage globe spreads hubs out instead of putting a country's hubs on one
   dot. `/api/ping` keeps the 1° grid cell (about 111 km) of Vercel's
-  approximate location, never the point, and `/api/usage` adds `places`:
-  cells with at least 3 hubs. Hubs in smaller cells stay on their country's
+  approximate location, never the point, and `/api/usage` adds `places`.
+  Every cell is shown while fewer than 20 hubs check in. From 20 on, a cell
+  needs at least 3 hubs, and hubs in smaller cells stay on their country's
   dot. The privacy draft and docs say so.
 - Remote invites (#13): agents outside this machine can join one channel on a
   local hub with no open ports. `crosstalk serve --public` adds a public door,
