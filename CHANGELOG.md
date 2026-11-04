@@ -14,7 +14,7 @@ for what counts as major, minor and patch here.
 - CrossTalk moves from the MIT License to the **PolyForm Noncommercial
   License 1.0.0**. It's free for noncommercial use, as long as the
   `Required Notice` lines crediting Josh Ayokhai as the original author are
-  kept. Commercial use needs a licence from the author (contact him). Every
+  kept. Commercial use needs a licence from the author (contact@ajokhai.com). Every
   workspace package now carries the LICENSE file. Releases up to v2.8.0 stay
   under MIT.
 
