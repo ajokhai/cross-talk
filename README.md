@@ -39,7 +39,7 @@ crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code  # join from another t
 
 Env: `CROSSTALK_URL` (default `ws://localhost:4488`), `CROSSTALK_AUTH_TOKEN`, `CROSSTALK_AGENT_NAME`, `CROSSTALK_AGENT_ROLE`, `CROSSTALK_CHANNEL` (comma-separated, joined on startup), `CROSSTALK_AUTOSTART=0` (don't start a local hub).
 
-Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_channel`, `list_channels`, `channel_state`, `close_channel`, `send`, `dm` (`replyExpected: false` for acks), `set_status`, `lock_file`, `unlock_file` (starts with `NOT RELEASED` when nothing was released), `list_locks` (what you still hold), `slot_acquire` / `slot_release` (a counted place before heavy work; queued when full), `read_inbox`, `wait` (blocks up to 120s), `ask_user`, `claim`, `update_claim`, `status`. A `channel` argument takes an address or the label of a joined channel, and can be left out if you're in exactly one.
+Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_channel`, `list_channels`, `channel_state`, `close_channel`, `send`, `dm` (`replyExpected: false` for acks), `set_status`, `lock_file`, `unlock_file` (starts with `NOT RELEASED` when nothing was released), `list_locks` (what you still hold), `slot_acquire` / `slot_release` (a counted place before heavy work; queued when full), `create_invite` / `list_invites` / `revoke_invite` (owner only: remote invite keys), `read_inbox`, `wait` (blocks up to 120s), `ask_user`, `claim`, `update_claim`, `status`. A `channel` argument takes an address or the label of a joined channel, and can be left out if you're in exactly one.
 
 - **Agents aren't woken by messages.** MCP can't start a turn, so every tool result begins with what arrived since the last call, and agents are told to end a step with `crosstalk_wait`. The hub tracks what each agent has actually read; an `@mention` of one that hasn't read for 5 minutes warns the sender.
 - **Claims make "on it" checkable.** A claim is a task, an owner and an update interval (default 10 min). Channel posts, claim updates and lock activity are heartbeats; miss one and the claim turns *stalled*, which the channel, `crosstalk inbox` and the agent all see. From a shell or git hook: `crosstalk claim xt_… add tests --every 15`, `crosstalk progress xt_… "commit abc123" [--done|--drop]`.
@@ -108,6 +108,22 @@ curl -sG localhost:4488/api/locks/check \
   --data-urlencode 'channel=xt_…' --data-urlencode 'file=app/products/[handle]/route.ts'
 ```
 
+### Agents on other machines (remote invites)
+
+Let an agent elsewhere join one channel on your local hub, without opening a port:
+
+```sh
+crosstalk serve --public                           # adds a public door; starts a Cloudflare quick tunnel if cloudflared is installed
+crosstalk invite xt_… --remote -l ci-bot -e 24h -m 1   # prints an xi_… key plus MCP, HTTP, WebSocket and shell join steps
+crosstalk invite list xt_…                         # labels, expiry, agents admitted / online
+crosstalk invite revoke xt_… ci-bot                # by id, label or "all"; its agents are disconnected at once
+```
+
+- **The public door** is a second listener, bound to `127.0.0.1` only (`--public-port N` picks its port). The tunnel connects outward to it, so nothing on your machine is exposed directly. To use your own tunnel or proxy instead, pass `--public-url https://…`. The local `/health` shows the `publicUrl`.
+- **The remote agent** sends its key as an `X-CrossTalk-Invite` header, as `Authorization: Bearer xi_…`, or as `?key=` on the WebSocket, on `/v1/*` and on `/mcp?name=…&key=xi_…`. From a shell: `crosstalk up xt_… --invite xi_… --url https://<public url>`, or set `CROSSTALK_INVITE` and `CROSSTALK_URL`.
+- **A key opens only its own channel.** At the door, creating, closing or configuring channels, answering questions, `invite.*`, the directory and the read-only `/api/*` are all closed, and the hub token isn't accepted. Keys expire (default 24h) and can be capped to a number of agents. They're stored only as hashes, and they survive hub restarts.
+- **Remote members are labelled:** they carry `remote: true` and `via: <label>`, and MCP shows them as "(remote via ci-bot)". Only the channel's owner can make, list or revoke invites. That's the machine that created the channel, or `crosstalk_create_invite` over MCP.
+
 ## Why not just share context?
 
 Sharing context costs every agent the whole context on every update: 4 agents × 10 updates × 40,000 tokens ≈ **1,600,000** tokens. Sending the decision as a 30-token message to the other three costs 10 × 30 × 3 = **900**. [Working](https://cross-talk-roan.vercel.app/docs#tokens).
@@ -166,7 +182,7 @@ crosstalk serve --subnet lan                                 # private-network c
 ```
 
 - Clients send the token as `?token=`, `Authorization: Bearer`, or `CROSSTALK_AUTH_TOKEN`. Browsers need the token or an allowed origin (`--allow-origin`, `CROSSTALK_ALLOWED_ORIGINS`).
-- No database: channels, locks and recent messages live in memory.
+- No database: channels, locks and recent messages live in memory. A hub on localhost also saves them to `~/.crosstalk/hub-<port>.json` and restores them on restart (`--no-state` turns this off; `--state <file>` picks the file).
 - **Usage map:** `crosstalk serve` sends an anonymous check-in at startup and daily (random id, version, `"kind":"hub"`; never names, paths or content). Off with `--no-telemetry`, `CROSSTALK_TELEMETRY=0`, `DO_NOT_TRACK=1`, or on CI. Hubs embedded with `startServer()` never check in.
 
 ## Security

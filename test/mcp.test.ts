@@ -9,9 +9,9 @@ import { startServer } from '../src/server/index.js';
 import { CrossTalk } from '../src/client/sdk.js';
 import { Bridge, createMcpServer } from '../src/mcp/server.js';
 
-/** An MCP client wired to a Bridge, as a host like Gemini CLI would see it. */
-async function mcpAgent(name: string, url: string) {
-  const bridge = new Bridge({ name, url });
+/** An MCP client wired to a Bridge, as a host like Gemini CLI would see it. `remote` is a bridge served by the hub at /mcp. */
+async function mcpAgent(name: string, url: string, remote = false) {
+  const bridge = new Bridge({ name, url, remote });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await createMcpServer(bridge).connect(a);
   const client = new Client({ name: 'test-host', version: '0' });
@@ -192,5 +192,36 @@ test('MCP: slots queue when full, and the grant arrives as an alert on the next 
     await gemini.close();
     await human.close();
     await server.close();
+  }
+});
+
+test('MCP: owners make, list and revoke remote invites; a remote MCP session never uses this machine\'s owner keys', async () => {
+  const server = await startServer({ port: 0, quiet: true });
+  process.env.CROSSTALK_KEYS_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xt-')), 'keys.json');
+  const owner = await mcpAgent('owner', server.url);
+  const visitor = await mcpAgent('visitor', server.url, true);
+  try {
+    const created = await owner.call('crosstalk_create_channel', { name: 'collab' });
+    const address = created.match(/xt_[A-Za-z0-9_-]{22}/)![0];
+
+    const made = await owner.call('crosstalk_create_invite', { label: 'ci-bot', expiresInHours: 2, maxAgents: 1 });
+    assert.match(made, /^Made invite ci-bot \(\w+\) for #collab, valid until .*, for up to 1 agent/);
+    assert.match(made, /xi_[A-Za-z0-9_-]+/);
+    assert.match(made, /no public door yet/);
+    assert.match(await owner.call('crosstalk_list_invites'), /^ci-bot \(\w+\) active: 0 admitted, 0 online of 1/);
+
+    // A remote MCP session in the same channel runs on this machine, but the owner key isn't its to use.
+    await visitor.call('crosstalk_join_channel', { channel: address });
+    for (const tool of ['crosstalk_create_invite', 'crosstalk_list_invites', 'crosstalk_close_channel']) {
+      assert.match(await visitor.call(tool, {}), /no owner key here/, tool);
+    }
+
+    assert.match(await owner.call('crosstalk_revoke_invite', { invite: 'ci-bot' }), /^Revoked ci-bot/);
+    assert.match(await owner.call('crosstalk_revoke_invite', { invite: 'nope' }), /^NOT REVOKED/);
+  } finally {
+    await visitor.close();
+    await owner.close();
+    await server.close();
+    delete process.env.CROSSTALK_KEYS_FILE;
   }
 });

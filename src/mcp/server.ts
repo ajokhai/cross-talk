@@ -2,7 +2,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { CrossTalk, CrossTalkError, type Channel, type ChannelLost, type LocksLost } from '../client/sdk.js';
 import { VERSION } from '../version.js';
-import { inviteText } from '../client/invite.js';
+import { inviteText, remoteInviteText } from '../client/invite.js';
+import { httpBase } from '../client/http.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
 import type { ChannelLimits, ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 
@@ -333,6 +334,16 @@ function formatLock(l: FileLock): string {
   return `${l.file} — ${l.holder.name}: ${l.reason} (${secs}s left)`;
 }
 
+/**
+ * The owner key saved on this machine for a channel. Never over remote MCP:
+ * that bridge runs on the hub's machine for someone else (for example an agent
+ * admitted by a remote invite), so this machine's keys aren't theirs to use.
+ */
+function ownedKey(bridge: Bridge, ch: Channel): { key: string } | undefined {
+  if (bridge.options.remote) return undefined;
+  return loadOwnedChannels().find(c => c.address === ch.address);
+}
+
 /** Normalizes a lock path the way the hub does, so local lookups match its keys. */
 function lockPath(file: string): string {
   const cleaned = file.trim().replace(/\\/g, '/');
@@ -385,7 +396,7 @@ function formatChannel(client: CrossTalk, ch: Channel, recent = 15): string {
     'Members:',
     ...[...ch.members.values()].map(m => {
       const a = attention.get(m.id);
-      return `  ${m.name} (${m.id}) ${m.status}${m.currentTask ? `: ${m.currentTask}` : ''}${a && m.id !== client.agent.id ? ` — ${formatAttention(a)}` : ''}`;
+      return `  ${m.name} (${m.id})${m.remote ? ` (remote via ${m.via || 'invite'})` : ''} ${m.status}${m.currentTask ? `: ${m.currentTask}` : ''}${a && m.id !== client.agent.id ? ` — ${formatAttention(a)}` : ''}`;
     }),
     `Locks: ${ch.locks.size ? [...ch.locks.values()].map(formatLock).join('; ') : 'none'}`,
     `Claims: ${ch.claims.size ? [...ch.claims.values()].map(formatClaim).join('; ') : 'none'}`,
@@ -596,6 +607,29 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: 'crosstalk_create_invite',
+    description: 'Owner only: make a remote invite key (xi_…) that lets one agent on another machine join this channel through the hub\'s public door (`crosstalk serve --public`). Returns join steps for your user to send privately. Never post the key in a channel.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: channelArg,
+        label: { type: 'string', description: 'Name shown on the agents it admits, e.g. ci-bot' },
+        expiresInHours: { type: 'number', description: 'Default 24' },
+        maxAgents: { type: 'number', description: 'How many agents the key can admit' }
+      }
+    }
+  },
+  {
+    name: 'crosstalk_list_invites',
+    description: 'Owner only: the remote invites for a channel, with status and how many agents each admitted.',
+    inputSchema: { type: 'object', properties: { channel: channelArg } }
+  },
+  {
+    name: 'crosstalk_revoke_invite',
+    description: 'Owner only: revoke a remote invite by id, label or "all". Agents it admitted are disconnected at once.',
+    inputSchema: { type: 'object', properties: { channel: channelArg, invite: { type: 'string' } }, required: ['invite'] }
+  },
+  {
     name: 'crosstalk_slot_release',
     description: 'Give up your place in a slot, or your place in its queue.',
     inputSchema: {
@@ -763,7 +797,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_close_channel': {
       const ch = pickChannel(client, args.channel);
-      const owned = loadOwnedChannels().find(c => c.address === ch.address);
+      const owned = ownedKey(bridge, ch);
       if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there is no owner key here to close it with. Its creator can close it with \`crosstalk close ${ch.address}\`.`);
       await ch.close(owned.key);
       forgetOwnedChannels([ch.address]);
@@ -837,6 +871,48 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       if (res.released) return `Released your place in slot ${name}.`;
       if (res.dequeued) return `Left the queue for slot ${name}.`;
       return `NOT RELEASED: you held no place in slot ${name} in #${ch.name}, and weren't queued for it.`;
+    }
+    case 'crosstalk_create_invite': {
+      const ch = pickChannel(client, args.channel);
+      const owned = ownedKey(bridge, ch);
+      if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there's no owner key here to make invites with. Its creator can run \`crosstalk invite ${ch.address} --remote\`.`);
+      const hours = Number(args.expiresInHours);
+      const { key, invite } = await client.request('invite.create', {
+        channel: ch.address,
+        ownerKey: owned.key,
+        label: str(args.label) || undefined,
+        expiresInSeconds: Number.isFinite(hours) && hours > 0 ? Math.round(hours * 3600) : undefined,
+        maxAgents: Number(args.maxAgents) || undefined
+      });
+      const health = await fetch(`${httpBase(client.url)}/health`).then(r => r.json() as Promise<{ publicUrl?: string }>).catch(() => ({} as { publicUrl?: string }));
+      const door = health.publicUrl
+        ? ''
+        : '\n\nThis hub has no public door yet, so the key won\'t work until your user restarts it with `crosstalk serve --public` (or --public-url <their tunnel>).';
+      // The key is a credential: hand it to the user to pass on, not to the channel.
+      return `Made invite ${invite.label} (${invite.id}) for #${ch.name}${invite.expiresAt ? `, valid until ${new Date(invite.expiresAt).toISOString()}` : ''}${invite.maxAgents ? `, for up to ${invite.maxAgents} agent(s)` : ''}. Give this to your user to send to the remote agent privately. Don't post it in a channel. Revoke it with crosstalk_revoke_invite.${door}\n\n${remoteInviteText({ address: ch.address, publicUrl: health.publicUrl ?? '<public URL>', key, expiresAt: invite.expiresAt })}`;
+    }
+    case 'crosstalk_list_invites': {
+      const ch = pickChannel(client, args.channel);
+      const owned = ownedKey(bridge, ch);
+      if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there's no owner key here to list its invites.`);
+      const { invites } = await client.request('invite.list', { channel: ch.address, ownerKey: owned.key });
+      if (!invites.length) return `No invites for #${ch.name}.`;
+      return invites.map(i => `${i.label} (${i.id}) ${i.status}: ${i.admitted} admitted, ${i.online} online${i.maxAgents ? ` of ${i.maxAgents}` : ''}${i.expiresAt ? `, expires ${new Date(i.expiresAt).toISOString()}` : ''}`).join('\n');
+    }
+    case 'crosstalk_revoke_invite': {
+      const ch = pickChannel(client, args.channel);
+      const owned = ownedKey(bridge, ch);
+      if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there's no owner key here to revoke its invites.`);
+      let result: { revoked: { label: string; id: string }[]; disconnected: number };
+      try {
+        result = await client.request('invite.revoke', { channel: ch.address, ownerKey: owned.key, invite: str(args.invite) });
+      } catch (err) {
+        if (err instanceof CrossTalkError && err.code === 'not_found') result = { revoked: [], disconnected: 0 };
+        else throw err;
+      }
+      const { revoked, disconnected } = result;
+      if (!revoked.length) return `NOT REVOKED: no invite in #${ch.name} matches "${str(args.invite)}". List them with crosstalk_list_invites.`;
+      return `Revoked ${revoked.map(i => `${i.label} (${i.id})`).join(', ')}; ${disconnected} agent(s) disconnected.`;
     }
     case 'crosstalk_list_locks': {
       const channels = args.channel !== undefined ? [pickChannel(client, args.channel)] : [...client.channels.values()];

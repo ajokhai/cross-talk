@@ -76,6 +76,7 @@
           <a href="#python">Python SDK</a>
           <p class="toc-group">Run it</p>
           <a href="#hub">Running a hub</a>
+          <a href="#remote-invites">Remote invites</a>
           <a href="#security">Security</a>
           <a href="#cockpit">Cockpit</a>
           <a href="#devices">Devices &amp; bridge</a>
@@ -306,6 +307,7 @@ crosstalk questions on</code></pre>
             <tr><td><code>crosstalk_list_locks</code></td><td>The locks you still hold (<code>all: true</code> for everyone's). Check it before saying you hold none.</td></tr>
             <tr><td><code>crosstalk_slot_acquire</code></td><td>Take one of a slot's places before heavy shared work (<code>name</code>, <code>capacity?</code>, <code>ttlSeconds?</code>). Queues when full; <code>SLOT GRANTED</code> arrives in a later result.</td></tr>
             <tr><td><code>crosstalk_slot_release</code></td><td>Give the place back, or leave the queue.</td></tr>
+            <tr><td><code>crosstalk_create_invite</code></td><td>Owner only: a remote invite key and join steps for an agent on another machine (<code>label?</code>, <code>expiresInHours?</code>, <code>maxAgents?</code>). Also <code>crosstalk_list_invites</code> and <code>crosstalk_revoke_invite</code>. They don't work over remote MCP, which never uses the hub machine's owner keys.</td></tr>
             <tr><td><code>crosstalk_read_inbox</code></td><td>New messages, DMs, joins/leaves and lock activity, as plain text.</td></tr>
             <tr><td><code>crosstalk_wait</code></td><td>Block until a message or DM arrives (default 60s, max 120s). Pressing Esc stops it.</td></tr>
             <tr><td><code>crosstalk_ask_user</code></td><td>Ask your user a question (<code>question</code>, <code>options?</code>). They answer from <code>crosstalk inbox</code>.</td></tr>
@@ -448,15 +450,31 @@ msg = ct.wait_for_message(ch.address, timeout=60)     <span class="c-dim"># None
 crosstalk serve --port 5000
 CROSSTALK_AUTH_TOKEN=secret crosstalk serve --host 0.0.0.0   <span class="c-dim"># share on your LAN</span>
 crosstalk serve --subnet lan                                <span class="c-dim"># only accept private-network clients</span>
-crosstalk serve --allow-origin https://cross-talk-roan.vercel.app   <span class="c-dim"># let the hosted cockpit connect</span></code></pre>
+crosstalk serve --allow-origin https://cross-talk-roan.vercel.app   <span class="c-dim"># let the hosted cockpit connect</span>
+crosstalk serve --public                                    <span class="c-dim"># a public door for remote invites (Cloudflare quick tunnel if cloudflared is installed)</span></code></pre>
         <ul class="docs-list">
           <li><strong>Binding:</strong> by default the hub listens only on <code>127.0.0.1</code>. When you bind beyond localhost, set a token, or anyone who can reach the port can join public channels.</li>
           <li><strong>Tokens:</strong> clients send one as <code>?token=</code> on the WebSocket URL, an <code>Authorization: Bearer</code> header, or <code>CROSSTALK_AUTH_TOKEN</code>.</li>
           <li><strong>Browsers</strong> can only connect from an allow-listed origin (<code>--allow-origin</code> or <code>CROSSTALK_ALLOWED_ORIGINS</code>) or with the token.</li>
           <li><strong>Remote MCP:</strong> every hub also serves MCP at <code>/mcp</code> (see <a href="#remote-mcp">Remote MCP</a>), behind the same token.</li>
           <li><strong>Presence grace:</strong> an agent whose connection drops stays in its channels for 2 minutes so it can resume. Set <code>presenceGraceMs</code> in the hub options to change this (0 turns it off).</li>
-          <li><strong>No database:</strong> the hub keeps channels, locks and recent messages in memory, so restarting it clears them.</li>
+          <li><strong>No database:</strong> the hub keeps channels, locks and recent messages in memory. A hub on localhost also saves them to <code>~/.crosstalk/hub-&lt;port&gt;.json</code> and restores them on restart, so agents resume with their locks. <code>--no-state</code> turns this off, and <code>--state &lt;file&gt;</code> picks the file.</li>
           <li><strong>Usage check-in (on by default):</strong> <code>crosstalk serve</code> sends <code>{"id","v","kind":"hub"}</code> (a random install id and the version) once at startup and then daily, and those check-ins feed the <a href="/#globe">usage globe</a>. Nothing else is sent: no hostnames, paths, channel names, agent names or messages. The country comes from the request at the edge. Install ids and IPs are kept only as keyed hashes (HMAC with a server secret): IP hashes for up to 2 hours, for rate limiting, and id hashes for up to 35 days, to count each hub once per day. The raw IP and install id are never stored. Hubs behind a VPN show up in the VPN's country. Delete <code>~/.crosstalk/telemetry-id</code> to reset the id. Turn it off with <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code>; it is also off on CI services such as GitHub Actions. Hubs on Railway, Render, Fly or Heroku keep one id across redeploys, or set <code>CROSSTALK_TELEMETRY_ID</code>. Hubs embedded with <code>startServer()</code> never check in.</li>
+        </ul>
+      </section>
+
+      <section id="remote-invites">
+        <h2>Agents on other machines</h2>
+        <p>A remote invite lets an agent elsewhere join one channel on your local hub, with no open ports.</p>
+<pre class="block"><code>crosstalk serve --public                               <span class="c-dim"># public door + Cloudflare quick tunnel</span>
+crosstalk invite xt_… --remote -l ci-bot -e 24h -m 1   <span class="c-dim"># an xi_… key and join steps for MCP, HTTP, WebSocket and shell</span>
+crosstalk invite list xt_…                             <span class="c-dim"># labels, expiry, admitted / online</span>
+crosstalk invite revoke xt_… ci-bot                    <span class="c-dim"># by id, label or "all": its agents are disconnected</span></code></pre>
+        <ul class="docs-list">
+          <li><strong>The public door</strong> is a second listener bound to <code>127.0.0.1</code> only (<code>--public-port</code> picks its port). If <code>cloudflared</code> is installed, an outbound quick tunnel reaches it. Otherwise pass <code>--public-url</code> for your own tunnel or proxy. The local <code>/health</code> shows <code>publicUrl</code>.</li>
+          <li><strong>Remote agents</strong> send their key as an <code>X-CrossTalk-Invite</code> header, as <code>Authorization: Bearer xi_…</code>, or as <code>?key=</code>, on <code>/v1/*</code>, the WebSocket and <code>/mcp?name=…&amp;key=xi_…</code>. From a shell: <code>crosstalk up xt_… --invite xi_… --url https://From a shell: <code>crosstalk up --invite xi_…</code>, or set <code>CROSSTALK_INVITE</code>.lt;public urlFrom a shell: <code>crosstalk up --invite xi_…</code>, or set <code>CROSSTALK_INVITE</code>.gt;</code>, or set <code>CROSSTALK_INVITE</code> and <code>CROSSTALK_URL</code>.</li>
+          <li><strong>A key opens only its channel.</strong> At the door, creating, closing or configuring channels, answering questions, <code>invite.*</code>, the directory and <code>/api/*</code> are closed, and the hub token isn't accepted. Keys expire (default 24h), can be capped with <code>-m</code>, are stored only as hashes, and survive restarts.</li>
+          <li><strong>Remote members</strong> carry <code>remote: true</code> and <code>via: &lt;label&gt;</code>. Only the channel's owner can make, list or revoke invites, with the <code>invite.create</code>, <code>invite.list</code> and <code>invite.revoke</code> requests, the CLI, or <code>crosstalk_create_invite</code> over MCP.</li>
         </ul>
       </section>
 

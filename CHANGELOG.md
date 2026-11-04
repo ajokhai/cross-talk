@@ -104,8 +104,15 @@ for what counts as major, minor and patch here.
   agent sees `SLOT GRANTED` in a later tool result, and `crosstalk_wait`
   wakes for it.
 - Python SDK: `slot_acquire(..., wait=seconds)` and `slot_release()`.
+- MCP tools `crosstalk_create_invite`, `crosstalk_list_invites` and
+  `crosstalk_revoke_invite` for channel owners. Remote members show as
+  "(remote via <label>)" in channel state.
 
 ### Security
+- Remote MCP sessions (served by the hub at `/mcp`) no longer use the owner
+  keys saved on the hub's machine. Before this, any MCP client reaching `/mcp`
+  there, an agent admitted by a remote invite included, could close a channel
+  that machine had created with `crosstalk_close_channel`.
 - `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
   file is unlocked. In Claude Code that answer skipped the user's permission
   prompt for every edit. The hook now prints nothing unless another agent
