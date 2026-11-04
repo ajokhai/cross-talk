@@ -243,14 +243,14 @@ export class Bridge {
 
 function describeEvent(f: ServerFrame): { channel: string; text: string } | undefined {
   switch (f.type) {
-    case 'member.joined': return { channel: f.channel, text: `${f.agent.name} (${f.agent.id}) joined` };
-    case 'member.left': return { channel: f.channel, text: `${f.agent.name} ${f.reason === 'left' ? 'left' : 'disconnected'}` };
-    case 'lock.acquired': return { channel: f.lock.channel, text: `${f.lock.holder.name} locked ${f.lock.file}: ${f.lock.reason}` };
+    case 'member.joined': return { channel: f.channel, text: `${who(f.agent)} (${f.agent.id}) joined` };
+    case 'member.left': return { channel: f.channel, text: `${who(f.agent)} ${f.reason === 'left' ? 'left' : 'disconnected'}` };
+    case 'lock.acquired': return { channel: f.lock.channel, text: `${who(f.lock.holder)} locked ${f.lock.file}: ${f.lock.reason}` };
     case 'lock.released': return { channel: f.channel, text: `${f.file} unlocked (${f.reason})` };
-    case 'lock.contended': return { channel: f.lock.channel, text: `${f.requester.name} wants ${f.lock.file}, which you hold: ${f.reason}` };
-    case 'question.asked': return { channel: f.question.channel, text: `${f.question.from.name} asked the owner: ${f.question.question}` };
+    case 'lock.contended': return { channel: f.lock.channel, text: `${who(f.requester)} wants ${f.lock.file}, which you hold: ${f.reason}` };
+    case 'question.asked': return { channel: f.question.channel, text: `${who(f.question.from)} asked the owner: ${f.question.question}` };
     case 'channel.updated': return { channel: f.channel.id, text: `questions are now ${f.channel.questions}` };
-    case 'channel.closed': return { channel: f.channel, text: `the channel was closed by ${f.by.name}; you are no longer in it` };
+    case 'channel.closed': return { channel: f.channel, text: `the channel was closed by ${who(f.by)}; you are no longer in it` };
     case 'claim.updated': {
       const c = f.claim;
       const what = c.status === 'active' && c.lastHeartbeat === c.createdAt
@@ -258,7 +258,7 @@ function describeEvent(f: ServerFrame): { channel: string; text: string } | unde
         : c.status === 'active' ? `is back on "${c.task}"`
         : c.status === 'stalled' ? `has gone quiet on "${c.task}": no update since ${ago(c.lastHeartbeat)}, it may be idle`
         : c.status === 'done' ? `finished "${c.task}"` : `dropped "${c.task}"`;
-      return { channel: c.channel, text: `${c.owner.name} ${what}` };
+      return { channel: c.channel, text: `${who(c.owner)} ${what}` };
     }
     default: return undefined;
   }
@@ -283,12 +283,12 @@ function formatItem(item: InboxItem, client?: CrossTalk): string {
     case 'message': {
       const m = item.message;
       const text = m.kind === 'shorthand' && m.shorthand ? `${m.shorthand.raw}  (${m.content})` : m.content;
-      return `[${time(m.timestamp)}] ${label(client, m.channel)} ${m.from.name} (${m.from.id}): ${body(text)}`;
+      return `[${time(m.timestamp)}] ${label(client, m.channel)} ${who(m.from)} (${m.from.id}): ${body(text)}`;
     }
     case 'dm': {
       const m = item.message;
       const hint = m.replyExpected ? '' : ' [no reply needed]';
-      return `[${time(m.timestamp)}] DM from ${m.from.name} (${m.from.id}): ${body(m.content)}${hint}`;
+      return `[${time(m.timestamp)}] DM from ${who(m.from)} (${m.from.id}): ${body(m.content)}${hint}`;
     }
     case 'event':
       return `[${time(item.at)}] ${label(client, item.channel)} · ${body(item.text)}`;
@@ -329,9 +329,14 @@ function formatInbox(items: InboxItem[], client: CrossTalk): string {
   ].join('\n');
 }
 
+/** An agent's name, tagged [remote] when the hub says it came in by a remote invite (names alone can be copied). */
+function who(ref: { name: string; remote?: boolean }): string {
+  return ref.remote ? `${ref.name} [remote]` : ref.name;
+}
+
 function formatLock(l: FileLock): string {
   const secs = Math.max(0, Math.round((l.expiresAt - Date.now()) / 1000));
-  return `${l.file} — ${l.holder.name}: ${l.reason} (${secs}s left)`;
+  return `${l.file} — ${who(l.holder)}: ${l.reason} (${secs}s left)`;
 }
 
 /**
@@ -362,7 +367,7 @@ function mineSuffix(client: CrossTalk, ch: Channel): string {
 function formatClaim(c: TaskClaim): string {
   const due = c.nextUpdateBy - Date.now();
   const when = due >= 0 ? `next update due in ${Math.ceil(due / 60_000)}m` : `update overdue by ${Math.ceil(-due / 60_000)}m`;
-  return `${c.id} ${c.owner.name}: "${c.task}" — ${c.status}, ${when}${c.note ? `; last note: ${c.note}` : ''}`;
+  return `${c.id} ${who(c.owner)}: "${c.task}" — ${c.status}, ${when}${c.note ? `; last note: ${c.note}` : ''}`;
 }
 
 /** "on it", "I'll take this", "working on it": a promise that should be a claim. */
@@ -823,7 +828,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       } catch (err) {
         if (err instanceof CrossTalkError && err.code === 'lock_held') {
           const held = err.details as FileLock;
-          return `NOT LOCKED: ${formatLock(held)}. Do not edit this file. DM ${held.holder.name} (${held.holder.id}) or wait for the lock to be released.`;
+          return `NOT LOCKED: ${formatLock(held)}. Do not edit this file. DM ${who(held.holder)} (${held.holder.id}) or wait for the lock to be released.`;
         }
         throw err;
       }
@@ -841,7 +846,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       } catch (err) {
         if (err instanceof CrossTalkError && err.code === 'forbidden') {
           const held = err.details as FileLock | undefined;
-          if (held && held.holder.name === client.agent.name) {
+          if (held && held.holder.name === client.agent.name && !held.holder.remote) {
             return `NOT RELEASED: ${formatLock(held)}. It was taken with \`crosstalk lock\` under your name, by a separate holder process, so release it from a shell with \`crosstalk unlock ${file}\`.${mineSuffix(client, ch)}`;
           }
           return `NOT RELEASED: ${held ? formatLock(held) : `${file} is held by someone else`}. That lock isn't yours, so nothing changed.${mineSuffix(client, ch)}`;
@@ -862,7 +867,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
         const until = Math.max(...res.granted.holders.filter(h => h.holder.id === client.agent.id).map(h => h.expiresAt));
         return `You hold a place in slot ${name} in #${ch.name} (${res.granted.holders.length} of ${res.granted.capacity} taken) until ${new Date(until).toISOString()}. Release it with crosstalk_slot_release when done.`;
       }
-      return `QUEUED: slot ${name} is full (${res.slot.holders.map(h => h.holder.name).join(', ')}). You are number ${res.position} in line. Don't start the heavy work yet: "SLOT GRANTED" will arrive in a later tool result, or call crosstalk_wait.`;
+      return `QUEUED: slot ${name} is full (${res.slot.holders.map(h => who(h.holder)).join(', ')}). You are number ${res.position} in line. Don't start the heavy work yet: "SLOT GRANTED" will arrive in a later tool result, or call crosstalk_wait.`;
     }
     case 'crosstalk_slot_release': {
       const ch = pickChannel(client, args.channel);
