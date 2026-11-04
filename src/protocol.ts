@@ -50,6 +50,10 @@ export interface AgentInfo {
   currentTask: string;
   connectedAt: number;
   lastSeen: number;
+  /** Joined from outside this hub's machine with a remote invite (#13). */
+  remote?: boolean;
+  /** The label of the invite a remote agent joined with. */
+  via?: string;
 }
 
 /** A reference to the sender embedded in messages; kept small on purpose. */
@@ -111,6 +115,22 @@ export interface Slot {
   holders: SlotHold[];
   /** Agents queued for it. */
   waiting: number;
+}
+
+/** A remote invite as its owner sees it. The key itself is never shown again after creation. */
+export interface InviteInfo {
+  /** First 12 hex characters of the key's hash; enough to revoke it by. */
+  id: string;
+  channel: string;
+  label: string;
+  createdAt: number;
+  expiresAt?: number;
+  maxAgents?: number;
+  /** Agents admitted so far. */
+  admitted: number;
+  /** Of those, how many are connected now. */
+  online: number;
+  status: 'active' | 'expired' | 'revoked';
 }
 
 export interface FileLock {
@@ -281,6 +301,11 @@ export type RequestFrame =
   | { type: 'dm.send'; id: string; to: string; content: string; text?: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
   | { type: 'lock.acquire'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
   | { type: 'lock.release'; id: string; channel: string; file: string }
+  /** Owner only: a key that lets agents outside this machine join this one channel through the hub's public listener (#13). */
+  | { type: 'invite.create'; id: string; channel: string; ownerKey: string; label?: string; expiresInSeconds?: number; maxAgents?: number }
+  | { type: 'invite.list'; id: string; channel: string; ownerKey: string }
+  /** `invite` is an id prefix (from invite.list), a label, or "all". Agents admitted with it are disconnected at once. */
+  | { type: 'invite.revoke'; id: string; channel: string; ownerKey: string; invite: string }
   /**
    * Takes the lock if it's free, or queues for it. Queued agents get a
    * `lock.granted` event, in order, when the lock is released or expires.
@@ -333,6 +358,10 @@ export interface ResultData {
   'shorthand.send': ChannelMessage;
   'dm.send': DirectMessage;
   'lock.acquire': FileLock;
+  /** `key` (xi_…) is shown once; the hub keeps only its hash. */
+  'invite.create': { key: string; invite: InviteInfo };
+  'invite.list': { invites: InviteInfo[] };
+  'invite.revoke': { revoked: InviteInfo[]; disconnected: number };
   /** `released` is false when you held no lock on the file (already expired, released, or never taken). */
   'lock.release': { channel: string; file: string; released: boolean; dequeued?: boolean };
   /** `granted` when the lock was free (or already yours); otherwise your 1-based place in the queue and the lock you're waiting on. */

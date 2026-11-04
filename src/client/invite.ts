@@ -29,7 +29,7 @@ const toHttp = (hub: string) => hub.replace(/^ws(s?):\/\//, 'http$1://').replace
 export function inviteText({ address, hub }: { address: string; hub: string }): string {
   const http = toHttp(hub);
   const firstTime = isLocalHub(hub)
-    ? ["- This hub runs on someone's machine (localhost), so you must be on that machine to reach it."]
+    ? ["- This hub runs on someone's machine (localhost). Not on that machine (a VPS, a cloud agent)? Ask its owner for a remote invite (crosstalk invite <channel> --remote): a secure link and key for this channel."]
     : [
         `- Make HTTP requests only: follow ${AGENT_GUIDE_URL} using hub ${http} (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
         `- MCP client (claude.ai and similar): add the connector ${http}/mcp?name=<your-name>&channel=${address}`
@@ -48,5 +48,29 @@ export function inviteText({ address, hub }: { address: string; hub: string }): 
     ...firstTime,
     // The bridge runs on a computer that can reach the hub, so this works for local hubs too.
     `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see ${DEVICE_GUIDE_URL}), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`
+  ].join('\n');
+}
+
+/**
+ * What the owner sends an agent outside this machine (#13): the hub's public
+ * door, the channel and an invite key that only opens that channel. The key is
+ * a secret; whoever has it can join until it expires or is revoked.
+ */
+export function remoteInviteText({ address, publicUrl, key, expiresAt }: { address: string; publicUrl: string; key: string; expiresAt?: number }): string {
+  const base = publicUrl.replace(/\/+$/, '');
+  const ws = base.replace(/^http(s?):\/\//, 'ws$1://');
+  return [
+    "You're invited to a CrossTalk conversation: a shared channel where AI agents message each other and lock files before editing.",
+    `Channel: ${address}`,
+    `Hub (public door): ${base}`,
+    `Invite key: ${key}  (secret: it opens this one channel${expiresAt ? `, until ${new Date(expiresAt).toISOString()}` : ''})`,
+    '',
+    'Connect whichever way you can:',
+    `- MCP client (claude.ai, cloud agents): add the connector ${base}/mcp?name=<your-name>&channel=${address}&key=${key}`,
+    `- HTTP: POST ${base}/v1/sessions with header X-CrossTalk-Invite: ${key} and body {"agent":{"name":"<your-name>"}}, then send X-CrossTalk-Invite and X-CrossTalk-Session on POST /v1/rpc ({"type":"channel.join","channel":"${address}"}) and long-poll GET /v1/events?wait=50. Guide: ${AGENT_GUIDE_URL}`,
+    `- WebSocket / SDK: connect to ${ws} with header X-CrossTalk-Invite: ${key}, then join ${address}.`,
+    `- Shell: npm install -g ${INSTALL_URL}, then: crosstalk up ${address} --url ${ws} --invite ${key} --name <your-name>`,
+    '',
+    'Say hello once you are in, and keep listening (crosstalk_wait, or long-poll /v1/events).'
   ].join('\n');
 }

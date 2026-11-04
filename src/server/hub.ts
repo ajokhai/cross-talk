@@ -13,6 +13,7 @@ import {
   type ErrorCode,
   type FileLock,
   type HelloFrame,
+  type InviteInfo,
   type HubError,
   type MemberAttention,
   type MessageReceipt,
@@ -197,6 +198,7 @@ export class Connection {
   /** @internal Set while the transport is gone but the agent is still present. */ droppedAt?: number;
   /** @internal Frames to send right after a resumed client's welcome. */ replay?: ServerFrame[];
   /** @internal Allowance for DMs this agent sends. */ dms: Bucket;
+  /** @internal Set when the connection came in through the public listener with an invite key (#13): it may only use the invite's channel. */ invite?: Invite;
   private readonly requests: Bucket;
 
   constructor(
@@ -244,6 +246,7 @@ export class MeshHub {
   private readonly agents = new Map<string, Connection>(); // agent id -> connection
   private readonly perAddress = new Map<string, number>(); // address -> open connections
   private readonly resumable = new Map<string, Connection>(); // resume token hash -> connection (live or dropped)
+  private readonly invites = new Map<string, Invite>(); // key hash -> invite
   private changes = 0;
   private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now' | 'channelLimits'>> & { channelLimits: ChannelLimits };
   private readonly onMessage?: (message: ChannelMessage) => void;
@@ -297,12 +300,16 @@ export class MeshHub {
    * Admits a new connection from `address` (an IP, or any stable client key).
    * Throws a HubFailure with code 'rate_limited' when the address or hub is at capacity.
    */
-  connect(peer: Peer, address = 'unknown'): Connection {
+  connect(peer: Peer, address = 'unknown', options: { inviteKey?: string } = {}): Connection {
+    // A remote connection must present a live invite before it takes any slot.
+    const invite = options.inviteKey === undefined ? undefined : this.liveInvite(options.inviteKey) ?? fail('unauthorized', 'Missing, expired or revoked invite key');
     const open = this.perAddress.get(address) ?? 0;
     if (open >= this.opts.maxConnectionsPerAddress) fail('rate_limited', 'Too many connections from your address');
     if (this.agents.size >= this.opts.maxAgents) fail('rate_limited', 'Hub is at capacity');
     this.perAddress.set(address, open + 1);
-    return new Connection(peer, address, this.opts.rateLimit, this.now(), this.opts.channelLimits);
+    const conn = new Connection(peer, address, this.opts.rateLimit, this.now(), this.opts.channelLimits);
+    conn.invite = invite;
+    return conn;
   }
 
   /** Handles a raw text frame from a streaming transport (WebSocket). */
@@ -338,6 +345,8 @@ export class MeshHub {
     }
     const previous = typeof frame.resume === 'string' && frame.resume ? this.resumable.get(MeshHub.hashToken(frame.resume)) : undefined;
     if (previous?.agent) {
+      // A resume never changes which door the agent came in by.
+      if (previous.invite?.id !== conn.invite?.id) fail('unauthorized', 'That agent joined with a different invite');
       const agent = this.takeOver(conn, previous);
       return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION, resumeToken: this.issueResumeToken(conn), resumed: true };
     }
@@ -346,6 +355,10 @@ export class MeshHub {
     if (!name) fail('bad_request', 'agent.name is required');
     const environments = ['ide', 'terminal', 'bot', 'web'] as const;
     const now = this.now();
+    const invite = conn.invite;
+    if (invite?.maxAgents !== undefined && invite.agents.length >= invite.maxAgents) {
+      fail('quota_exceeded', `This invite admits at most ${invite.maxAgents} agent(s)`);
+    }
     const agent: AgentInfo = {
       id: newId('ag'),
       name,
@@ -357,6 +370,11 @@ export class MeshHub {
       connectedAt: now,
       lastSeen: now
     };
+    if (invite) {
+      agent.remote = true;
+      agent.via = invite.label;
+      invite.agents.push(agent.id);
+    }
     conn.agent = agent;
     this.agents.set(agent.id, conn);
     return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION, resumeToken: this.issueResumeToken(conn) };
@@ -466,6 +484,7 @@ export class MeshHub {
       if (!id) fail('bad_request', 'Requests need a string "id" (max 128 chars)');
       if (!conn.agent) fail('not_registered', 'Send "hello" first');
       if (this.opts.rateLimits && !conn.take(this.now())) fail('rate_limited', 'Too many requests; slow down');
+      if (conn.invite) this.checkRemote(conn, frame as unknown as RequestFrame);
       conn.agent!.lastSeen = this.now();
       this.changes++;
       const data = await this.dispatch(conn, frame as unknown as RequestFrame);
@@ -490,7 +509,10 @@ export class MeshHub {
       case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility, f.limits);
       case 'channel.join': return this.joinChannel(conn, f.channel, f.since);
       case 'channel.leave': return this.leaveChannel(conn, f.channel);
-      case 'channel.list': return this.listChannels(conn, f.scope ?? 'joined', f.limit, f.cursor);
+      case 'channel.list': return this.listChannels(conn, conn.invite ? 'joined' : f.scope ?? 'joined', f.limit, f.cursor);
+      case 'invite.create': return this.createInvite(conn, f.channel, f.ownerKey, f.label, f.expiresInSeconds, f.maxAgents);
+      case 'invite.list': return { invites: this.listInvites(conn, f.channel, f.ownerKey) };
+      case 'invite.revoke': return this.revokeInvites(conn, f.channel, f.ownerKey, f.invite);
       case 'channel.state': {
         const channel = this.memberChannel(conn, f.channel);
         this.markRead(channel, conn.agent!.id);
@@ -1447,6 +1469,7 @@ export class MeshHub {
 
   /** Expires stale locks and deletes channels that have been empty too long. */
   sweep(): void {
+    this.sweepInvites();
     for (const lock of this.locks.sweepExpired()) {
       this.changes++;
       const channel = this.channels.get(lock.channel);
@@ -1482,6 +1505,130 @@ export class MeshHub {
   }
 
   // -------------------------------------------------------------------------
+  // Remote invites (#13): channel-scoped keys for agents outside this machine
+  // -------------------------------------------------------------------------
+
+  private inviteIsLive(invite: Invite): boolean {
+    return !invite.revokedAt && (invite.expiresAt === undefined || invite.expiresAt > this.now()) && this.channels.has(invite.channel);
+  }
+
+  /** The invite a key belongs to, if it is still good. */
+  liveInvite(key: string): Invite | undefined {
+    if (typeof key !== 'string' || !/^xi_[A-Za-z0-9_-]{20,64}$/.test(key)) return undefined;
+    const invite = this.invites.get(MeshHub.hashToken(key));
+    return invite && this.inviteIsLive(invite) ? invite : undefined;
+  }
+
+  /** What a remote agent may do: only inside its invite's channel, and nothing an owner does. */
+  private checkRemote(conn: Connection, f: RequestFrame): void {
+    const invite = conn.invite!;
+    if (!this.inviteIsLive(invite)) {
+      queueMicrotask(() => this.endRemote(conn, 'invite revoked or expired'));
+      fail('unauthorized', 'Your invite was revoked or has expired');
+    }
+    const ownerOnly = ['channel.create', 'channel.close', 'channel.configure', 'question.answer', 'invite.create', 'invite.list', 'invite.revoke'];
+    if (ownerOnly.includes(f.type)) fail('forbidden', 'Agents joined by invite cannot do that');
+    if (f.type === 'channel.join' && (f as { channel?: unknown }).channel !== invite.channel) {
+      fail('forbidden', 'Your invite is for one channel only');
+    }
+  }
+
+  private endRemote(conn: Connection, reason: string): void {
+    if (conn.released && conn.droppedAt === undefined) return;
+    conn.peer.close(4003, reason);
+    if (conn.droppedAt !== undefined) this.evict(conn);
+    else this.disconnect(conn);
+  }
+
+  private inviteInfo(invite: Invite): InviteInfo {
+    const status = invite.revokedAt ? 'revoked' : invite.expiresAt !== undefined && invite.expiresAt <= this.now() ? 'expired' : 'active';
+    const online = [...this.agents.values()].filter(c => c.invite?.id === invite.id && c.agent).length;
+    return {
+      id: invite.id.slice(0, 12),
+      channel: invite.channel,
+      label: invite.label,
+      createdAt: invite.createdAt,
+      expiresAt: invite.expiresAt,
+      maxAgents: invite.maxAgents,
+      admitted: invite.agents.length,
+      online,
+      status
+    };
+  }
+
+  private createInvite(conn: Connection, address: unknown, ownerKey: unknown, label: unknown, expiresInSeconds: unknown, maxAgents: unknown): { key: string; invite: InviteInfo } {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    if (expiresInSeconds !== undefined && (typeof expiresInSeconds !== 'number' || !(expiresInSeconds >= 60) || expiresInSeconds > 365 * 86400)) {
+      fail('bad_request', 'expiresInSeconds must be from 60 to 31536000');
+    }
+    if (maxAgents !== undefined && (typeof maxAgents !== 'number' || !Number.isInteger(maxAgents) || maxAgents < 1 || maxAgents > this.opts.maxMembersPerChannel)) {
+      fail('bad_request', `maxAgents must be a whole number from 1 to ${this.opts.maxMembersPerChannel}`);
+    }
+    const live = [...this.invites.values()].filter(i => i.channel === channel.id && this.inviteIsLive(i));
+    if (live.length >= 50) fail('quota_exceeded', 'At most 50 active invites per channel; revoke some first');
+    const key = `xi_${crypto.randomBytes(24).toString('base64url')}`;
+    const invite: Invite = {
+      id: MeshHub.hashToken(key),
+      channel: channel.id,
+      label: cleanText(label, 64) || `invite-${live.length + 1}`,
+      createdAt: this.now(),
+      expiresAt: expiresInSeconds === undefined ? undefined : this.now() + (expiresInSeconds as number) * 1000,
+      maxAgents: maxAgents as number | undefined,
+      agents: []
+    };
+    this.invites.set(invite.id, invite);
+    return { key, invite: this.inviteInfo(invite) };
+  }
+
+  private listInvites(conn: Connection, address: unknown, ownerKey: unknown): InviteInfo[] {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    return [...this.invites.values()].filter(i => i.channel === channel.id).map(i => this.inviteInfo(i));
+  }
+
+  /** Revokes by id prefix (as `invite.list` shows it), by label, or every invite with "all"; agents admitted with them are disconnected at once. */
+  private revokeInvites(conn: Connection, address: unknown, ownerKey: unknown, which: unknown): { revoked: InviteInfo[]; disconnected: number } {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    const key = cleanText(which, 64);
+    if (!key) fail('bad_request', 'invite must be an id, a label or "all"');
+    const matches = [...this.invites.values()].filter(i =>
+      i.channel === channel.id && !i.revokedAt && (key === 'all' || i.label === key || (key.length >= 6 && i.id.startsWith(key))));
+    if (!matches.length) fail('not_found', 'No active invite matches that');
+    let disconnected = 0;
+    for (const invite of matches) {
+      invite.revokedAt = this.now();
+      disconnected += this.dropInviteAgents(invite, 'invite revoked');
+    }
+    this.changes++;
+    return { revoked: matches.map(i => this.inviteInfo(i)), disconnected };
+  }
+
+  private dropInviteAgents(invite: Invite, reason: string): number {
+    let n = 0;
+    for (const c of new Set([...this.agents.values(), ...this.resumable.values()])) {
+      if (c.invite?.id === invite.id && c.agent) {
+        this.endRemote(c, reason);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  private sweepInvites(): void {
+    const now = this.now();
+    for (const [id, invite] of this.invites) {
+      if (!this.channels.has(invite.channel)) {
+        this.invites.delete(id);
+        this.changes++;
+      } else if (!invite.revokedAt && invite.expiresAt !== undefined && invite.expiresAt <= now) {
+        if (this.dropInviteAgents(invite, 'invite expired')) this.changes++;
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Persistence: channels, agents, locks, claims and questions survive a restart
   // -------------------------------------------------------------------------
 
@@ -1490,7 +1637,7 @@ export class MeshHub {
     const agents: PersistedAgent[] = [];
     for (const conn of new Set([...this.agents.values(), ...this.resumable.values()])) {
       if (!conn.agent || !conn.resumeToken) continue;
-      agents.push({ agent: { ...conn.agent }, resumeTokenHash: conn.resumeToken, channels: [...conn.channels] });
+      agents.push({ agent: { ...conn.agent }, resumeTokenHash: conn.resumeToken, channels: [...conn.channels], invite: conn.invite?.id });
     }
     return {
       version: 1,
@@ -1517,7 +1664,8 @@ export class MeshHub {
         slots: [...c.slots.values()].filter(slot => slot.holds.length).map(slot => ({ name: slot.name, capacity: slot.capacity, holds: slot.holds }))
       })),
       agents,
-      locks: this.locks.list()
+      locks: this.locks.list(),
+      invites: [...this.invites.values()].map(i => ({ ...i, agents: [...i.agents] }))
     };
   }
 
@@ -1544,6 +1692,9 @@ export class MeshHub {
         slots: new Map()
       });
     }
+    for (const invite of state.invites ?? []) {
+      if (this.channels.has(invite.channel)) this.invites.set(invite.id, { ...invite, agents: [...invite.agents] });
+    }
     let agents = 0;
     const now = this.now();
     for (const saved of state.agents) {
@@ -1551,6 +1702,12 @@ export class MeshHub {
       if (!channels.length) continue;
       const conn = new Connection({ send: () => {}, close: () => {} }, 'restored', this.opts.rateLimit, now, this.opts.channelLimits);
       conn.released = true; // holds no per-address slot until it resumes
+      if (saved.invite) {
+        // A remote agent comes back only while its invite is still good.
+        const invite = this.invites.get(saved.invite);
+        if (!invite || !this.inviteIsLive(invite)) continue;
+        conn.invite = invite;
+      }
       conn.agent = saved.agent;
       conn.resumeToken = saved.resumeTokenHash;
       for (const id of channels) {
@@ -1611,6 +1768,8 @@ export interface PersistedAgent {
   /** Hex SHA-256 of the agent's current resume token; the token itself is never saved. */
   resumeTokenHash: string;
   channels: string[];
+  /** Id of the invite a remote agent joined with (#13). */
+  invite?: string;
 }
 
 export interface HubState {
@@ -1619,4 +1778,19 @@ export interface HubState {
   channels: PersistedChannel[];
   agents: PersistedAgent[];
   locks: FileLock[];
+  /** Remote invites (#13), keys stored only as hashes. */
+  invites?: Invite[];
+}
+
+/** A remote invite (#13). `id` is the SHA-256 (hex) of the key; the key itself is never stored. */
+export interface Invite {
+  id: string;
+  channel: string;
+  label: string;
+  createdAt: number;
+  expiresAt?: number;
+  maxAgents?: number;
+  /** Agent ids admitted with this invite. */
+  agents: string[];
+  revokedAt?: number;
 }

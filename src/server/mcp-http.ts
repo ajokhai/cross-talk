@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type http from 'node:http';
 import { Bridge, McpServer, type JsonRpcMessage } from '../mcp/server.js';
-import { CLIENT_HEADER, INTERNAL_HEADER } from './internal.js';
+import { CLIENT_HEADER, INTERNAL_HEADER, INVITE_HEADER } from './internal.js';
 
 /**
  * Remote MCP: the hub serves `/mcp` over Streamable HTTP, so clients that can't
@@ -24,11 +24,13 @@ interface McpSession {
   server: McpServer;
   bridge: Bridge;
   address: string;
+  inviteKey?: string;
   lastSeen: number;
 }
 
 export interface McpEndpoint {
-  handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL, address: string): Promise<void>;
+  /** `inviteKey` is set for sessions through the public door (#13); the session's agent is then held to that invite. */
+  handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL, address: string, inviteKey?: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -94,11 +96,12 @@ export function createMcpEndpoint(opts: { hubUrl: string; token?: string; secret
   };
 
   return {
-    async handle(req, res, url, address) {
+    async handle(req, res, url, address, inviteKey) {
       req.socket.setTimeout(0);
       const id = req.headers['mcp-session-id'];
       let session = typeof id === 'string' ? sessions.get(id) : undefined;
       if (typeof id === 'string' && !session) return error(res, 404, 'Unknown or expired MCP session; reconnect');
+      if (session && session.inviteKey !== inviteKey) return error(res, 404, 'Unknown or expired MCP session; reconnect');
       if (req.method === 'DELETE') {
         if (!session) return error(res, 400, 'No MCP session to end');
         await end(id as string);
@@ -125,13 +128,13 @@ export function createMcpEndpoint(opts: { hubUrl: string; token?: string; secret
           role: cleanName(url.searchParams.get('role')) || 'agent',
           url: opts.hubUrl,
           token: opts.token,
-          headers: { [INTERNAL_HEADER]: opts.secret, [CLIENT_HEADER]: address },
+          headers: { [INTERNAL_HEADER]: opts.secret, [CLIENT_HEADER]: address, ...(inviteKey ? { [INVITE_HEADER]: inviteKey } : {}) },
           channels: (url.searchParams.get('channel') ?? '').split(','),
           remote: true,
           publicUrl: publicHubUrl(req)
         });
         const sid = crypto.randomUUID();
-        session = { server: new McpServer(bridge), bridge, address, lastSeen: Date.now() };
+        session = { server: new McpServer(bridge), bridge, address, inviteKey, lastSeen: Date.now() };
         sessions.set(sid, session);
         res.setHeader('Mcp-Session-Id', sid);
         // Join the hub now, so the agent is present before its first tool call.

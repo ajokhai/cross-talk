@@ -8,7 +8,7 @@ import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
 import { HttpAgent, httpBase } from './http.js';
 import { askHolder, ensureHolder, holderIfRunning, runHolder, type HolderTarget } from './holder.js';
 import { parseSize, runWithSlot } from './slots.js';
-import { inviteText } from './invite.js';
+import { inviteText, remoteInviteText } from './invite.js';
 import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
@@ -150,6 +150,9 @@ program
   .option('--request-burst <n>', 'requests a connection may make back to back', '60')
   .option('--state <file>', 'save channels, agents and locks here so a restart keeps them (default for a localhost hub: ~/.crosstalk/hub-<port>.json, or $CROSSTALK_STATE_FILE)')
   .option('--no-state', 'keep everything in memory: a restart drops every channel and lock')
+  .option('--public', 'open a public door for agents outside this machine: a loopback-only listener behind an outbound Cloudflare tunnel; only invite keys get in (crosstalk invite xt_… --remote)')
+  .option('--public-port <port>', 'loopback port for the public door (default: any free port)')
+  .option('--public-url <url>', 'your own tunnel or proxy in front of the public door, instead of starting cloudflared')
   .option('--no-rate-limit', 'don\'t enforce rate limits (only for hubs where every client is trusted); length limits still apply')
   .action(async opts => {
     const n = (flag: string, value: string) => {
@@ -174,7 +177,10 @@ program
         },
         rateLimit: { perSecond: n('request-rate', opts.requestRate), burst: n('request-burst', opts.requestBurst) },
         rateLimits: opts.rateLimit
-      }
+      },
+      public: opts.public || opts.publicUrl || opts.publicPort
+        ? { port: opts.publicPort ? Number(opts.publicPort) : undefined, url: opts.publicUrl, tunnel: opts.publicUrl ? false : undefined }
+        : undefined
     }).catch(fail);
     if (running) {
       // Save state and close cleanly, so a restart picks up exactly where this one stopped.
@@ -301,11 +307,12 @@ program
   .option('--rate <perMinute>', 'for a new conversation: messages each member may post per minute')
   .option('--burst <n>', 'for a new conversation: messages a member may post back to back')
   .option('--no-start', 'do not start a local hub if none is running (only ever happens for localhost URLs)')
+  .option('--invite <key>', 'remote invite key (xi_…) for a hub\'s public door, or $CROSSTALK_INVITE')
   .action(async (address: string | undefined, opts) => {
     let ct: CrossTalk;
     let ch: Channel;
     try {
-      ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start });
+      ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start, invite: opts.invite });
       ch = address ? await ct.joinChannel(address) : await ct.createChannel(opts.label, { limits: limitsFrom(opts) });
     } catch (err) {
       return fail(err);
@@ -696,6 +703,86 @@ program
       const { claims } = await agent.request('claim.update', { channel, claim: opts.claim, note: words.join(' ') || undefined, status });
       if (!claims.length) return console.log(dim(`${agent.agent!.name} holds no claims in this channel.`));
       for (const c of claims) console.log(green(`✔ ${c.status} ${c.id}: ${c.task}`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// Remote invites (#13): let agents outside this machine into one channel
+// ---------------------------------------------------------------------------
+
+/** "24h", "7d", "90m", "3600s" or a number of seconds. */
+function parseDuration(text: string): number {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*([smhd]?)\s*$/i.exec(text);
+  if (!m) fail(`Not a duration: "${text}" (try 24h, 7d or 90m)`);
+  return Math.round(Number(m![1]) * { '': 1, s: 1, m: 60, h: 3600, d: 86400 }[m![2].toLowerCase() as '' | 's' | 'm' | 'h' | 'd']);
+}
+
+/** The owner key saved on this machine for `address` on `url`, or a clear failure. */
+function ownerKeyFor(address: string, url: string): string {
+  const owned = loadOwnedChannels().find(c => c.address === address && sameHub(c.url, url)) ?? loadOwnedChannels().find(c => c.address === address);
+  if (!owned) fail(`No owner key for ${address} on this machine. Only the channel's creator can invite remote agents.`);
+  return owned!.key;
+}
+
+program
+  .command('invite <what> [address] [which]')
+  .description('Invite agents into a channel. `invite xt_…` prints the invite text; `invite xt_… --remote` makes a key for agents outside this machine (needs `crosstalk serve --public`); `invite list xt_…`; `invite revoke xt_… <id|label|all>` (disconnects them)')
+  .option('--remote', 'make an invite key that opens only this channel, through the hub\'s public door')
+  .option('-l, --label <label>', 'name for the invite, shown on the agents it admits')
+  .option('-e, --expires <duration>', 'how long the key works, e.g. 24h, 7d (default 24h)', '24h')
+  .option('-m, --max-agents <n>', 'how many agents the key can admit')
+  .option('--json', 'print raw JSON')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (what: string, address: string | undefined, which: string | undefined, opts) => {
+    try {
+      const sub = what === 'list' || what === 'revoke' ? what : 'create';
+      const target = sub === 'create' ? what : address;
+      if (!target || !CrossTalk.isAddress(target)) fail('Which channel? Give its address (xt_…).');
+      if (sub === 'create' && !opts.remote) {
+        console.log(inviteText({ address: target!, hub: opts.url }));
+        return;
+      }
+      const ownerKey = ownerKeyFor(target!, opts.url);
+      const { agent, channel } = await oneShot(target!, opts);
+      try {
+        if (sub === 'list') {
+          const { invites } = await agent.request('invite.list', { channel, ownerKey });
+          if (opts.json) return console.log(JSON.stringify(invites, null, 2));
+          if (!invites.length) return console.log(dim('No invites for this channel.'));
+          for (const i of invites) {
+            const state = i.status === 'active' ? green(i.status) : dim(i.status);
+            console.log(`${bold(i.label)} ${dim(i.id)} ${state} ${dim(`${i.admitted} admitted, ${i.online} online${i.maxAgents ? ` of ${i.maxAgents}` : ''}${i.expiresAt ? `, expires ${new Date(i.expiresAt).toLocaleString()}` : ''}`)}`);
+          }
+          return;
+        }
+        if (sub === 'revoke') {
+          if (!which) fail('Revoke which invite? Give its id or label (see `crosstalk invite list`), or "all".');
+          const { revoked, disconnected } = await agent.request('invite.revoke', { channel, ownerKey, invite: which! });
+          for (const i of revoked) console.log(green(`✔ revoked ${i.label} (${i.id})`));
+          console.log(dim(`${disconnected} agent(s) disconnected.`));
+          return;
+        }
+        const health = (await (await fetch(`${httpBase(opts.url)}/health`)).json()) as { publicUrl?: string };
+        const { key, invite } = await agent.request('invite.create', {
+          channel,
+          ownerKey,
+          label: opts.label,
+          expiresInSeconds: parseDuration(opts.expires),
+          maxAgents: opts.maxAgents ? Number(opts.maxAgents) : undefined
+        });
+        if (opts.json) return console.log(JSON.stringify({ key, invite, publicUrl: health.publicUrl }, null, 2));
+        if (!health.publicUrl) {
+          console.error(yellow('! This hub has no public door yet, so remote agents can\'t use the key. Restart it with `crosstalk serve --public` (or --public-url <your tunnel>).'));
+        }
+        console.log(dim(`Invite ${invite.label} (${invite.id}) made. Send this to the remote agent; the key is shown only once.`));
+        console.log(dim(`Revoke it any time: crosstalk invite revoke ${target} ${invite.label}\n`));
+        console.log(remoteInviteText({ address: target!, publicUrl: health.publicUrl ?? '<public URL>', key, expiresAt: invite.expiresAt }));
+      } finally {
+        await agent.close().catch(() => {});
+      }
     } catch (err) {
       fail(err);
     }

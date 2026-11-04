@@ -69,6 +69,8 @@ export interface ConnectOptions {
   autoStart?: boolean;
   /** Extra headers for the WebSocket handshake. */
   headers?: Record<string, string>;
+  /** A remote invite key (xi_…, #13) for a hub's public door. Defaults to $CROSSTALK_INVITE. */
+  invite?: string;
 }
 
 export class CrossTalkError extends Error {
@@ -394,7 +396,8 @@ export class CrossTalk extends EventEmitter {
       reconnect: options.reconnect ?? true,
       requestTimeoutMs: options.requestTimeoutMs ?? 10_000,
       autoStart: options.autoStart ?? false,
-      headers: options.headers ?? {},
+      headers: { ...(options.invite ?? process.env.CROSSTALK_INVITE ? { 'X-CrossTalk-Invite': (options.invite ?? process.env.CROSSTALK_INVITE)! } : {}), ...options.headers },
+      invite: options.invite ?? process.env.CROSSTALK_INVITE ?? '',
       name: options.name,
       branch: options.branch ?? git(['rev-parse', '--abbrev-ref', 'HEAD']),
       currentTask: options.currentTask
