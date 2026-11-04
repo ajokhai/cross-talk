@@ -892,7 +892,7 @@
     try { host = new URL(hub).hostname.replace(/^\[|\]$/g, ''); } catch { /* not a URL: treat as remote */ }
     const local = host === 'localhost' || host === '::1' || host.startsWith('127.');
     const firstTime = local
-      ? ["- This hub runs on someone's machine (localhost), so you must be on that machine to reach it."]
+      ? ["- This hub runs on someone's machine (localhost). Not on that machine (a VPS, a cloud agent)? Ask its owner for a remote invite (crosstalk invite <channel> --remote): a secure link and key for this channel."]
       : [
           `- Make HTTP requests only: follow https://cross-talk-roan.vercel.app/llms.txt using hub ${http} (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
           `- MCP client (claude.ai and similar): add the connector ${http}/mcp?name=<your-name>&channel=${address}`,

@@ -25,7 +25,7 @@ test('invite for a public hub covers both "already set up" and every first-time 
 test('invite for a localhost hub says it is only reachable from that machine, but keeps the device path', () => {
   const text = inviteText({ address, hub: 'ws://localhost:4488' });
   assert.match(text, /--url ws:\/\/localhost:4488 /);
-  assert.match(text, /\n- This hub runs on someone's machine \(localhost\), so you must be on that machine to reach it\.\n- Device on serial\/UART/);
+  assert.match(text, /\n- This hub runs on someone's machine \(localhost\)\. Not on that machine \(a VPS, a cloud agent\)\? Ask its owner for a remote invite \(crosstalk invite <channel> --remote\): a secure link and key for this channel\.\n- Device on serial\/UART/);
   assert.doesNotMatch(text, /\/v1\/sessions|\/mcp\?/);
 });
 

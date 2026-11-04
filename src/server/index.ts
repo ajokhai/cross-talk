@@ -6,7 +6,8 @@ import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type HubState, type Peer } from './hub.js';
 import { SubnetGuard } from './subnet.js';
-import { CLIENT_HEADER, INTERNAL_HEADER } from './internal.js';
+import { CLIENT_HEADER, INTERNAL_HEADER, INVITE_HEADER } from './internal.js';
+import { hasCloudflared, startQuickTunnel, type Tunnel } from './tunnel.js';
 import type { McpEndpoint } from './mcp-http.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { PROTOCOL_VERSION, type HelloFrame, type ServerFrame } from '../protocol.js';
@@ -49,6 +50,21 @@ export interface ServerOptions {
   stateFile?: string | false;
   /** How long agents restored from the state file have to reconnect. Default 5 minutes. */
   restoreGraceMs?: number;
+  /**
+   * A second, public door for agents outside this machine (#13). It listens
+   * on 127.0.0.1 only, so nothing outside can reach it except through a
+   * tunnel, and it admits only requests that carry a live invite key (xi_…,
+   * see `invite.create`), each limited to its invite's channel. The hub token
+   * is not accepted there, and the directory and read-only API are closed.
+   */
+  public?: {
+    /** Loopback port for the public listener. Default: any free port. */
+    port?: number;
+    /** Start a Cloudflare quick tunnel to it (needs `cloudflared`). Default true unless `url` is given. */
+    tunnel?: boolean;
+    /** The public base URL when you run your own tunnel or proxy, e.g. https://hub.example.com */
+    url?: string;
+  };
 }
 
 /** The state file a hub on `host:port` uses unless told otherwise, or undefined for none. */
@@ -74,10 +90,17 @@ export interface RunningServer {
   url: string;
   /** Where state is saved, if anywhere. */
   stateFile?: string;
+  /** The public door (#13), when enabled: its loopback port and its public base URL (https://…), if known. */
+  publicDoor?: { port: number; url?: string };
   close(): Promise<void>;
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
+
+/** Marks requests that came through the public door (#13), and the invite key a WebSocket upgrade there presented. */
+const PUBLIC = Symbol('crosstalk.public');
+const INVITE = Symbol('crosstalk.invite');
+type PublicRequest = http.IncomingMessage & { [PUBLIC]?: boolean; [INVITE]?: string };
 const MAX_POLL_SECONDS = 55;
 const HELLO_TIMEOUT_MS = 10_000;
 const QUEUE_LIMIT = 1000;
@@ -107,7 +130,7 @@ class HttpSession {
   private queue: ServerFrame[] = [];
   private waiter?: () => void;
 
-  constructor(hub: MeshHub, address: string, readonly token: string) {
+  constructor(hub: MeshHub, address: string, readonly token: string, inviteKey?: string) {
     const peer: Peer = {
       send: frame => {
         this.queue.push(frame);
@@ -116,7 +139,7 @@ class HttpSession {
       },
       close: () => this.waiter?.()
     };
-    this.conn = hub.connect(peer, address);
+    this.conn = hub.connect(peer, address, { inviteKey });
   }
 
   async poll(waitSeconds: number): Promise<ServerFrame[]> {
@@ -219,7 +242,17 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     }
   };
 
-  const addressOf = (req: http.IncomingMessage) => SubnetGuard.normalizeIp(clientIp(req)) || 'unknown';
+  const addressOf = (req: http.IncomingMessage) => {
+    if ((req as PublicRequest)[PUBLIC]) {
+      // Only the tunnel can reach the public door, so its forwarding headers name the real client.
+      const cf = req.headers['cf-connecting-ip'];
+      const hops = String(req.headers['x-forwarded-for'] ?? '').split(',').map(h => h.trim()).filter(Boolean);
+      const ip = (typeof cf === 'string' && cf.trim()) || hops[hops.length - 1];
+      if (ip) return `public:${SubnetGuard.normalizeIp(ip) || ip}`;
+      return 'public:unknown';
+    }
+    return SubnetGuard.normalizeIp(clientIp(req)) || 'unknown';
+  };
 
   const json = (res: http.ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -273,6 +306,103 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   }, 30_000);
   reaper.unref();
 
+  /** The invite key a public-door request carries: X-CrossTalk-Invite, Authorization: Bearer xi_…, or ?key=. */
+  const presentedInvite = (req: http.IncomingMessage, url: URL): string | undefined => {
+    const header = req.headers['x-crosstalk-invite'];
+    if (typeof header === 'string' && header) return header.trim();
+    const auth = req.headers.authorization;
+    if (auth?.startsWith('Bearer xi_')) return auth.slice(7).trim();
+    return url.searchParams.get('key') ?? undefined;
+  };
+
+  /** The invite a WebSocket connection is held to: from the public door, or from a remote-MCP bridge serving one. */
+  const inviteFor = (req: http.IncomingMessage): string | undefined => {
+    if ((req as PublicRequest)[PUBLIC]) return (req as PublicRequest)[INVITE];
+    const bridged = req.headers[INVITE_HEADER];
+    return isInternal(req) && typeof bridged === 'string' && bridged ? bridged : undefined;
+  };
+
+  let mcpPublic: Promise<McpEndpoint> | undefined;
+  let publicDoor: RunningServer['publicDoor'];
+
+  /**
+   * The public door's routes: health, the HTTP agent API, remote MCP and
+   * WebSocket (in the upgrade handler). Every one but health needs a live
+   * invite key; the directory and read-only API don't exist here.
+   */
+  const handlePublic = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    const url = new URL(req.url ?? '/', 'http://hub.local');
+    const origin = req.headers.origin;
+    if (origin) {
+      // Browser agents are fine here: nothing is reachable without the key.
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CrossTalk-Invite, X-CrossTalk-Session, Mcp-Session-Id, Mcp-Protocol-Version');
+      res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+    }
+    if (req.method === 'OPTIONS') return void res.writeHead(204).end();
+    const path = url.pathname.replace(/\/+$/, '') || '/';
+    const route = `${req.method} ${path}`;
+    if (route === 'GET /health' || route === 'GET /') return json(res, 200, { ok: true, name: 'crosstalk', protocol: PROTOCOL_VERSION, door: 'public' });
+
+    const key = presentedInvite(req, url);
+    const invite = key ? hub.liveInvite(key) : undefined;
+    if (!key || !invite) return json(res, 401, { error: { code: 'unauthorized', message: 'This hub only admits agents with a live invite key (X-CrossTalk-Invite: xi_…)' } });
+    try {
+      if (path === '/mcp') {
+        mcpPublic ??= import('./mcp-http.js').then(m => m.createMcpEndpoint({ hubUrl: `ws://127.0.0.1:${boundPort}`, token: token || undefined, secret: internalSecret }));
+        return await (await mcpPublic).handle(req, res, url, addressOf(req), key);
+      }
+      if (route === 'POST /v1/sessions') {
+        const body = await readJson(req);
+        let session: HttpSession;
+        try {
+          session = new HttpSession(hub, addressOf(req), `xs_${crypto.randomBytes(24).toString('base64url')}`, key);
+        } catch (err) {
+          if (err instanceof HubFailure) return json(res, err.code === 'unauthorized' ? 401 : 429, { error: { code: err.code, message: err.message } });
+          throw err;
+        }
+        try {
+          const welcome = hub.hello(session.conn, { type: 'hello', protocol: PROTOCOL_VERSION, agent: body.agent ?? body } as HelloFrame);
+          sessions.set(session.token, session);
+          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, channel: invite.channel });
+        } catch (err: any) {
+          hub.disconnect(session.conn);
+          return json(res, 400, { error: { code: err.code ?? 'bad_request', message: err.message } });
+        }
+      }
+      if (path.startsWith('/v1/')) {
+        const session = sessionFor(req);
+        // A session made at the local door can't be driven from the public one, or with another invite.
+        if (!session || session.conn.invite?.id !== invite.id) {
+          return json(res, 401, { error: { code: 'not_registered', message: 'Missing or expired X-CrossTalk-Session; POST /v1/sessions first' } });
+        }
+        if (route === 'DELETE /v1/sessions') {
+          endSession(session);
+          return json(res, 200, { ok: true });
+        }
+        if (route === 'POST /v1/rpc') {
+          const body = await readJson(req);
+          const result = await hub.request(session.conn, { ...body, id: typeof body.id === 'string' ? body.id : crypto.randomUUID() });
+          return json(res, result.type === 'result' && !result.ok ? 400 : 200, result);
+        }
+        if (route === 'GET /v1/events') {
+          const wait = Math.max(0, Math.min(Number(url.searchParams.get('wait') ?? 0) || 0, MAX_POLL_SECONDS));
+          req.socket.setTimeout(0);
+          hub.polled(session.conn);
+          const events = await session.poll(wait);
+          hub.polled(session.conn);
+          if (!res.writableEnded) json(res, 200, { events });
+          return;
+        }
+      }
+      json(res, 404, { error: { code: 'not_found', message: 'Not available through the public door' } });
+    } catch (err: any) {
+      if (!res.headersSent) json(res, 400, { error: { code: 'bad_request', message: err.message } });
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://hub.local');
     const origin = req.headers.origin;
@@ -293,7 +423,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     const route = `${req.method} ${url.pathname.replace(/\/+$/, '') || '/'}`;
 
     if (route === 'GET /health' || route === 'GET /') {
-      json(res, 200, { ok: true, name: 'crosstalk', version: SERVER_VERSION, protocol: PROTOCOL_VERSION, ...hub.stats() });
+      json(res, 200, { ok: true, name: 'crosstalk', version: SERVER_VERSION, protocol: PROTOCOL_VERSION, ...hub.stats(), ...(publicDoor?.url ? { publicUrl: publicDoor.url } : {}) });
       return;
     }
 
@@ -420,7 +550,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
         },
         close: (code, reason) => ws.close(code, reason)
-      }, isInternal(req) ? String(req.headers[CLIENT_HEADER] ?? 'unknown') : addressOf(req));
+      }, isInternal(req) ? String(req.headers[CLIENT_HEADER] ?? 'unknown') : addressOf(req), { inviteKey: inviteFor(req) });
     } catch (err) {
       ws.close(1013, err instanceof HubFailure ? err.message : 'Hub unavailable');
       return;
@@ -498,6 +628,50 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   const saver = setInterval(persist, 1000);
   saver.unref();
 
+  // --- Public door (#13) ------------------------------------------------------
+  let publicServer: http.Server | undefined;
+  let tunnel: Tunnel | undefined;
+  if (options.public) {
+    publicServer = http.createServer((req, res) => {
+      (req as PublicRequest)[PUBLIC] = true;
+      void handlePublic(req, res);
+    });
+    publicServer.on('upgrade', (req, socket, head) => {
+      (req as PublicRequest)[PUBLIC] = true;
+      const url = new URL(req.url ?? '/', 'http://hub.local');
+      const key = presentedInvite(req, url);
+      if (!key || !hub.liveInvite(key)) {
+        socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        return;
+      }
+      (req as PublicRequest)[INVITE] = key;
+      wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+    });
+    await new Promise<void>((resolve, reject) => {
+      publicServer!.once('error', reject);
+      publicServer!.listen(options.public!.port ?? 0, '127.0.0.1', () => {
+        publicServer!.off('error', reject);
+        resolve();
+      });
+    });
+    const port = (publicServer.address() as { port: number }).port;
+    publicDoor = { port, url: options.public.url?.replace(/\/+$/, '') };
+    if (!publicDoor.url && options.public.tunnel !== false) {
+      if (!hasCloudflared()) {
+        log(`public door on 127.0.0.1:${port}, but cloudflared isn't installed: start a tunnel to it yourself and pass --public-url`);
+      } else {
+        try {
+          tunnel = await startQuickTunnel(port);
+          publicDoor.url = tunnel.url;
+          void tunnel.exited.then(code => log(`tunnel stopped (code ${code}); remote agents can't reach the hub until it is restarted`));
+        } catch (err) {
+          log(`could not start the tunnel: ${(err as Error).message}`);
+        }
+      }
+    }
+    log(`public door on 127.0.0.1:${port}${publicDoor.url ? ` → ${publicDoor.url}` : ''}; only invite keys get in (crosstalk invite xt_… --remote)`);
+  }
+
   const address = server.address();
   boundPort = typeof address === 'object' && address ? address.port : port;
   const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
@@ -522,7 +696,15 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     wss,
     url,
     stateFile,
+    publicDoor,
     close: async () => {
+      tunnel?.close();
+      if (publicServer) {
+        const closing = new Promise<void>(resolve => publicServer!.close(() => resolve()));
+        publicServer.closeAllConnections?.();
+        await closing;
+      }
+      await (await mcpPublic)?.close();
       // Save before tearing down connections, which would evict every agent.
       clearInterval(saver);
       persist();

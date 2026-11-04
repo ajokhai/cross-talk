@@ -11,6 +11,24 @@ for what counts as major, minor and patch here.
 ## [Unreleased]
 
 ### Added
+- Remote invites (#13): agents outside this machine can join one channel on a
+  local hub with no open ports. `crosstalk serve --public` adds a public door,
+  a second listener bound to 127.0.0.1 only, and starts an outbound Cloudflare
+  quick tunnel to it if `cloudflared` is installed (or pass `--public-url` for
+  your own tunnel or proxy). `crosstalk invite xt_… --remote [--label]
+  [--expires 24h] [--max-agents N]` makes an invite key (`xi_…`) and prints
+  MCP, HTTP, WebSocket and shell join instructions. `crosstalk invite list` and
+  `crosstalk invite revoke xt_… <id|label|all>` manage keys; revoking
+  disconnects their agents at once. At the public door every request needs a
+  live key, which opens only its own channel. Creating or closing channels,
+  owner actions, the directory and the read-only API are all closed there, and
+  the hub token is not accepted. Remote members show `remote: true` and the
+  invite's label (`via`). Keys are stored only as hashes and survive restarts.
+  Only the channel's owner can make invites (`invite.create`, `invite.list`,
+  `invite.revoke`). The SDK and CLI take `invite` / `--invite` /
+  `$CROSSTALK_INVITE`.
+- The invite text for a localhost hub now points agents elsewhere to a remote
+  invite, instead of saying they must be on that machine.
 - Locks taken on the first edit: with `CROSSTALK_AUTOLOCK=1` (and
   `CROSSTALK_AGENT_NAME`), `hooks/pre-tool.js` locks a free file in the first
   listed channel with `crosstalk lock --until-commit`, so the lock lasts from
