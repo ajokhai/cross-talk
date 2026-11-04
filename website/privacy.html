@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CrossTalk Privacy Policy (draft)</title>
+  <meta name="description" content="What CrossTalk's software, website and hosted hub collect, why, and for how long.">
+  <!-- Draft pending legal review: keep it out of search results until it is approved. -->
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#111111">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cal+Sans&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="site.css">
+  <style>
+    .legal { max-width: 46rem; margin: 0 auto; padding: 3rem 1rem 5rem; line-height: 1.65; }
+    .legal h1 { margin-bottom: .25rem; }
+    .legal h2 { margin-top: 2.5rem; }
+    .legal h3 { margin-top: 1.5rem; font-size: 1.05rem; }
+    .legal table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .95rem; }
+    .legal th, .legal td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-bottom: 1px solid rgba(127,127,127,.25); }
+    .legal .table-wrap { overflow-x: auto; }
+    .legal code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .9em; overflow-wrap: anywhere; }
+    .draft { border: 2px solid #b26a00; border-radius: 8px; padding: .9rem 1rem; margin: 1.5rem 0; background: rgba(178,106,0,.08); }
+    .planned { border-left: 4px solid #6b7280; padding: .25rem 0 .25rem 1rem; }
+    .todo { background: rgba(178,106,0,.15); padding: 0 .25rem; border-radius: 3px; }
+  </style>
+  <script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 6h10M4 12h16M10 18h10" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+        </span>
+        CrossTalk
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="docs.html">Docs</a>
+        <a href="cockpit.html">Cockpit</a>
+        <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="legal">
+    <h1>Privacy Policy</h1>
+    <p class="muted">Draft of 4 November 2026. Not yet in effect.</p>
+
+    <div class="draft" role="note">
+      <strong>Draft, pending legal review.</strong> This page describes what CrossTalk does today, based on its source code. It hasn't been reviewed by a lawyer or approved, and it isn't in effect yet. Text <span class="todo">highlighted like this</span> still needs to be filled in.
+    </div>
+
+    <h2>The short version</h2>
+    <ul>
+      <li><strong>Your conversations stay on your hub.</strong> CrossTalk is software you run yourself. Channels, messages, locks and agents live in the hub on your machine (or wherever you run it). They never pass through this website.</li>
+      <li><strong>Hubs send one anonymous check-in a day</strong>: a random install id and the version number. It feeds the usage map on the home page, and you can turn it off.</li>
+      <li><strong>This website uses no cookies.</strong> It loads Google Fonts and counts page views with Vercel Web Analytics, which doesn't use cookies.</li>
+      <li><strong>The hosted hub</strong> (the public Railway hub, for people who choose to use it) relays messages in memory and doesn't write them to disk.</li>
+      <li><strong>CrossTalk Social isn't offered yet.</strong> The section on it describes plans, not current practice.</li>
+    </ul>
+
+    <h2>Who this covers</h2>
+    <p>This policy covers the CrossTalk open-source software, the website at <code>cross-talk-roan.vercel.app</code> (including the Cockpit page and the <code>/api</code> endpoints), and the hosted CrossTalk hub at <code>hub-production-a114.up.railway.app</code>. They are run by <span class="todo">[operator's legal name and address]</span> ("we"). Contact: <span class="todo">[privacy contact email]</span>.</p>
+    <p>A hub that you or someone else runs is controlled by whoever runs it, not by us. If you join a channel on another person's hub, their practices apply to what you send there.</p>
+
+    <h2>1. The software on your machine</h2>
+    <p>When you run <code>crosstalk serve</code>, start the MCP server, or use the CLI or SDKs, everything they handle stays on the hub you connect to: channel names, messages, direct messages, file paths you lock, task claims, the questions agents ask you, and agent names, roles, branches and status. A hub on your own machine keeps this in memory. By default a hub on localhost also saves its state to <code>~/.crosstalk/hub-&lt;port&gt;.json</code>, readable only by your user account, so a restart doesn't lose your channels. You can turn that off with <code>--no-state</code> or <code>CROSSTALK_STATE_FILE=off</code>. The CLI also keeps a few small files in <code>~/.crosstalk/</code>: owner keys for channels you created, HTTP session ids, lock-holder sockets and logs, and the telemetry install id. None of these are sent to us.</p>
+
+    <h3>The daily check-in (telemetry)</h3>
+    <p>Unless you turn it off, a running hub sends one request a day to <code>https://cross-talk-roan.vercel.app/api/ping</code>, containing exactly:</p>
+    <pre><code>{"id": "&lt;random 32-character id, kept in ~/.crosstalk/telemetry-id&gt;", "v": "&lt;CrossTalk version&gt;", "kind": "hub"}</code></pre>
+    <p>The id is random and not derived from your machine, name or account. When the request arrives, our endpoint also sees your IP address and the country Vercel's network assigns it. Here's what we keep:</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>How it's stored</th><th>Kept for</th></tr></thead>
+      <tbody>
+        <tr><td>Install id</td><td>Only as a keyed hash (HMAC with a server secret)</td><td>35 days, then deleted automatically</td></tr>
+        <tr><td>Country (two-letter code)</td><td>Next to the hashed id, one record per day</td><td>35 days</td></tr>
+        <tr><td>IP address</td><td>Only as a keyed hash (HMAC with a server secret), to rate-limit check-ins</td><td>2 hours</td></tr>
+        <tr><td>Version</td><td>Checked for format, not stored</td><td>Not kept</td></tr>
+      </tbody>
+    </table></div>
+    <p>We use this only to show how many hubs checked in from each country over the last 30 days, which is the map on the home page, served by <code>/api/usage</code>. That endpoint publishes only per-country counts. The records are stored in a MongoDB database. <span class="todo">[Name the database host and region, e.g. MongoDB Atlas, and where it runs.]</span></p>
+    <p><strong>To turn it off</strong>, use any one of: <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code>, or <code>DO_NOT_TRACK=1</code>. It's also off on CI services. The hub prints a line when it starts saying whether telemetry is on and what it sends.</p>
+
+    <h2>2. This website</h2>
+    <ul>
+      <li><strong>Hosting.</strong> The site is hosted on Vercel, which handles each request and keeps standard request logs. <span class="todo">[Confirm Vercel's log retention for this plan.]</span></li>
+      <li><strong>Vercel Web Analytics</strong> counts page views and the pages that referred visitors. It doesn't set cookies, and it identifies a visit only by a short-lived hash that it can't link across days or sites.</li>
+      <li><strong>Google Fonts.</strong> Pages load their fonts from Google's servers, so your browser sends Google your IP address and browser details when you visit. Google's privacy policy covers that.</li>
+      <li><strong>No cookies, no ads, no tracking pixels.</strong></li>
+    </ul>
+
+    <h3>The Cockpit</h3>
+    <p>The Cockpit page connects from your browser <strong>straight to the hub you type in</strong>. Messages go between your browser and that hub, never through our servers. It stores four things in your browser's local storage so you don't have to retype them: the hub URL, the hub token if you entered one, your display name, and the owner keys of channels you started there. They stay in your browser and are sent only to that hub. Clear your site data to remove them.</p>
+
+    <h2>3. The hosted hub</h2>
+    <p>We run a public hub at <code>wss://hub-production-a114.up.railway.app</code> for people who don't want to run their own. Using it is optional: it's used only if you point <code>CROSSTALK_URL</code> at it, or connect to it by MCP over HTTP or from the Cockpit. Whatever you send there is relayed to the other members of your channel. Here is what it keeps:</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>What</th><th>Where</th><th>Kept for</th></tr></thead>
+      <tbody>
+        <tr><td>Channels, members, file locks, claims, questions</td><td>Memory only</td><td>While anyone is in the channel. An empty channel is deleted after 1 hour, or after 10 minutes if no message was ever sent. Everything is lost when the hub restarts or redeploys.</td></tr>
+        <tr><td>Messages</td><td>Memory only</td><td>The newest 100 per channel, for as long as the channel exists. Direct messages aren't stored. One sent while its recipient is briefly disconnected waits in memory, for up to the 2-minute reconnect window, and is then delivered or dropped.</td></tr>
+        <tr><td>Agent name, role, branch, status and environment</td><td>Memory only</td><td>Until the agent disconnects, plus a 2-minute window to reconnect. An HTTP session lasts 10 minutes after its last request.</td></tr>
+        <tr><td>Your IP address</td><td>Memory only</td><td>While you're connected, for rate limits and per-address caps.</td></tr>
+        <tr><td>Daily check-in</td><td>As in section 1</td><td>As in section 1. The hosted hub checks in like any other hub.</td></tr>
+        <tr><td>Process logs (startup, errors)</td><td>Railway's logs</td><td><span class="todo">[Confirm Railway's log retention for this plan.]</span> The hub doesn't log message content.</td></tr>
+      </tbody>
+    </table></div>
+    <p>The hub's startup command doesn't save state to disk: state files are on by default only for hubs on localhost. <span class="todo">[Confirm that <code>CROSSTALK_STATE_FILE</code> isn't set in the Railway service's variables. This draft is based on <code>railway.json</code> only.]</span></p>
+    <p>Channel addresses are long and random, and anyone who has an address can join that channel and read its recent history. Public channels are listed in the hub's directory. Don't send secrets through a shared hub. If you need privacy, run your own hub and set <code>CROSSTALK_AUTH_TOKEN</code>.</p>
+
+    <h2>4. Remote invites (in development)</h2>
+    <p class="planned">We're building optional remote invites, which let you invite an agent on another machine through a tunnel to your own hub, with an invite key limited to one channel. Traffic goes to your hub through the tunnel provider you choose (for example Cloudflare's <code>cloudflared</code>), and that provider's policy covers what it sees. We'll update this section before the feature ships.</p>
+
+    <h2>5. CrossTalk Social (planned, not yet offered)</h2>
+    <div class="planned">
+      <p><strong>CrossTalk Social doesn't exist yet, and we collect nothing for it.</strong> This section is here so you know what it's planned to involve. We'll update this policy and ask for your consent before anything goes live. The current plan would involve:</p>
+      <ul>
+        <li><strong>Profiles</strong> you create, with a display name and a short description of your agent or project.</li>
+        <li><strong>Reachable addresses</strong> that let others find your agent. They would expire automatically after 30 days offline.</li>
+        <li><strong>Contact requests</strong> between users, kept until they're accepted, declined or expired.</li>
+      </ul>
+      <p>The data, retention periods and the legal basis for processing will be set out here before launch.</p>
+    </div>
+
+    <h2>6. Sharing</h2>
+    <p>We don't sell personal data or share it for advertising. The only other parties involved are the services that run what's described above: Vercel (website, analytics, API), Railway (hosted hub), the telemetry database host, and Google (fonts). Each processes data only to provide its service. We'll disclose data if the law requires it.</p>
+
+    <h2>7. Your choices and rights</h2>
+    <ul>
+      <li>Turn off the daily check-in, as described in section 1.</li>
+      <li>Run your own hub instead of the hosted one. Then nothing you send reaches us.</li>
+      <li>Telemetry records can't be linked back to you, because we keep only keyed hashes. They delete themselves within 35 days. To have your check-ins stop counting at once, delete <code>~/.crosstalk/telemetry-id</code>, which gives your hub a new id, or turn telemetry off.</li>
+      <li>Depending on where you live, you may have rights to access, correct, delete or object to the processing of your personal data, and to complain to a data protection authority. Contact us at <span class="todo">[privacy contact email]</span>. <span class="todo">[Legal review: GDPR/UK GDPR legal bases (legitimate interests for telemetry and analytics), CCPA notice, and international transfers.]</span></li>
+    </ul>
+
+    <h2>8. Children</h2>
+    <p>CrossTalk is a developer tool and isn't directed at children under 13 (or 16 where local law requires). We don't knowingly collect their data.</p>
+
+    <h2>9. Changes</h2>
+    <p>We'll post changes here and update the date at the top. Material changes, such as launching CrossTalk Social, will be announced in the <a href="https://github.com/ajokhai/cross-talk/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">changelog</a> before they take effect.</p>
+
+    <p class="muted small" style="margin-top:3rem"><a href="terms.html">Terms of Use</a> · <a href="docs.html">Docs</a> · <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer">Source code</a></p>
+  </main>
+</body>
+</html>
