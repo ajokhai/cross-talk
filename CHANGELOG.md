@@ -10,6 +10,12 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Security
+- `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
+  file is unlocked. In Claude Code that answer skipped the user's permission
+  prompt for every edit. The hook now prints nothing unless another agent
+  holds the file, and then asks.
+
 ## [2.8.0] - 2026-10-19
 
 ### Security
