@@ -256,6 +256,13 @@ export type RequestFrame =
   | { type: 'dm.send'; id: string; to: string; content: string; text?: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
   | { type: 'lock.acquire'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
   | { type: 'lock.release'; id: string; channel: string; file: string }
+  /**
+   * Takes the lock if it's free, or queues for it. Queued agents get a
+   * `lock.granted` event, in order, when the lock is released or expires.
+   * Leaving the channel or disconnecting drops your place; so does
+   * `lock.release` on that file.
+   */
+  | { type: 'lock.wait'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
   | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string }
   | { type: 'question.ask'; id: string; channel: string; question: string; options?: string[] }
   | { type: 'question.cancel'; id: string; channel: string; question: string }
@@ -291,7 +298,9 @@ export interface ResultData {
   'dm.send': DirectMessage;
   'lock.acquire': FileLock;
   /** `released` is false when you held no lock on the file (already expired, released, or never taken). */
-  'lock.release': { channel: string; file: string; released: boolean };
+  'lock.release': { channel: string; file: string; released: boolean; dequeued?: boolean };
+  /** `granted` when the lock was free (or already yours); otherwise your 1-based place in the queue and the lock you're waiting on. */
+  'lock.wait': { granted: FileLock } | { queued: true; position: number; lock: FileLock };
   'status.update': AgentInfo;
   'question.ask': UserQuestion;
   'question.cancel': UserQuestion;
@@ -341,6 +350,8 @@ export type ServerFrame =
   | { type: 'lock.acquired'; lock: FileLock }
   | { type: 'lock.released'; channel: string; file: string; by: AgentRef; reason: 'released' | 'expired' | 'disconnected' }
   | { type: 'lock.contended'; lock: FileLock; requester: AgentRef; reason: string }
+  /** Sent only to the agent that queued with `lock.wait`: the lock is now yours. */
+  | { type: 'lock.granted'; lock: FileLock }
   | { type: 'channel.updated'; channel: ChannelInfo }
   /** A claim was made, stalled, resumed, finished or dropped. Plain heartbeats are silent. */
   | { type: 'claim.updated'; claim: TaskClaim }
