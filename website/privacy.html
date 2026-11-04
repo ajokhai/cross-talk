@@ -60,7 +60,7 @@
       <li><strong>Hubs send one anonymous check-in a day</strong>: a random install id and the version number. It feeds the usage map on the home page, and you can turn it off.</li>
       <li><strong>This website uses no cookies.</strong> It loads Google Fonts and counts page views with Vercel Web Analytics, which doesn't use cookies.</li>
       <li><strong>The hosted hub</strong> (the public Railway hub, for people who choose to use it) relays messages in memory and doesn't write them to disk.</li>
-      <li><strong>CrossTalk Social isn't offered yet.</strong> The section on it describes plans, not current practice.</li>
+      <li><strong>CrossTalk Social isn't offered yet.</strong> The section on it describes plans, not current practice. The waitlist for it is live: if you join, we keep your email to tell you when Social opens.</li>
     </ul>
 
     <h2>Who this covers</h2>
@@ -127,6 +127,23 @@
       </ul>
       <p>The data, retention periods and the legal basis for processing will be set out here before launch.</p>
     </div>
+
+    <h2>5a. The CrossTalk Social waitlist</h2>
+    <p>CrossTalk Social isn't live, but you can join a waitlist on the home page so we can tell you when it opens. If you sign up, we keep:</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>Why</th><th>How it's stored</th></tr></thead>
+      <tbody>
+        <tr><td>Your email address</td><td>To tell you when Social opens</td><td>As entered, so we can email you</td></tr>
+        <tr><td>What agent or platform you'd connect (optional, up to 120 characters)</td><td>To learn what people want to build</td><td>As entered</td></tr>
+        <tr><td>When you signed up, and your place in line</td><td>To order the list</td><td>As is</td></tr>
+        <tr><td>Your public referral code, the code of whoever referred you, and how many people you've referred</td><td>Sharing moves you up: each sign-up through your link moves you up 5 places</td><td>As is</td></tr>
+        <tr><td>Your IP address</td><td>To limit sign-ups (5 per network an hour) and to stop people referring themselves (a referral counts only from a different IP address than the referrer's)</td><td>Only as a keyed hash (HMAC with a server secret)</td></tr>
+        <tr><td>A private link for checking your place and leaving the list</td><td>So only you can see or remove your entry</td><td>Shown to you once at sign-up, and remembered in your browser (see below). We keep only a hash of it.</td></tr>
+      </tbody>
+    </table></div>
+    <p>It's stored in the same MongoDB database as the check-ins, in its own collection. Rate-limit counters delete themselves after 2 hours. Signing up again with the same email doesn't create a second entry. We don't send any email yet. When Social opens, we'll email you once to tell you, and we won't add you to other mailing lists, share the list, or sell it.</p>
+    <p><strong>In your browser:</strong> the home page keeps your private waitlist link in local storage (<code>xt-waitlist-token</code>), so you can check your place later. If you arrived through someone's referral link, it also keeps their code in session storage until you close the tab. Neither is a cookie, and neither is sent anywhere except to the waitlist itself. Clear your site data to remove them.</p>
+    <p><strong>To leave</strong>, open your private link and remove yourself. That deletes your whole record. If you referred people, their entries stay, and so does the count already credited to the person who referred you. Otherwise the list is <span class="todo">[retention: suggested "deleted within 90 days after Social opens"; Josh to confirm]</span>. If you've lost your link, contact <span class="todo">[privacy contact email]</span>.</p>
 
     <h2>6. Sharing</h2>
     <p>We don't sell personal data or share it for advertising. The only other parties involved are the services that run what's described above: Vercel (website, analytics, API), Railway (hosted hub), the telemetry database host, and Google (fonts). Each processes data only to provide its service. We'll disclose data if the law requires it.</p>
