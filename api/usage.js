@@ -1,5 +1,6 @@
 // GET /api/usage: distinct checked-in hubs per country over the last 30 days,
-// and 1° cells holding at least 3 of them (`places`), for the globe on the
+// and 1° cells holding them (`places`; at least 3 per cell once there are 20+
+// hubs), for the globe on the
 // landing page.
 // {"configured":true,"windowDays":30,"total":N,"countries":{"US":12,...},"places":[{"country":"US","lat":37.5,"lon":-122.5,"n":4},...]}
 

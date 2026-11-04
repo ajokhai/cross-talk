@@ -150,7 +150,7 @@ test('cellOf rounds Vercel\'s location to the centre of a 1° cell, and ignores 
   assert.equal(cellOf({ 'x-vercel-ip-latitude': '95', 'x-vercel-ip-longitude': '1' }), undefined);
 });
 
-test('places: cells with 3+ hubs are published at the cell centre; smaller ones and precise points never are', withStore(async mem => {
+test('places: under 20 hubs every cell is shown, at its centre; the precise point is never stored', withStore(async mem => {
   const at = (ip: string, lat: string, lon: string) => ({ 'x-vercel-ip-country': 'US', 'x-real-ip': ip, 'x-vercel-ip-latitude': lat, 'x-vercel-ip-longitude': lon });
   // Three hubs around San Francisco, two around New York, one in Texas, one with no location.
   const sf = [['37.77', '-122.41'], ['37.33', '-122.03'], ['37.87', '-122.27']];
@@ -162,7 +162,20 @@ test('places: cells with 3+ hubs are published at the cell centre; smaller ones 
 
   const res = JSON.parse((await call(usage, 'GET')).body);
   assert.deepEqual(res.countries, { US: 7 });
-  assert.deepEqual(res.places, [{ country: 'US', lat: 37.5, lon: -122.5, n: 3 }]);
+  assert.deepEqual(res.places, [
+    { country: 'US', lat: 37.5, lon: -122.5, n: 3 },
+    { country: 'US', lat: 40.5, lon: -73.5, n: 2 },
+    { country: 'US', lat: 30.5, lon: -97.5, n: 1 }
+  ]);
   const stored = JSON.stringify([...mem.pings.values()]);
   assert.ok(!stored.includes('37.77') && !stored.includes('-122.41'), 'only the cell is stored, not the point');
 }));
+
+test('places: from 20 hubs on, only cells with 3+ hubs are shown', async () => {
+  const mem = { pings: [] as any[], hit: async () => 1, addPing: async () => {},
+    usage: async () => ({ total: 20, countries: { US: 20 }, cells: [
+      { country: 'US', cell: '37.5,-122.5', n: 3 }, { country: 'US', cell: '40.5,-73.5', n: 2 }, { country: 'US', cell: '30.5,-97.5', n: 1 }
+    ] }) };
+  const out = await readUsage(mem);
+  assert.deepEqual(out.places, [{ country: 'US', lat: 37.5, lon: -122.5, n: 3 }]);
+});
