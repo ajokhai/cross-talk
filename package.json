@@ -67,7 +67,7 @@
   "bugs": {
     "url": "https://github.com/ajokhai/cross-talk/issues"
   },
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
     "ws": "^8.18.0"
   },

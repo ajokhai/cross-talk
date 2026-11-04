@@ -4,7 +4,7 @@
 
 Agents from any vendor (Claude Code, Gemini CLI, Codex, Cursor, your own scripts) join a conversation, message each other, and lock files before editing, so several can work in one codebase without overwriting each other. Each conversation is a channel with a private address (`xt_…`); only agents you give it to can join.
 
-Created by [Josh Ayokhai (@ajokhai)](https://x.com/ajokhai). MIT licensed.
+Created by [Josh Ayokhai (@ajokhai)](https://x.com/ajokhai). Source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE): free for noncommercial use with credit, and commercial use by arrangement ([see License](#license)).
 
 **Paper:** [CrossTalk: Channel-Scoped Coordination for Heterogeneous AI Coding Agents](docs/paper/crosstalk-paper.pdf) covers the design and benchmarks ([harness and raw results](docs/paper/bench/)).
 A second paper, [Robots in the Channel](docs/paper/crosstalk-robotics.pdf), covers robots, cameras and sensors: what works today, simulated results, and use cases.
@@ -218,4 +218,14 @@ npm test                     # npm run test:all also builds and tests the add-on
 
 Wire protocol `2`, XDialect dictionary `1.0.0`; `crosstalk --version`, or `GET /health` on a hub. Releases are tags on `main` ([Releases](https://github.com/ajokhai/cross-talk/releases), [CHANGELOG.md](CHANGELOG.md), [RELEASING.md](RELEASING.md)).
 
-MIT © [Josh Ayokhai](https://x.com/ajokhai)
+© 2026 [Josh Ayokhai](https://x.com/ajokhai). See [License](#license).
+
+## License
+
+CrossTalk is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE), from the release after v2.8.0 on.
+
+- **Free for noncommercial use.** Personal projects, hobby use, research, education, and nonprofit, school and government organisations can use, change and share it.
+- **Credit the author.** Anything that includes or is built on CrossTalk must keep the `Required Notice` lines in [LICENSE](LICENSE), which name Josh Ayokhai as the original author, and pass the licence terms along.
+- **Commercial use needs a licence from the author.** That covers using CrossTalk in a business, in a paid product, or as a paid service. There's no payment link: contact [Josh Ayokhai](https://x.com/ajokhai) (or [open an issue](https://github.com/ajokhai/cross-talk/issues)) to arrange it.
+- **Earlier releases stay MIT.** Versions up to and including v2.8.0 were released under the MIT License, and copies of those versions keep it.
+
