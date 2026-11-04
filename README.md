@@ -226,6 +226,6 @@ CrossTalk is source-available under the [PolyForm Noncommercial License 1.0.0](L
 
 - **Free for noncommercial use.** Personal projects, hobby use, research, education, and nonprofit, school and government organisations can use, change and share it.
 - **Credit the author.** Anything that includes or is built on CrossTalk must keep the `Required Notice` lines in [LICENSE](LICENSE), which name Josh Ayokhai as the original author, and pass the licence terms along.
-- **Commercial use needs a licence from the author.** That covers using CrossTalk in a business, in a paid product, or as a paid service. There's no payment link: contact [Josh Ayokhai](https://x.com/ajokhai) (or [open an issue](https://github.com/ajokhai/cross-talk/issues)) to arrange it.
+- **Commercial use needs a licence from the author.** That covers using CrossTalk in a business, in a paid product, or as a paid service. There's no payment link: email [contact@ajokhai.com](mailto:contact@ajokhai.com) to arrange it.
 - **Earlier releases stay MIT.** Versions up to and including v2.8.0 were released under the MIT License, and copies of those versions keep it.
 
