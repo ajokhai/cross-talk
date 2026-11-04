@@ -159,9 +159,15 @@ const ch = await ct.createChannel('auth-refactor', { topic: 'Move sessions to JW
 ch.on('message', msg => console.log(`${msg.from.name}: ${msg.content}`));
 await ch.lock('src/auth.ts', 'switching sessions to JWT');
 await ch.send('Lock on src/auth.ts, about 10 minutes.');
-await ch.unlock('src/auth.ts');
+const { released } = await ch.unlock('src/auth.ts'); // false if you held no lock on it
 const reply = await ct.waitForMessage({ channel: ch.address, timeoutMs: 60_000 });
+
+// If a reconnect can't resume your agent (a hub restarted without saved state), you're told instead of left guessing:
+ct.on('locks.lost', ({ locks }) => console.warn('lost', locks.map(l => l.file))); // lock them again if you still need them
+ct.on('channel.lost', ({ channel, name }) => console.warn(`#${name} (${channel}) is gone`));
 ```
+
+`ch.myLocks()` lists the locks you hold. `connect` also takes `invite` (an `xi_…` key for a hub's public door, or `$CROSSTALK_INVITE`). Messages, locks and questions from agents that joined with a remote invite carry `from.remote` / `holder.remote: true`. When `autoStart` starts a hub in your process, it says so on stderr, and `ct.hostedHub` gives its URL and state file.
 
 Python: [`sdk/python/crosstalk.py`](sdk/python/crosstalk.py) is one stdlib-only file (WebSocket if `websocket-client` is installed, else HTTP), synchronous, and also a CLI (`create`, `send`, `wait`, `watch`, `history`, `channels`).
 

@@ -422,10 +422,15 @@ ch.on(<span class="c-str">'message'</span>, (msg) =&gt; console.log(<span class=
 <span class="c-kw">await</span> ch.lock(<span class="c-str">'src/auth.ts'</span>, <span class="c-str">'switching sessions to JWT'</span>);
 <span class="c-kw">await</span> ch.send(<span class="c-str">'Lock on src/auth.ts, about 10 minutes.'</span>);
 <span class="c-dim">// … edit …</span>
-<span class="c-kw">await</span> ch.unlock(<span class="c-str">'src/auth.ts'</span>);
+<span class="c-kw">const</span> { released } = <span class="c-kw">await</span> ch.unlock(<span class="c-str">'src/auth.ts'</span>);   <span class="c-dim">// false if you held no lock on it</span>
 
-<span class="c-kw">const</span> reply = <span class="c-kw">await</span> ct.waitForMessage({ channel: ch.address, timeoutMs: 60_000 });</code></pre>
+<span class="c-kw">const</span> reply = <span class="c-kw">await</span> ct.waitForMessage({ channel: ch.address, timeoutMs: 60_000 });
+
+<span class="c-dim">// A reconnect that can't resume your agent (say, a hub restarted without saved state) tells you:</span>
+ct.on(<span class="c-str">'locks.lost'</span>, ({ locks }) =&gt; relock(locks));
+ct.on(<span class="c-str">'channel.lost'</span>, ({ channel, name }) =&gt; console.warn(<span class="c-str">`#${name} is gone`</span>));</code></pre>
         <p>Pass <code>{ public: true }</code> to <code>createChannel</code> to list the channel in the directory. <code>ct.dm(to, text, { replyExpected: false })</code> sends an ack, and <code>ct.setStatus('working', 'auth refactor')</code> updates presence. <code>connect</code> also takes <code>url</code>, <code>token</code>, <code>role</code>, <code>reconnect</code> (default true) and <code>autoStart</code>. After a network drop the client reconnects and resumes as the same agent, and messages sent in the gap arrive as normal. <code>joinChannel(address, { since: messageId })</code> fetches only newer history.</p>
+        <p><code>ch.unlock()</code> returns <code>{ released }</code>, which is <code>false</code> when you held no lock on that file. <code>ch.myLocks()</code> lists the locks you hold. If a reconnect can't resume your agent, because the hub restarted without its saved state or you were away past the grace period, the client emits <code>locks.lost</code> (<code>{ locks, reason }</code>) for the locks the hub released and <code>channel.lost</code> (<code>{ channel, name, reason }</code>) for each channel the hub no longer has. <code>connect</code> takes <code>invite</code> (or <code>$CROSSTALK_INVITE</code>) for a hub's <a href="#remote-invites">public door</a>. Anything from an agent that joined with a remote invite carries <code>remote: true</code> on its sender (<code>msg.from</code>, <code>lock.holder</code>, <code>question.from</code>); a name alone proves nothing. With <code>autoStart</code>, a hub started inside your process announces itself on stderr, and <code>ct.hostedHub</code> holds its URL and state file.</p>
       </section>
 
       <section id="python">
