@@ -9,10 +9,17 @@
  *
  * Env: CROSSTALK_URL, CROSSTALK_CHANNEL (comma-separated channel addresses),
  *      CROSSTALK_AUTH_TOKEN, CROSSTALK_AGENT_NAME (your own locks are ignored).
+ *
+ * CROSSTALK_AUTOLOCK=1 (needs CROSSTALK_AGENT_NAME) also locks a free file on
+ * its first edit, in the first channel listed, with
+ * `crosstalk lock --until-commit`: the lock is released once the file's
+ * changes are committed. If someone else took the file in the meantime, the
+ * hook asks instead.
  */
 
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { execFileSync, execFile } from 'node:child_process';
 
 const base = (process.env.CROSSTALK_URL || 'ws://localhost:4488').replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '')
   // Node 18 resolves localhost to ::1 first; the hub listens on 127.0.0.1.
@@ -30,14 +37,32 @@ function targetFile(payload) {
   return payload.tool_input?.file_path || payload.tool_input?.notebook_path || payload.toolCall?.args?.TargetFile || null;
 }
 
-function repoRelative(file, cwd) {
-  if (!path.isAbsolute(file)) return file;
-  let root = cwd || process.cwd();
+function gitRoot(cwd) {
   try {
-    root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  } catch {}
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || cwd;
+  } catch {
+    return cwd;
+  }
+}
+
+function repoRelative(file, root) {
+  if (!path.isAbsolute(file)) return file;
   const rel = path.relative(root, file);
   return rel.startsWith('..') ? file : rel.split(path.sep).join('/');
+}
+
+/** Locks `rel` until it is committed, through the CLI's background holder. Resolves to null, or a reason to ask. */
+function autoLock(channel, rel, root) {
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'crosstalk.js');
+  return new Promise(resolve => {
+    execFile(process.execPath, [cli, 'lock', rel, '--until-commit', '-r', 'editing (locked on first edit)', '-c', channel, '-n', process.env.CROSSTALK_AGENT_NAME, '-u', process.env.CROSSTALK_URL || 'ws://localhost:4488'],
+      { cwd: root, timeout: 15_000, env: { ...process.env, NO_COLOR: '1' } },
+      (err, _out, stderr) => {
+        if (!err) return resolve(null);
+        const held = /HELD (.*)/.exec(stderr || '');
+        resolve(held ? `CrossTalk: ${held[1].slice(0, 200)}. Coordinate in the channel before editing.` : null);
+      });
+  });
 }
 
 async function checkLock(address, file) {
@@ -70,14 +95,23 @@ const file = targetFile(payload);
 let reason = null;
 
 if (file && targets.length) {
-  const rel = repoRelative(file, payload.cwd);
+  const root = gitRoot(payload.cwd || process.cwd());
+  const rel = repoRelative(file, root);
+  let mine = false;
+  let reachable = false;
   for (const target of targets) {
     const status = await checkLock(target, rel);
     const lock = status?.locked ? status.lock : null;
+    if (status && target === targets[0]) reachable = true;
     if (lock && lock.holder.name.toLowerCase() !== me) {
       reason = `CrossTalk: ${lock.file} is locked by ${JSON.stringify(lock.holder.name.slice(0, 40))} (reason: ${JSON.stringify(lock.reason.slice(0, 80))}). Coordinate in the channel before editing.`;
       break;
     }
+    if (lock && target === targets[0]) mine = true;
+  }
+  // Only a file inside the repo, free everywhere, and not already ours.
+  if (!reason && !mine && reachable && me && process.env.CROSSTALK_AUTOLOCK === '1' && !path.isAbsolute(rel)) {
+    reason = await autoLock(targets[0], rel, root);
   }
 }
 

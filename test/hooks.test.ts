@@ -44,3 +44,31 @@ test('pre-tool hook prints nothing when the hub is down', async () => {
   const env = { CROSSTALK_URL: 'ws://127.0.0.1:9', CROSSTALK_CHANNEL: 'xt_AAAAAAAAAAAAAAAAAAAAAA' };
   assert.equal(await runHook('hooks/pre-tool.js', env, { tool_input: { file_path: 'a.ts' } }), '');
 });
+
+test('with CROSSTALK_AUTOLOCK=1 the first edit locks a free file until it is committed', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const holders = fs.mkdtempSync(path.join(os.tmpdir(), 'xt-holders-'));
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const watcher = await CrossTalk.connect({ name: 'watcher', url: server.url, reconnect: false });
+  try {
+    const ch = await watcher.createChannel('autolock');
+    const env = {
+      CROSSTALK_URL: server.url, CROSSTALK_CHANNEL: ch.address, CROSSTALK_AGENT_NAME: 'editor', CROSSTALK_AUTOLOCK: '1',
+      CROSSTALK_HOLDERS_DIR: holders, CROSSTALK_HOLDER_IDLE_MS: '1000', CROSSTALK_HOLDER_GONE_MS: '1000', CROSSTALK_HOLDER_TICK_MS: '200'
+    };
+    assert.equal(await runHook('hooks/pre-tool.js', env, { tool_input: { file_path: path.resolve('src/version.ts') }, cwd: process.cwd() }), '');
+    await ch.refresh();
+    const lock = ch.locks.get('src/version.ts');
+    assert.equal(lock?.holder.name, 'editor');
+    assert.match(lock!.reason, /first edit/);
+
+    // Someone else editing it is now asked to coordinate.
+    const out = JSON.parse(await runHook('hooks/pre-tool.js', { ...env, CROSSTALK_AGENT_NAME: 'other' }, { tool_input: { file_path: 'src/version.ts' } }));
+    assert.equal(out.hookSpecificOutput.permissionDecision, 'ask');
+  } finally {
+    await watcher.close();
+    await server.close(); // the holder, cut off from the hub, exits shortly after
+  }
+});
