@@ -24,7 +24,7 @@
   "peerDependencies": {
     "cross-talk": "*"
   },
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "bin": {
     "crosstalk-bridge": "./dist/bridge-cli.js"
   },
