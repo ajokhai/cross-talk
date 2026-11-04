@@ -1098,9 +1098,14 @@ export class MeshHub {
     }
   }
 
-  /** Agents with role "locks" are lock holders for another agent (see `crosstalk lock`); they don't show as members. */
+  /**
+   * Helper connections that act for another agent of the same name don't show
+   * as members: "locks" (the `crosstalk lock` holder) and "runner" (one
+   * `crosstalk run` holding a slot). Their locks and slot places still do.
+   */
   private visible(id: string): boolean {
-    return this.agents.get(id)?.agent?.role !== 'locks';
+    const role = this.agents.get(id)?.agent?.role;
+    return role !== 'locks' && role !== 'runner';
   }
 
   private visibleMembers(channel: Channel): string[] {

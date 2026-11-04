@@ -144,6 +144,11 @@ test('lock holder connections (role "locks") hold locks under the agent\'s name 
   const dm = await a.ok({ type: 'dm.send', to: 'gemini', content: 'hi' });
   assert.equal(dm.to.id, gemini.id);
 
+  const runner = agent('gemini', 'runner');
+  await runner.ok({ type: 'channel.join', channel: room });
+  assert.equal((await a.ok<ChannelSnapshot>({ type: 'channel.state', channel: room })).members.length, 2, 'runners are hidden too');
+  hub.disconnect(runner.conn);
+
   hub.disconnect(holder.conn);
   assert.equal(a.events('member.left').length, 0, 'no leave announcement');
   assert.equal(a.events('lock.released').at(-1).file, 'src/db.ts', 'its locks go with it, and that is announced');
