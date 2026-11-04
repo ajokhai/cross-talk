@@ -25,6 +25,7 @@ __version__ = "2.8.0"
 
 import json
 import os
+import posixpath
 import re
 import shutil
 import sys
@@ -50,6 +51,17 @@ ADDRESS_RE = re.compile(r"^xt_[A-Za-z0-9_-]{22}$")
 POLL_WAIT_SECONDS = 25
 REQUEST_TIMEOUT = 30
 INBOX_LIMIT = 1000
+
+
+def _lock_path(file: str) -> str:
+    """Normalizes a lock path the way the hub does."""
+    cleaned = file.strip().replace("\\", "/")
+    if not cleaned:
+        return ""
+    normalized = posixpath.normpath(cleaned)
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    return "" if normalized in (".", "/") else normalized
 
 
 class CrossTalkError(Exception):
@@ -312,8 +324,14 @@ class Channel:
     def lock(self, file: str, reason: str, ttl: Optional[int] = None) -> Dict[str, Any]:
         return self._client.lock(self.address, file, reason, ttl)
 
-    def unlock(self, file: str) -> None:
-        self._client.unlock(self.address, file)
+    def unlock(self, file: str) -> bool:
+        """True if a lock was released. False if you held none on that file (check the path)."""
+        return self._client.unlock(self.address, file)
+
+    def my_locks(self) -> List[Dict[str, Any]]:
+        """The locks you hold in this channel, as of the last update from the hub."""
+        me = (self._client.agent or {}).get("id")
+        return [l for l in self.locks.values() if l["holder"]["id"] == me]
 
     def wait_for_message(self, timeout: float = 60) -> Optional[Dict[str, Any]]:
         return self._client.wait_for_message(self.address, timeout=timeout, include_dms=False)
@@ -512,10 +530,27 @@ class CrossTalk:
 
     def lock(self, channel: str, file: str, reason: str, ttl: Optional[int] = None) -> Dict[str, Any]:
         """Claims an advisory file lock. Raises CrossTalkError('lock_held', details=<current lock>)."""
-        return self.request("lock.acquire", channel=channel, file=self._relative(file), reason=reason, ttlSeconds=ttl)
+        lock = self.request("lock.acquire", channel=channel, file=self._relative(file), reason=reason, ttlSeconds=ttl)
+        known = self.channels.get(channel)
+        if known and isinstance(lock, dict) and lock.get("file"):
+            known.locks[lock["file"]] = lock
+        return lock
 
-    def unlock(self, channel: str, file: str) -> None:
-        self.request("lock.release", channel=channel, file=self._relative(file))
+    def unlock(self, channel: str, file: str) -> bool:
+        """
+        Releases a file lock. Returns True if one was released, and False if you
+        held none on that file, so a mistyped path doesn't pass silently. Raises
+        CrossTalkError('forbidden', details=<lock>) if someone else holds it.
+        """
+        path = _lock_path(self._relative(file))
+        known = self.channels.get(channel)
+        held_before = bool(known and (known.locks.get(path) or {}).get("holder", {}).get("id") == (self.agent or {}).get("id"))
+        result = self.request("lock.release", channel=channel, file=path) or {}
+        if known:
+            known.locks.pop(result.get("file") or path, None)
+        released = result.get("released")
+        # Older hubs don't say; fall back to what this client last saw.
+        return released if isinstance(released, bool) else held_before
 
     def set_status(self, status: Optional[str] = None, current_task: Optional[str] = None) -> Dict[str, Any]:
         """status is 'idle', 'working' or 'waiting'."""

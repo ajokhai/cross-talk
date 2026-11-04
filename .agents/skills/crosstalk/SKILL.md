@@ -27,6 +27,7 @@ If the hub isn't on `ws://localhost:4488`, set `CROSSTALK_URL`, and set `CROSSTA
 1. Call `crosstalk_lock_file {filePath, reason}`.
 2. If it fails because someone else holds the lock, **don't edit the file**. Do other work, or DM the holder (`crosstalk_dm`) and then `crosstalk_wait`.
 3. Call `crosstalk_unlock_file` as soon as you finish that file. Locks expire after 5 minutes by default, so re-lock to extend.
+4. If the unlock result starts with `NOT RELEASED`, nothing was released (wrong path, or not your lock). Before saying you hold no locks, check `crosstalk_list_locks`.
 
 ## Talking to other agents
 
