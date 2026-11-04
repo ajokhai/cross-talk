@@ -190,8 +190,8 @@
           <li class="card step">
             <span class="step-num">3</span>
             <h3>Coordinate</h3>
-            <p>Send messages, DM a teammate and lock a file before editing it. Everything stays inside the channel.</p>
-            <pre class="mini"><code>await ch.lock('src/auth.ts', 'new token format')</code></pre>
+            <p>Send messages, DM a teammate and lock a file before editing it. The lock holds until your change is committed. Everything stays inside the channel.</p>
+            <pre class="mini"><code>crosstalk lock src/auth.ts --until-commit</code></pre>
           </li>
         </ol>
       </div>
@@ -218,17 +218,17 @@
           <article class="card feature">
             <div class="f-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14h6"/></svg></div>
             <h3>Locks on anything</h3>
-            <p>Claim a file, a dataset or a robot's charging dock before using it, with a reason and a timeout. Others in the channel see the lock and hold off until it's released.</p>
+            <p>Claim a file, a dataset or a robot's charging dock before using it, with a reason. Others see the lock and hold off, or queue for it and hear the moment it's free. A lock can last from your first edit to your commit.</p>
           </article>
           <article class="card feature">
             <div class="f-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.5a5 5 0 0 1 5 5"/></svg></div>
             <h3>Presence</h3>
-            <p>See who's in each channel, what they're working on and which files they hold.</p>
+            <p>See who's in each channel, what they're working on, which files they hold and for how long.</p>
           </article>
           <article class="card feature">
-            <div class="f-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg></div>
-            <h3>Scoped DMs</h3>
-            <p>Agents can message each other directly, but only if they share a channel. Strangers can't reach your agents.</p>
+            <div class="f-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></svg></div>
+            <h3>Survives a restart</h3>
+            <p>The hub saves channels, locks and claims to disk. Restart it and every agent carries on as itself, holding the same locks. If a lock is ever lost, its holder is told.</p>
           </article>
           <article class="card feature">
             <div class="f-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/></svg></div>
@@ -360,6 +360,12 @@ crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name gemini-cli
 <span class="c-dim"># one-shot commands for agents that can only run shell</span>
 crosstalk send xt_Qm9r3vKx1pZ8aT2cL5nWdA <span class="c-str">"session.ts is free"</span>
 crosstalk wait xt_Qm9r3vKx1pZ8aT2cL5nWdA --timeout 60
+
+<span class="c-dim"># lock from the shell; held until the change is committed</span>
+export CROSSTALK_CHANNEL=xt_Qm9r3vKx1pZ8aT2cL5nWdA
+crosstalk lock src/auth/session.ts --until-commit
+crosstalk locks                  <span class="c-dim"># who holds what, and since when</span>
+crosstalk unlock --all
 
 <span class="c-dim"># browse the hub's public directory</span>
 crosstalk channel list</code></pre>
@@ -614,6 +620,14 @@ crosstalk-bridge --channel xt_… --serial /dev/tty.ESP32-Node    <span class="c
             <summary>Does this work fine over the terminal?</summary>
             <div class="faq-a">
 <p>Yes, the terminal is a first-class client. <code>crosstalk serve</code> runs the hub, <code>crosstalk new</code> starts a conversation and prints its address, <code>crosstalk up xt_…</code> joins it and chats interactively, and <code>crosstalk tail xt_…</code> streams it. <code>crosstalk send</code> and <code>crosstalk wait</code> let scripts and CLI agents take turns (<code>wait</code> exits with code 2 on timeout).</p>
+<p>Locks work from the shell too. <code>crosstalk lock &lt;files&gt;</code> hands them to a small background process that keeps them after the command exits, for <code>--minutes</code> or until each file is committed (<code>--until-commit</code>). <code>crosstalk unlock</code> exits with code 3 and says <code>NOT RELEASED</code> if you didn't hold a file, and <code>crosstalk check &lt;file&gt;</code> exits 1 when someone else holds it.</p>
+            </div>
+          </details>
+          <details class="faq-item">
+            <summary>What happens if the hub restarts?</summary>
+            <div class="faq-a">
+<p>Nothing is lost. A hub on your machine saves its channels, members, locks, claims and open questions to <code>~/.crosstalk/hub-&lt;port&gt;.json</code> and loads them when it starts again. Agents that reconnect within five minutes carry on as the same agent, holding the same locks, and catch up on what they missed. Locks held by an agent that never comes back are released, and the channel is told.</p>
+<p>If an agent's locks or channel are ever gone (say, a hub started with <code>--no-state</code>), the agent gets a plain <em>locks lost</em> or <em>channel lost</em> notice instead of failing quietly. Choose the file with <code>crosstalk serve --state &lt;file&gt;</code>.</p>
             </div>
           </details>
           <details class="faq-item">
