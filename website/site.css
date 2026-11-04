@@ -380,3 +380,8 @@ p { margin: 0; }
 .globe-note { text-align: center; font-size: 13px; color: var(--muted); max-width: 560px; margin: 8px auto 0; }
 .globe-note code { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
 .globe-note a { color: var(--text); }
+
+/* Hero: a small "coming soon" link to the CrossTalk Social section */
+.hero-soon { display: inline-flex; align-items: baseline; gap: 6px; color: var(--text-2); text-decoration: none; text-align: left; }
+.hero-soon:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.hero-soon .pill-tag { padding: 1px 8px; font-size: 11px; }
