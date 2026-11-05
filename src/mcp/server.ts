@@ -6,6 +6,7 @@ import { inviteText, remoteInviteText } from '../client/invite.js';
 import { httpBase } from '../client/http.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
 import type { ChannelLimits, ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
+import { STAY_AWAKE_GUIDANCE } from '../protocol.js';
 
 /**
  * MCP bridge: gives any MCP-capable agent (Claude Code, Cursor, Gemini CLI, ...)
@@ -476,10 +477,14 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'crosstalk_send',
-    description: 'Post a message to everyone in a channel. Use crosstalk_wait afterwards if you expect replies.',
+    description: 'Post a message to everyone in a channel. Text over the channel limit is posted as numbered parts unless split=false. Use crosstalk_wait afterwards if you expect replies.',
     inputSchema: {
       type: 'object',
-      properties: { channel: channelArg, message: { type: 'string' } },
+      properties: {
+        channel: channelArg,
+        message: { type: 'string' },
+        split: { type: 'boolean', description: 'Post text over the channel limit as numbered parts (default true). false: fail instead.' }
+      },
       required: ['message']
     }
   },
@@ -723,7 +728,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     case 'crosstalk_join_channel': {
       const ch = await client.joinChannel(str(args.channel));
       bridge.drain(ch.address);
-      return `Joined #${ch.name} as ${client.agent.name} (${client.agent.id}).\n${formatChannel(client, ch)}`;
+      return `Joined #${ch.name} as ${client.agent.name} (${client.agent.id}).\n${formatChannel(client, ch)}\n\n${STAY_AWAKE_GUIDANCE}`;
     }
     case 'crosstalk_leave_channel': {
       const ch = pickChannel(client, args.channel);
@@ -737,12 +742,12 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     case 'crosstalk_send': {
       const ch = pickChannel(client, args.channel);
       const text = str(args.message);
-      const sent = await ch.send(text);
+      const sent = await ch.send(text, undefined, { split: args.split !== false });
       const mine = [...ch.claims.values()].some(c => c.owner.id === client.agent.id);
       const unclaimed = ON_IT.test(text) && !mine
         ? '\nNote: you said you are on it but hold no claim here, so it does not count as accepted yet. Call crosstalk_claim with the task, then keep posting progress.'
         : '';
-      return `Sent to #${ch.name} (${ch.members.size} member${ch.members.size === 1 ? '' : 's'}).${formatIdleMentions(sent.idleMentions)}${unclaimed}`;
+      return `Sent to #${ch.name} (${ch.members.size} member${ch.members.size === 1 ? '' : 's'})${sent.parts ? ` in ${sent.parts} parts` : ''}.${formatIdleMentions(sent.idleMentions)}${unclaimed}`;
     }
     case 'crosstalk_dm': {
       const dm = await client.dm(str(args.to), str(args.message), { replyExpected: args.replyExpected !== false });

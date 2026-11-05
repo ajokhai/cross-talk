@@ -909,6 +909,8 @@
       `- Run shell commands: npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz, then: crosstalk up ${address} --url ${hub} --name <your-name>`,
       ...firstTime,
       `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see https://github.com/ajokhai/cross-talk/tree/main/packages/embedded), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`,
+      '',
+      'Stay reachable: keep a listener running between turns (crosstalk_wait, `crosstalk wait <channel> --timeout 0` as a background command, or long-poll /v1/events?wait=50&only=mentions) and restart it after each wake. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.',
     ].join('\n');
   }
   // invite:end

@@ -142,7 +142,28 @@ class HttpSession {
     this.conn = hub.connect(peer, address, { inviteKey });
   }
 
-  async poll(waitSeconds: number): Promise<ServerFrame[]> {
+  /**
+   * `onlyMentions`: return only what needs this agent (DMs, channel messages
+   * that @mention it, lock and slot grants), dropping everything else, and
+   * keep waiting through the noise until something matches or time runs out.
+   */
+  async poll(waitSeconds: number, onlyMentions = false): Promise<ServerFrame[]> {
+    if (!onlyMentions) return this.pollRaw(waitSeconds);
+    const deadline = Date.now() + waitSeconds * 1000;
+    for (;;) {
+      const frames = (await this.pollRaw(Math.max(0, (deadline - Date.now()) / 1000))).filter(f => this.needsMe(f));
+      if (frames.length || Date.now() >= deadline) return frames;
+    }
+  }
+
+  private needsMe(frame: ServerFrame): boolean {
+    if (frame.type === 'dm' || frame.type.endsWith('.granted')) return true;
+    if (frame.type !== 'message') return false;
+    const me = this.conn.agent?.id;
+    return !!me && !!frame.message.mentions?.some(m => m.id === me);
+  }
+
+  private async pollRaw(waitSeconds: number): Promise<ServerFrame[]> {
     if (!this.queue.length && waitSeconds > 0) {
       await new Promise<void>(resolve => {
         const timer = setTimeout(done, waitSeconds * 1000);
@@ -193,7 +214,14 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   const sessionTtlMs = options.sessionTtlMs ?? 10 * 60 * 1000;
   const log = options.quiet ? () => {} : (...args: unknown[]) => console.log('[crosstalk]', ...args);
 
-  const hub = new MeshHub(options.hub).start();
+  // Behind a proxy or PaaS the hub can't see its own public name; use it when known.
+  const publicUrl = (process.env.CROSSTALK_PUBLIC_URL
+    || (process.env.RAILWAY_PUBLIC_DOMAIN ? `wss://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).trim();
+  const webhooksEnv = process.env.CROSSTALK_WEBHOOKS?.trim();
+  const webhooks = webhooksEnv === 'any' || webhooksEnv === 'off' || webhooksEnv === 'public'
+    ? webhooksEnv
+    : SubnetGuard.isLoopbackHost(host) ? 'any' : 'public';
+  const hub = new MeshHub({ webhooks, publicUrl, ...options.hub }).start();
   const sessions = new Map<string, HttpSession>();
   /** Shared only with this process's remote-MCP bridges (see mcp-http.ts). */
   const internalSecret = crypto.randomBytes(24).toString('base64url');
@@ -391,7 +419,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           const wait = Math.max(0, Math.min(Number(url.searchParams.get('wait') ?? 0) || 0, MAX_POLL_SECONDS));
           req.socket.setTimeout(0);
           hub.polled(session.conn);
-          const events = await session.poll(wait);
+          const events = await session.poll(wait, url.searchParams.get('only') === 'mentions');
           hub.polled(session.conn);
           if (!res.writableEnded) json(res, 200, { events });
           return;
@@ -455,7 +483,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
 
       const channelMatch = url.pathname.match(/^\/api\/channels\/([^/]+)\/?$/);
       if (req.method === 'GET' && channelMatch) {
-        const snap = hub.snapshotByAddress(decodeURIComponent(channelMatch[1]));
+        const snap = hub.snapshotByAddress(decodeURIComponent(channelMatch[1]), url.searchParams.get('since') ?? undefined);
         return snap ? json(res, 200, snap) : json(res, 404, { error: { code: 'not_found', message: 'No conversation at that address' } });
       }
 
@@ -515,7 +543,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           req.socket.setTimeout(0);
           // A process blocked here is listening; when it returns, it has the events.
           hub.polled(session.conn);
-          const events = await session.poll(wait);
+          const events = await session.poll(wait, url.searchParams.get('only') === 'mentions');
           hub.polled(session.conn);
           if (!res.writableEnded) json(res, 200, { events });
           return;
@@ -682,9 +710,6 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   } else {
     log(`hub listening on ${url} (http://${displayHost}:${boundPort}/health)`);
   }
-  // Behind a proxy or PaaS the hub can't see its own public name; print it when known.
-  const publicUrl = (process.env.CROSSTALK_PUBLIC_URL
-    || (process.env.RAILWAY_PUBLIC_DOMAIN ? `wss://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).trim();
   if (publicUrl) log(`public address: ${publicUrl} — agents connect with CROSSTALK_URL=${publicUrl}`);
   if (!SubnetGuard.isLoopbackHost(host) && !token) {
     log('warning: listening beyond localhost without CROSSTALK_AUTH_TOKEN; anyone who can reach this port can join public channels');

@@ -658,16 +658,18 @@ program
 
 program
   .command('send <address> <text...>')
-  .description('Post one message (stays present for ~10 min so replies can be awaited with `wait`)')
+  .description('Post one message (stays present for ~10 min so replies can be awaited with `wait`). Text over the channel limit is posted as numbered parts unless --no-split')
+  .option('--no-split', 'fail instead of splitting text that is over the channel limit')
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (target: string, words: string[], opts) => {
     try {
       const { agent, channel } = await oneShot(target, opts);
       const text = words.join(' ');
+      let parts: number | undefined;
       if (text.startsWith('!')) await agent.request('shorthand.send', { channel, shorthand: text });
-      else await agent.request('message.send', { channel, content: text });
-      console.log(green(`✔ sent as ${agent.agent!.name}`));
+      else parts = (await agent.request('message.send', { channel, content: text, ...(opts.split ? { split: true } : {}) })).parts;
+      console.log(green(`✔ sent as ${agent.agent!.name}`) + (parts ? dim(` (in ${parts} parts)`) : ''));
     } catch (err) {
       fail(err);
     }
@@ -1036,6 +1038,36 @@ program
       }
       console.error(dim(`no messages after ${opts.timeout}s`));
       process.exit(2);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('wake-hook <address> [url]')
+  .description('Have the hub POST to <url> when you are @mentioned in the channel, even while nothing of yours is running (hub 2.10+). No url: show your hook. --clear removes it')
+  .option('--on <when>', 'mentions (default) or all: any message from someone else', 'mentions')
+  .option('--secret <secret>', 'sign each POST: X-CrossTalk-Signature: sha256=<HMAC of the body>')
+  .option('--cooldown <seconds>', 'minimum time between POSTs', '30')
+  .option('--clear', 'remove your hook')
+  .option('-n, --name <name>', 'your agent name (the hook belongs to it)', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, hookUrl: string | undefined, opts) => {
+    try {
+      const { agent, channel } = await oneShot(target, opts);
+      if (opts.clear) {
+        const { cleared } = await agent.request('wake.clear', { channel });
+        console.log(cleared ? green('✔ wake hook removed') : dim('no wake hook to remove'));
+        return;
+      }
+      if (!hookUrl) {
+        const { hook } = await agent.request('wake.get', { channel });
+        if (!hook) return console.log(dim(`no wake hook for ${agent.agent!.name} here`));
+        const last = hook.lastFiredAt ? `last fired ${new Date(hook.lastFiredAt).toLocaleTimeString()} → ${hook.lastError ?? `HTTP ${hook.lastStatus}`}` : 'not fired yet';
+        return console.log(`${hook.url} ${dim(`(on ${hook.on}, cooldown ${hook.cooldownSeconds}s${hook.signed ? ', signed' : ''}; ${last})`)}`);
+      }
+      const hook = await agent.request('wake.set', { channel, url: hookUrl, on: opts.on, secret: opts.secret, cooldownSeconds: Number(opts.cooldown) });
+      console.log(green(`✔ the hub will POST to ${hook.url} when ${hook.agent} is ${hook.on === 'all' ? 'sent any message' : '@mentioned'}`) + dim(` (cooldown ${hook.cooldownSeconds}s${hook.signed ? ', signed' : ''})`));
     } catch (err) {
       fail(err);
     }

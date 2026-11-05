@@ -23,7 +23,10 @@ import {
   type Slot,
   type SlotHold,
   type TaskClaim,
-  type UserQuestion
+  type UserQuestion,
+  type WakeHook,
+  type WakePayload,
+  STAY_AWAKE_GUIDANCE
 } from '../protocol.js';
 import { LockManager, type LockManagerOptions } from './locks.js';
 import { DialectEngine } from '../dialect/engine.js';
@@ -83,7 +86,26 @@ export interface HubOptions {
   /** Persistence hook, called for every channel message (e.g. write to a database). */
   onMessage?: (message: ChannelMessage) => void;
   now?: () => number;
+  /**
+   * Wake hooks (`wake.set`): 'public' (default) accepts only https URLs whose
+   * host is not localhost or a private/link-local IP literal; 'any' accepts
+   * http and private hosts too (for a hub on your own machine or LAN); 'off'
+   * refuses wake.set.
+   */
+  webhooks?: 'public' | 'any' | 'off';
+  /** How wake hooks are delivered; defaults to the global fetch. Tests inject a stub. */
+  fetch?: (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{ status: number }>;
+  /** The hub's own public address, put in wake payloads so a receiver knows where to reconnect. */
+  publicUrl?: string;
 }
+
+interface WakeState extends WakeHook {
+  secret?: string;
+  /** Messages since the hook last fired. */
+  pending: number;
+}
+
+const PRIVATE_HOST = /^(localhost|.*\.localhost|.*\.local|.*\.internal|0\.0\.0\.0|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+|::1?|f[cd][0-9a-f]{2}:.*|fe80:.*|::ffff:.*)$/i;
 
 export class HubFailure extends Error {
   constructor(readonly code: ErrorCode, message: string, readonly details?: unknown) {
@@ -124,6 +146,8 @@ interface Channel {
   senders: Map<string, Bucket>;
   /** Counted semaphores by name. */
   slots: Map<string, SlotState>;
+  /** Wake hooks by lowercased agent name. In memory only. */
+  wakes: Map<string, WakeState>;
 }
 
 interface SlotState {
@@ -153,6 +177,31 @@ class Bucket {
     }
     return Math.ceil(((1 - this.tokens) / this.perSecond) * 1000);
   }
+
+  /** True when `count` tokens are available now; takes none. */
+  canTake(count: number, now: number): boolean {
+    return Math.min(this.burst, this.tokens + ((now - this.refilledAt) / 1000) * this.perSecond) >= count;
+  }
+}
+
+/**
+ * Cuts `text` into parts of at most `max` characters, each prefixed `[i/n] `,
+ * breaking at a newline or space near the end of a part when there is one.
+ */
+export function splitText(text: string, max: number): string[] {
+  const prefixRoom = 12; // "[999/999] " plus slack
+  const room = Math.max(1, max - prefixRoom);
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > room) {
+    let cut = rest.lastIndexOf('\n', room);
+    if (cut < room * 0.5) cut = rest.lastIndexOf(' ', room);
+    if (cut < room * 0.5) cut = room;
+    chunks.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).replace(/^[ \n]+/, '');
+  }
+  if (rest) chunks.push(rest);
+  return chunks.map((chunk, i) => `[${i + 1}/${chunks.length}] ${chunk}`);
 }
 
 /** Channel limits unless the hub or the channel's creator says otherwise. */
@@ -248,7 +297,9 @@ export class MeshHub {
   private readonly resumable = new Map<string, Connection>(); // resume token hash -> connection (live or dropped)
   private readonly invites = new Map<string, Invite>(); // key hash -> invite
   private changes = 0;
-  private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now' | 'channelLimits'>> & { channelLimits: ChannelLimits };
+  private readonly opts: Required<Omit<HubOptions, 'locks' | 'onMessage' | 'now' | 'channelLimits' | 'fetch' | 'publicUrl'>> & { channelLimits: ChannelLimits };
+  private readonly deliver: NonNullable<HubOptions['fetch']>;
+  private readonly publicUrl: string;
   private readonly onMessage?: (message: ChannelMessage) => void;
   private readonly now: () => number;
   private sweeper?: NodeJS.Timeout;
@@ -276,8 +327,11 @@ export class MeshHub {
       unusedChannelTtlMs: options.unusedChannelTtlMs ?? 10 * 60 * 1000,
       presenceGraceMs: options.presenceGraceMs ?? 2 * 60 * 1000,
       idleAfterMs: options.idleAfterMs ?? 5 * 60 * 1000,
-      rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 }
+      rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 },
+      webhooks: options.webhooks ?? 'public'
     };
+    this.deliver = options.fetch ?? ((url, init) => fetch(url, init));
+    this.publicUrl = options.publicUrl ?? '';
   }
 
   /** Starts the periodic sweep for expired locks and abandoned channels. */
@@ -523,7 +577,7 @@ export class MeshHub {
       case 'channel.receipts': return { receipts: this.receipts(this.memberChannel(conn, f.channel), f.limit) };
       case 'claim.create': return this.createClaim(conn, f.channel, f.task, f.everySeconds, f.paths);
       case 'claim.update': return this.updateClaims(conn, f.channel, f.claim, f.note, f.status);
-      case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata);
+      case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata, f.split === true);
       case 'shorthand.send': return this.postShorthand(conn, f.channel, f.shorthand);
       case 'dm.send': return this.sendDirect(conn, f.to, f.content ?? f.text, f.replyExpected, f.metadata);
       case 'lock.acquire': return this.acquireLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
@@ -536,6 +590,15 @@ export class MeshHub {
       case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
       case 'question.answer': return this.answerQuestion(conn, f.channel, f.question, f.answer, f.ownerKey);
       case 'channel.configure': return this.configureChannel(conn, f.channel, f.ownerKey, f.questions);
+      case 'wake.set': return this.setWake(conn, f.channel, f.url, f.on, f.secret, f.cooldownSeconds);
+      case 'wake.clear': {
+        const channel = this.memberChannel(conn, f.channel);
+        return { channel: channel.id, cleared: channel.wakes.delete(conn.agent!.name.toLowerCase()) };
+      }
+      case 'wake.get': {
+        const hook = this.memberChannel(conn, f.channel).wakes.get(conn.agent!.name.toLowerCase());
+        return { hook: hook ? this.wakeView(hook) : null };
+      }
       default: return fail('bad_request', `Unknown request type "${(f as { type: string }).type}"`);
     }
   }
@@ -582,6 +645,7 @@ export class MeshHub {
       reads: new Map(),
       claims: new Map(),
       slots: new Map(),
+      wakes: new Map(),
       limits: fixed,
       senders: new Map()
     };
@@ -599,7 +663,7 @@ export class MeshHub {
       this.addMember(conn, channel);
     }
     this.markRead(channel, conn.agent!.id);
-    return this.snapshot(channel, since);
+    return { ...this.snapshot(channel, since), guidance: STAY_AWAKE_GUIDANCE };
   }
 
   private leaveChannel(conn: Connection, address: unknown): { channel: string } {
@@ -850,9 +914,9 @@ export class MeshHub {
   }
 
   /** Read-only view for HTTP observers. Knowing the address is the capability. */
-  snapshotByAddress(address: string): ChannelSnapshot | undefined {
+  snapshotByAddress(address: string, since?: string): ChannelSnapshot | undefined {
     const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
-    return channel ? this.snapshot(channel) : undefined;
+    return channel ? this.snapshot(channel, since) : undefined;
   }
 
   /** Lock lookup for editor hooks. */
@@ -912,6 +976,7 @@ export class MeshHub {
     if (channel.history.length > this.opts.historyLimit) channel.history.shift();
     channel.lastActivity = message.timestamp;
     this.emit(channel, { type: 'message', message }, sender.agent!.id);
+    this.fireWakes(channel, message);
     try {
       this.onMessage?.(message);
     } catch (err) {
@@ -924,9 +989,13 @@ export class MeshHub {
     return idle.length ? { ...message, idleMentions: idle } : message;
   }
 
-  private postMessage(conn: Connection, address: unknown, content: unknown, metadata: unknown): ChannelMessage {
+  private postMessage(conn: Connection, address: unknown, content: unknown, metadata: unknown, split = false): ChannelMessage {
     const channel = this.memberChannel(conn, address);
-    const text = this.messageText(content, channel.limits.maxMessageChars);
+    const max = channel.limits.maxMessageChars;
+    if (split && typeof content === 'string' && content.length > max) {
+      return this.postSplit(conn, channel, content, metadata);
+    }
+    const text = this.messageText(content, max);
     this.spend(channel, conn);
     const message: ChannelMessage = {
       id: newId('msg'),
@@ -939,6 +1008,145 @@ export class MeshHub {
     const meta = this.metadata(metadata);
     if (meta) message.metadata = meta;
     return this.record(channel, message, conn);
+  }
+
+  /**
+   * Posts text over the channel limit as numbered parts. Every part is checked
+   * against the sender's message allowance before any is posted, so a long
+   * text is never left half-sent by the rate limit.
+   */
+  private postSplit(conn: Connection, channel: Channel, content: string, metadata: unknown): ChannelMessage {
+    const max = channel.limits.maxMessageChars;
+    if (content.length > this.opts.maxMessageChars * 8) {
+      fail('bad_request', `Message is ${content.length} characters; split posts allow up to ${this.opts.maxMessageChars * 8}. Point to a file instead.`);
+    }
+    const meta = this.metadata(metadata);
+    const parts = splitText(content, max);
+    if (this.opts.rateLimits) {
+      const id = conn.agent!.id;
+      let bucket = channel.senders.get(id);
+      if (!bucket) channel.senders.set(id, (bucket = new Bucket(channel.limits.messageBurst, channel.limits.messagesPerMinute / 60, this.now())));
+      if (!bucket.canTake(parts.length, this.now())) {
+        fail('rate_limited', `Splitting this message needs ${parts.length} posts; your allowance here is lower right now. Wait and retry, or send less.`, { parts: parts.length });
+      }
+    }
+    let first: ChannelMessage | undefined;
+    parts.forEach((text, i) => {
+      this.spend(channel, conn);
+      const message: ChannelMessage = {
+        id: newId('msg'),
+        channel: channel.id,
+        kind: 'chat',
+        from: conn.ref,
+        content: text,
+        timestamp: this.now()
+      };
+      if (meta) message.metadata = { ...meta, part: i + 1, parts: parts.length };
+      else message.metadata = { part: i + 1, parts: parts.length };
+      const recorded = this.record(channel, message, conn);
+      first ??= recorded;
+    });
+    return { ...first!, parts: parts.length };
+  }
+
+  // -------------------------------------------------------------------------
+  // Wake hooks
+  // -------------------------------------------------------------------------
+
+  private setWake(conn: Connection, address: unknown, url: unknown, on: unknown, secret: unknown, cooldown: unknown): WakeHook {
+    const channel = this.memberChannel(conn, address);
+    if (this.opts.webhooks === 'off') fail('forbidden', 'Wake hooks are switched off on this hub');
+    if (conn.invite) fail('forbidden', 'Agents that joined with a remote invite cannot register wake hooks');
+    if (typeof url !== 'string' || url.length > 2048) fail('bad_request', 'url must be a string of at most 2048 characters');
+    let parsed: URL;
+    try {
+      parsed = new URL(url as string);
+    } catch {
+      return fail('bad_request', 'url is not a valid URL');
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') fail('bad_request', 'url must be http(s)');
+    if (parsed.username || parsed.password) fail('bad_request', 'url must not contain credentials; use secret to sign requests');
+    if (this.opts.webhooks === 'public') {
+      if (parsed.protocol !== 'https:') fail('bad_request', 'This hub only calls https wake hooks');
+      const host = parsed.hostname.replace(/^\[|\]$/g, '');
+      if (PRIVATE_HOST.test(host)) fail('bad_request', 'This hub does not call local or private addresses');
+    }
+    if (on !== undefined && on !== 'mentions' && on !== 'all') fail('bad_request', 'on must be "mentions" or "all"');
+    if (secret !== undefined && (typeof secret !== 'string' || secret.length < 8 || secret.length > 256)) {
+      fail('bad_request', 'secret must be 8 to 256 characters');
+    }
+    const cooldownSeconds = cooldown === undefined ? 30 : Math.round(Number(cooldown));
+    if (!Number.isFinite(cooldownSeconds) || cooldownSeconds < 5 || cooldownSeconds > 3600) {
+      fail('bad_request', 'cooldownSeconds must be between 5 and 3600');
+    }
+    const hook: WakeState = {
+      channel: channel.id,
+      agent: conn.agent!.name,
+      url: parsed.toString(),
+      on: (on as 'mentions' | 'all' | undefined) ?? 'mentions',
+      cooldownSeconds,
+      signed: typeof secret === 'string',
+      createdAt: this.now(),
+      secret: secret as string | undefined,
+      pending: 0
+    };
+    channel.wakes.set(conn.agent!.name.toLowerCase(), hook);
+    return this.wakeView(hook);
+  }
+
+  private wakeView(hook: WakeState): WakeHook {
+    const { secret: _secret, pending: _pending, ...view } = hook;
+    return { ...view };
+  }
+
+  /** Called for every recorded channel message: POSTs to the wake hooks it concerns. */
+  private fireWakes(channel: Channel, message: ChannelMessage): void {
+    if (!channel.wakes.size) return;
+    const lower = (message.shorthand?.raw ?? message.content).toLowerCase();
+    const sender = message.from.name.toLowerCase();
+    for (const [name, hook] of channel.wakes) {
+      if (name === sender) continue;
+      hook.pending++;
+      const tag = '@' + name;
+      let mentioned = false;
+      for (let at = lower.indexOf(tag); at >= 0 && !mentioned; at = lower.indexOf(tag, at + 1)) {
+        mentioned = !/[\p{L}\p{N}_-]/u.test(lower[at + tag.length] ?? '');
+      }
+      if (!mentioned && hook.on !== 'all') continue;
+      const now = this.now();
+      if (hook.lastFiredAt && now - hook.lastFiredAt < hook.cooldownSeconds * 1000) continue;
+      hook.lastFiredAt = now;
+      const payload: WakePayload = {
+        type: 'crosstalk.wake',
+        reason: mentioned ? 'mention' : 'message',
+        hub: this.publicUrl,
+        channel: { id: channel.id, name: channel.name },
+        agent: hook.agent,
+        message: { id: message.id, from: message.from, content: message.content.slice(0, 2000), timestamp: message.timestamp },
+        pending: hook.pending
+      };
+      hook.pending = 0;
+      void this.postWake(hook, payload);
+    }
+  }
+
+  private async postWake(hook: WakeState, payload: WakePayload): Promise<void> {
+    const body = JSON.stringify(payload);
+    const headers: Record<string, string> = { 'content-type': 'application/json', 'user-agent': `crosstalk-hub/${SERVER_VERSION}` };
+    if (hook.secret) headers['x-crosstalk-signature'] = 'sha256=' + crypto.createHmac('sha256', hook.secret).update(body).digest('hex');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    timer.unref?.();
+    try {
+      const res = await this.deliver(hook.url, { method: 'POST', headers, body, signal: controller.signal });
+      hook.lastStatus = res.status;
+      hook.lastError = res.status >= 200 && res.status < 300 ? undefined : `HTTP ${res.status}`;
+    } catch (err) {
+      hook.lastStatus = 0;
+      hook.lastError = controller.signal.aborted ? 'timed out after 5s' : String((err as Error)?.message ?? err).slice(0, 200);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** XDialect shorthand. `!LCK` / `!REL` with a target also take or release the lock. */
@@ -1689,7 +1897,8 @@ export class MeshHub {
         reads: new Map(c.reads),
         claims: new Map(c.claims.map(k => [k.id, k])),
         senders: new Map(),
-        slots: new Map()
+        slots: new Map(),
+        wakes: new Map()
       });
     }
     for (const invite of state.invites ?? []) {
