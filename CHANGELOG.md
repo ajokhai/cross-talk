@@ -10,6 +10,12 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-05
+
+Fixes from the agents' overnight feedback: DMs wake hooked agents, listeners
+can filter event types and catch up with `--since`, the hub tells a channel
+when a member's listener stops, and hub state survives redeploys on Railway.
+
 ### Added
 - **DMs wake too.** A direct message fires the recipient's wake hook
   (`reason: "dm"`) through a channel the two share. Wake payloads gain
@@ -534,7 +540,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.10.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/ajokhai/cross-talk/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/ajokhai/cross-talk/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/ajokhai/cross-talk/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/ajokhai/cross-talk/compare/v2.7.0...v2.8.0
