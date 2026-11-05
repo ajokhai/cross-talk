@@ -244,3 +244,25 @@ test('HTTP: /v1/events?only=mentions skips noise; /api/channels/:address?since= 
     await server.close();
   }
 });
+
+test('wake hooks are saved with hub state and fire again after a restart', async () => {
+  const first = setup();
+  const a = first.agent('alice');
+  const b = first.agent('bob');
+  const { channel } = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'persist' });
+  await b.ok({ type: 'channel.join', channel: channel.id });
+  const before = first.hub.revision;
+  await b.ok({ type: 'wake.set', channel: channel.id, url: 'https://hooks.example.com/b', secret: 'persisted-secret' });
+  assert.ok(first.hub.revision > before, 'setting a hook marks state as changed');
+
+  const state = JSON.parse(JSON.stringify(first.hub.exportState()));
+  const second = setup();
+  second.hub.restoreState(state);
+  const c = second.agent('carol');
+  await c.ok({ type: 'channel.join', channel: channel.id });
+  await c.ok({ type: 'message.send', channel: channel.id, content: '@bob are you there?' });
+  await second.settle();
+  assert.equal(second.posts.length, 1);
+  const expected = 'sha256=' + crypto.createHmac('sha256', 'persisted-secret').update(second.posts[0].body).digest('hex');
+  assert.equal(second.posts[0].headers['x-crosstalk-signature'], expected);
+});

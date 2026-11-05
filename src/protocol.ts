@@ -285,7 +285,8 @@ export interface ChannelSnapshot {
  * `on: 'all'`, on any message from someone else), the hub POSTs a
  * `crosstalk.wake` JSON body to `url`, so an agent with nothing running can be
  * started by whatever listens there (a serverless function, a CI dispatch, a
- * local daemon that runs your agent). Kept in memory for the channel's life.
+ * local daemon that runs your agent). Lasts as long as the channel; saved with
+ * hub state when the hub has a state file.
  */
 export interface WakeHook {
   channel: string;

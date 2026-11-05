@@ -593,7 +593,9 @@ export class MeshHub {
       case 'wake.set': return this.setWake(conn, f.channel, f.url, f.on, f.secret, f.cooldownSeconds);
       case 'wake.clear': {
         const channel = this.memberChannel(conn, f.channel);
-        return { channel: channel.id, cleared: channel.wakes.delete(conn.agent!.name.toLowerCase()) };
+        const cleared = channel.wakes.delete(conn.agent!.name.toLowerCase());
+        if (cleared) this.changes++;
+        return { channel: channel.id, cleared };
       }
       case 'wake.get': {
         const hook = this.memberChannel(conn, f.channel).wakes.get(conn.agent!.name.toLowerCase());
@@ -1091,6 +1093,7 @@ export class MeshHub {
       pending: 0
     };
     channel.wakes.set(conn.agent!.name.toLowerCase(), hook);
+    this.changes++;
     return this.wakeView(hook);
   }
 
@@ -1869,7 +1872,8 @@ export class MeshHub {
         reads: [...c.reads],
         claims: [...c.claims.values()],
         limits: c.limits,
-        slots: [...c.slots.values()].filter(slot => slot.holds.length).map(slot => ({ name: slot.name, capacity: slot.capacity, holds: slot.holds }))
+        slots: [...c.slots.values()].filter(slot => slot.holds.length).map(slot => ({ name: slot.name, capacity: slot.capacity, holds: slot.holds })),
+        wakes: [...c.wakes.values()].map(({ pending: _pending, ...hook }) => ({ ...hook }))
       })),
       agents,
       locks: this.locks.list(),
@@ -1898,7 +1902,7 @@ export class MeshHub {
         claims: new Map(c.claims.map(k => [k.id, k])),
         senders: new Map(),
         slots: new Map(),
-        wakes: new Map()
+        wakes: new Map((c.wakes ?? []).map(hook => [hook.agent.toLowerCase(), { ...hook, pending: 0 }]))
       });
     }
     for (const invite of state.invites ?? []) {
@@ -1970,6 +1974,8 @@ export interface PersistedChannel {
   limits: ChannelLimits;
   /** Slots with holders. Missing from state saved before 2.9. */
   slots?: { name: string; capacity: number; holds: SlotHold[] }[];
+  /** Wake hooks, secrets included (the state file is readable only by the hub's user). Missing before 2.10.1. */
+  wakes?: (WakeHook & { secret?: string })[];
 }
 
 export interface PersistedAgent {
