@@ -153,11 +153,12 @@ class HttpSession {
    * that @mention it, lock and slot grants), dropping everything else, and
    * keep waiting through the noise until something matches or time runs out.
    */
-  async poll(waitSeconds: number, onlyMentions = false): Promise<ServerFrame[]> {
-    if (!onlyMentions) return this.pollRaw(waitSeconds);
+  async poll(waitSeconds: number, onlyMentions = false, exclude: ReadonlySet<string> = new Set()): Promise<ServerFrame[]> {
+    if (!onlyMentions && !exclude.size) return this.pollRaw(waitSeconds);
+    const keep = (f: ServerFrame) => !exclude.has(f.type) && (!onlyMentions || this.needsMe(f));
     const deadline = Date.now() + waitSeconds * 1000;
     for (;;) {
-      const frames = (await this.pollRaw(Math.max(0, (deadline - Date.now()) / 1000))).filter(f => this.needsMe(f));
+      const frames = (await this.pollRaw(Math.max(0, (deadline - Date.now()) / 1000))).filter(keep);
       if (frames.length || Date.now() >= deadline) return frames;
     }
   }
@@ -424,9 +425,9 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         if (route === 'GET /v1/events') {
           const wait = Math.max(0, Math.min(Number(url.searchParams.get('wait') ?? 0) || 0, MAX_POLL_SECONDS));
           req.socket.setTimeout(0);
-          hub.polled(session.conn);
-          const events = await session.poll(wait, url.searchParams.get('only') === 'mentions');
-          hub.polled(session.conn);
+          const exclude = new Set((url.searchParams.get('exclude') ?? '').split(',').map(t => t.trim()).filter(Boolean));
+          hub.pollStarted(session.conn);
+          const events = await session.poll(wait, url.searchParams.get('only') === 'mentions', exclude).finally(() => hub.pollEnded(session.conn));
           if (!res.writableEnded) json(res, 200, { events });
           return;
         }
@@ -548,9 +549,9 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           const wait = Math.max(0, Math.min(Number(url.searchParams.get('wait') ?? 0) || 0, MAX_POLL_SECONDS));
           req.socket.setTimeout(0);
           // A process blocked here is listening; when it returns, it has the events.
-          hub.polled(session.conn);
-          const events = await session.poll(wait, url.searchParams.get('only') === 'mentions');
-          hub.polled(session.conn);
+          const exclude = new Set((url.searchParams.get('exclude') ?? '').split(',').map(t => t.trim()).filter(Boolean));
+          hub.pollStarted(session.conn);
+          const events = await session.poll(wait, url.searchParams.get('only') === 'mentions', exclude).finally(() => hub.pollEnded(session.conn));
           if (!res.writableEnded) json(res, 200, { events });
           return;
         }

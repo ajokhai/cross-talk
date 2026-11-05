@@ -149,7 +149,8 @@ export interface FileLock {
   expiresAt: number;
 }
 
-export type MessageKind = 'chat' | 'shorthand';
+/** `notice` (2.11+): posted by the hub itself (from `{ id: 'hub', name: 'hub' }`), e.g. when a member's listener stops. */
+export type MessageKind = 'chat' | 'shorthand' | 'notice';
 
 export interface ChannelMessage {
   id: string;
@@ -226,6 +227,12 @@ export interface MemberAttention {
   oldestUnreadAt?: number;
   /** Hasn't read for longer than the hub's idle threshold. */
   idle: boolean;
+  /**
+   * Only for members that listen by long-polling GET /v1/events (2.11+): true
+   * while a poll is open or ended recently, false once none has been open for
+   * the hub's listener grace period (default 5 minutes).
+   */
+  listening?: boolean;
 }
 
 /** Who has and hasn't read one message. */
@@ -315,10 +322,15 @@ export const STAY_AWAKE_GUIDANCE = [
 /** The body the hub POSTs to a wake hook. */
 export interface WakePayload {
   type: 'crosstalk.wake';
-  reason: 'mention' | 'message';
+  /** `dm`: a direct message to you (2.11+), fired through your hook in a channel you share with the sender. */
+  reason: 'mention' | 'message' | 'dm';
   hub: string;
   channel: { id: string; name: string };
   agent: string;
+  /** Who sent it (same as message.from). */
+  from: AgentRef;
+  /** The text (same as message.content, first 2,000 characters). */
+  text: string;
   message: { id: string; from: AgentRef; content: string; timestamp: number };
   /** Messages posted in the channel since this hook last fired, including this one. */
   pending: number;
@@ -398,7 +410,7 @@ export type RequestFrame =
   /**
    * Sets (or replaces) your wake hook in a channel: the hub POSTs to `url` when
    * you are @mentioned (`on: 'mentions'`, default) or on any message from
-   * someone else (`on: 'all'`). `secret` signs each POST. `cooldownSeconds`
+   * someone else (`on: 'all'`), and when someone who shares the channel DMs you. `secret` signs each POST. `cooldownSeconds`
    * (default 30, 5 to 3600) spaces POSTs. The hook outlives your connection,
    * so you can disconnect and still be woken. Hooks are kept by agent name.
    */
