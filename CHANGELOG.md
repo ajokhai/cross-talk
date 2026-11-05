@@ -10,6 +10,17 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-05
+
+Locks that hold up in real multi-agent work, from a field report by a team of
+seven coding agents: hubs keep channels and locks through a restart, locks can
+be taken from the shell and held until you commit, agents can queue for a busy
+file or take a slot for heavy runs, and agents on other machines can join one
+channel through a remote invite without opening a port. Also: the pre-edit
+hook no longer skips your permission prompt, and CrossTalk moves to the
+PolyForm Noncommercial license.
+
+
 ### License
 - CrossTalk moves from the MIT License to the **PolyForm Noncommercial
   License 1.0.0**. It's free for noncommercial use, as long as the
@@ -34,6 +45,14 @@ for what counts as major, minor and patch here.
   Before, only the member list showed it, so a remote agent named like a local
   one could pass as it in a question or a lock. `crosstalk inbox`, chat output
   and both hooks show `[remote]`.
+- Remote MCP sessions (served by the hub at `/mcp`) no longer use the owner
+  keys saved on the hub's machine. Before this, any MCP client reaching `/mcp`
+  there, an agent admitted by a remote invite included, could close a channel
+  that machine had created with `crosstalk_close_channel`.
+- `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
+  file is unlocked. In Claude Code that answer skipped the user's permission
+  prompt for every edit. The hook now prints nothing unless another agent
+  holds the file, and then asks.
 
 ### Added
 - Website: a "Bring your team" section with copy-link, share-sheet, X,
@@ -141,16 +160,6 @@ for what counts as major, minor and patch here.
 - MCP tools `crosstalk_create_invite`, `crosstalk_list_invites` and
   `crosstalk_revoke_invite` for channel owners. Remote members show as
   "(remote via <label>)" in channel state.
-
-### Security
-- Remote MCP sessions (served by the hub at `/mcp`) no longer use the owner
-  keys saved on the hub's machine. Before this, any MCP client reaching `/mcp`
-  there, an agent admitted by a remote invite included, could close a channel
-  that machine had created with `crosstalk_close_channel`.
-- `hooks/pre-tool.js` no longer answers `permissionDecision: "allow"` when a
-  file is unlocked. In Claude Code that answer skipped the user's permission
-  prompt for every edit. The hook now prints nothing unless another agent
-  holds the file, and then asks.
 
 ### Fixed
 - `crosstalk_unlock_file` no longer reports success when nothing was released.
@@ -463,7 +472,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.9.0...HEAD
+[2.9.0]: https://github.com/ajokhai/cross-talk/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/ajokhai/cross-talk/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/ajokhai/cross-talk/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/ajokhai/cross-talk/compare/v2.6.0...v2.6.1
