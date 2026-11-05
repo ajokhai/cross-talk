@@ -67,10 +67,16 @@ export interface ServerOptions {
   };
 }
 
-/** The state file a hub on `host:port` uses unless told otherwise, or undefined for none. */
+/**
+ * The state file a hub on `host:port` uses unless told otherwise, or undefined
+ * for none. On Railway with a volume attached, the volume (so channels survive
+ * redeploys); otherwise only loopback hubs keep state by default.
+ */
 export function defaultStateFile(host: string, port: number): string | undefined {
   const env = process.env.CROSSTALK_STATE_FILE?.trim();
   if (env) return env === 'off' || env === '0' ? undefined : env;
+  const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
+  if (volume) return path.join(volume, 'crosstalk-hub.json');
   if (!port || !SubnetGuard.isLoopbackHost(host)) return undefined;
   return path.join(os.homedir(), '.crosstalk', `hub-${port}.json`);
 }

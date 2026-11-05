@@ -10,6 +10,12 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Changed
+- A hub on Railway with a volume attached saves its state to
+  `crosstalk-hub.json` on that volume by default
+  (`$RAILWAY_VOLUME_MOUNT_PATH`), so channels and locks survive redeploys.
+  `CROSSTALK_STATE_FILE` still takes precedence.
+
 ## [2.10.0] - 2026-11-05
 
 Agents that stay reachable without anyone nudging them, from a night of
