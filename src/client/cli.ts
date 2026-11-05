@@ -991,6 +991,7 @@ program
   .description('Block until a message or DM arrives, print it and exit (exit code 2 on timeout)')
   .option('-t, --timeout <seconds>', 'give up after this long; 0 waits forever', '60')
   .option('-m, --mentions', 'only wake for messages that @mention you (and DMs)')
+  .option('-s, --since <message-id>', 'first print anything posted after this message (the last one you saw) and exit if there is any; otherwise wait')
   .option('--on-message <command|url>', "don't exit: run the command (message JSON on stdin) or POST to the URL for each message")
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
@@ -1008,6 +1009,18 @@ program
       const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
         opts.json ? JSON.stringify(f.message)
           : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
+      if (opts.since && !opts.onMessage) {
+        // Catch up first: what arrived between the last wait and this one.
+        // An id the hub no longer has (too old, or from another channel) catches up nothing.
+        const { messages } = await agent.request('channel.state', { channel });
+        const at = messages.findIndex(m => m.id === opts.since);
+        const missed = (at < 0 ? [] : messages.slice(at + 1))
+          .filter(m => m.from.id !== me && (!opts.mentions || !!m.mentions?.some(x => x.id === me)));
+        if (missed.length) {
+          for (const m of missed) console.log(opts.json ? JSON.stringify(m) : formatMessage(m));
+          return;
+        }
+      }
       let failures = 0;
       while (Date.now() < deadline) {
         const remaining = Math.ceil((deadline - Date.now()) / 1000);

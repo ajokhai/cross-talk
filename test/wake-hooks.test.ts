@@ -266,3 +266,83 @@ test('wake hooks are saved with hub state and fire again after a restart', async
   const expected = 'sha256=' + crypto.createHmac('sha256', 'persisted-secret').update(second.posts[0].body).digest('hex');
   assert.equal(second.posts[0].headers['x-crosstalk-signature'], expected);
 });
+
+test('a DM wakes the recipient through its hook in a shared channel, with from and text at the top level', async () => {
+  const { agent, posts, settle } = setup();
+  const a = agent('alice');
+  const b = agent('bob');
+  const { channel } = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'dm' });
+  await b.ok({ type: 'channel.join', channel: channel.id });
+  await b.ok({ type: 'wake.set', channel: channel.id, url: 'https://hooks.example.com/b' });
+
+  await a.ok({ type: 'dm.send', to: 'bob', content: 'quick question' });
+  await settle();
+  assert.equal(posts.length, 1);
+  const payload = JSON.parse(posts[0].body) as WakePayload;
+  assert.equal(payload.reason, 'dm');
+  assert.equal(payload.from.name, 'alice');
+  assert.equal(payload.text, 'quick question');
+  assert.equal(payload.channel.id, channel.id);
+
+  // Mentions also carry the top-level fields; the cooldown is shared.
+  await a.ok({ type: 'message.send', channel: channel.id, content: '@bob ping' });
+  await settle();
+  assert.equal(posts.length, 1, 'still inside the cooldown');
+});
+
+test('HTTP: /v1/events?exclude= drops the listed event types', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const base = server.url.replace('ws://', 'http://');
+  const post = async (path: string, body: unknown, session?: string) =>
+    (await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...(session ? { 'x-crosstalk-session': session } : {}) }, body: JSON.stringify(body) })).json() as Promise<any>;
+  try {
+    const alice = (await post('/v1/sessions', { name: 'alice' })).session;
+    const bob = (await post('/v1/sessions', { name: 'bob' })).session;
+    const channel = (await post('/v1/rpc', { type: 'channel.create', name: 'x' }, alice)).data.channel.id;
+    await post('/v1/rpc', { type: 'channel.join', channel }, bob);
+    await post('/v1/rpc', { type: 'status.update', status: 'working', currentTask: 'noise' }, bob);
+    await post('/v1/rpc', { type: 'message.send', channel, content: 'hello' }, bob);
+    const { events } = await (await fetch(`${base}/v1/events?wait=2&exclude=member.updated,member.joined`, { headers: { 'x-crosstalk-session': alice } })).json() as any;
+    assert.ok(events.length >= 1);
+    assert.ok(events.every((e: any) => e.type !== 'member.updated' && e.type !== 'member.joined'), JSON.stringify(events.map((e: any) => e.type)));
+    assert.ok(events.some((e: any) => e.type === 'message'));
+  } finally {
+    await server.close();
+  }
+});
+
+test('listening presence: a member that stops long-polling is announced, and again when it is back', async () => {
+  const { hub, agent, tick } = setup({ listenerGraceMs: 60_000 });
+  const a = agent('alice');
+  const b = agent('bob');
+  const { channel } = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'listen' });
+  await b.ok({ type: 'channel.join', channel: channel.id });
+
+  // Bob listens by long-polling; alice never polls (a WebSocket client), so she has no listening flag.
+  hub.pollStarted(b.conn);
+  let state = await a.ok<ChannelSnapshot>({ type: 'channel.state', channel: channel.id });
+  assert.equal(state.attention.find(x => x.agent.name === 'bob')!.listening, true);
+  assert.equal(state.attention.find(x => x.agent.name === 'alice')!.listening, undefined);
+  hub.pollEnded(b.conn);
+
+  tick(30_000);
+  hub.sweep();
+  state = await a.ok<ChannelSnapshot>({ type: 'channel.state', channel: channel.id });
+  assert.equal(state.messages.length, 0, 'still inside the grace period');
+
+  tick(31_000);
+  hub.sweep();
+  hub.sweep(); // announced once, not on every sweep
+  state = await a.ok<ChannelSnapshot>({ type: 'channel.state', channel: channel.id });
+  assert.equal(state.attention.find(x => x.agent.name === 'bob')!.listening, false);
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].kind, 'notice');
+  assert.equal(state.messages[0].from.name, 'hub');
+  assert.match(state.messages[0].content, /^bob has not been listening/);
+  assert.ok(a.inbox.some(f => f.type === 'message' && (f as any).message.kind === 'notice'), 'members get the notice live');
+
+  hub.pollStarted(b.conn);
+  state = await a.ok<ChannelSnapshot>({ type: 'channel.state', channel: channel.id });
+  assert.equal(state.messages.at(-1)!.content, 'bob is listening again.');
+  assert.equal(state.attention.find(x => x.agent.name === 'bob')!.listening, true);
+});

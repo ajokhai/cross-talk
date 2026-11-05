@@ -74,6 +74,12 @@ export interface HubOptions {
   presenceGraceMs?: number;
   /** A member that hasn't read a channel for this long is shown as idle, and senders who @mention it are warned. */
   idleAfterMs?: number;
+  /**
+   * A member that has listened by long-polling GET /v1/events and then has no
+   * poll open for this long is announced in its channels as no longer
+   * listening (default 5 minutes, under the 10-minute HTTP session expiry; 0 disables).
+   */
+  listenerGraceMs?: number;
   /** Token bucket per connection, over every request: burst size and refill per second. */
   rateLimit?: { burst: number; perSecond: number };
   /**
@@ -248,6 +254,9 @@ export class Connection {
   /** @internal Frames to send right after a resumed client's welcome. */ replay?: ServerFrame[];
   /** @internal Allowance for DMs this agent sends. */ dms: Bucket;
   /** @internal Set when the connection came in through the public listener with an invite key (#13): it may only use the invite's channel. */ invite?: Invite;
+  /** @internal Long-polls open right now on GET /v1/events. */ polling = 0;
+  /** @internal When the last long-poll ended; set once the agent has listened at all. */ lastPollEndAt?: number;
+  /** @internal True after the hub announced that this agent's listener stopped. */ listenerAlerted = false;
   private readonly requests: Bucket;
 
   constructor(
@@ -327,6 +336,7 @@ export class MeshHub {
       unusedChannelTtlMs: options.unusedChannelTtlMs ?? 10 * 60 * 1000,
       presenceGraceMs: options.presenceGraceMs ?? 2 * 60 * 1000,
       idleAfterMs: options.idleAfterMs ?? 5 * 60 * 1000,
+      listenerGraceMs: options.listenerGraceMs ?? 5 * 60 * 1000,
       rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 },
       webhooks: options.webhooks ?? 'public'
     };
@@ -854,6 +864,60 @@ export class MeshHub {
     }
   }
 
+  /** An HTTP long-poll opened: the agent is listening. Announces a return after a stopped-listener notice. */
+  pollStarted(conn: Connection): void {
+    conn.polling++;
+    this.polled(conn);
+    if (conn.listenerAlerted && conn.agent) {
+      conn.listenerAlerted = false;
+      this.listenerNotice(conn, `${conn.agent.name} is listening again.`);
+    }
+  }
+
+  /** An HTTP long-poll ended (events returned or it timed out). */
+  pollEnded(conn: Connection): void {
+    conn.polling = Math.max(0, conn.polling - 1);
+    conn.lastPollEndAt = this.now();
+    this.polled(conn);
+  }
+
+  private isListening(conn: Connection): boolean | undefined {
+    if (conn.lastPollEndAt === undefined && !conn.polling) return undefined;
+    return conn.polling > 0 || this.now() - (conn.lastPollEndAt ?? 0) < this.opts.listenerGraceMs;
+  }
+
+  /** Posts a hub notice in every channel the agent is in. */
+  private listenerNotice(conn: Connection, text: string): void {
+    for (const id of conn.channels) {
+      const channel = this.channels.get(id);
+      if (!channel) continue;
+      const message: ChannelMessage = {
+        id: newId('msg'),
+        channel: channel.id,
+        kind: 'notice',
+        from: { id: 'hub', name: 'hub' },
+        content: text,
+        timestamp: this.now()
+      };
+      channel.posted++;
+      channel.history.push(message);
+      if (channel.history.length > this.opts.historyLimit) channel.history.shift();
+      this.changes++;
+      this.emit(channel, { type: 'message', message });
+    }
+  }
+
+  /** Announces members whose listener has stopped (called from sweep). */
+  private sweepListeners(): void {
+    if (!this.opts.listenerGraceMs) return;
+    for (const conn of new Set(this.agents.values())) {
+      if (!conn.agent || conn.listenerAlerted || this.isListening(conn) !== false) continue;
+      conn.listenerAlerted = true;
+      const minutes = Math.round(this.opts.listenerGraceMs / 60_000);
+      this.listenerNotice(conn, `${conn.agent.name} has not been listening for ${minutes}+ minute${minutes === 1 ? '' : 's'} (no open GET /v1/events). @mention them or check on them; they may not see new messages.`);
+    }
+  }
+
   /** Per message: which members have read it. Newest last. */
   private receipts(channel: Channel, limit?: unknown): MessageReceipt[] {
     const size = Math.max(1, Math.min(typeof limit === 'number' ? Math.floor(limit) : 20, 100));
@@ -892,6 +956,8 @@ export class MeshHub {
       unread: pending.length,
       idle: this.now() - read.at >= this.opts.idleAfterMs
     };
+    const listening = this.isListening(conn);
+    if (listening !== undefined) out.listening = listening;
     if (pending.length) out.oldestUnreadAt = pending[0].timestamp;
     return out;
   }
@@ -1119,18 +1185,41 @@ export class MeshHub {
       const now = this.now();
       if (hook.lastFiredAt && now - hook.lastFiredAt < hook.cooldownSeconds * 1000) continue;
       hook.lastFiredAt = now;
-      const payload: WakePayload = {
-        type: 'crosstalk.wake',
-        reason: mentioned ? 'mention' : 'message',
-        hub: this.publicUrl,
-        channel: { id: channel.id, name: channel.name },
-        agent: hook.agent,
-        message: { id: message.id, from: message.from, content: message.content.slice(0, 2000), timestamp: message.timestamp },
-        pending: hook.pending
-      };
-      hook.pending = 0;
-      void this.postWake(hook, payload);
+      this.sendWake(hook, channel, mentioned ? 'mention' : 'message', message);
     }
+  }
+
+  /** A DM wakes its recipient through the first hook it has in a channel shared with the sender. */
+  private fireDmWake(sender: Connection, target: Connection, dm: DirectMessage): void {
+    const name = target.agent!.name.toLowerCase();
+    for (const id of sender.channels) {
+      if (!target.channels.has(id)) continue;
+      const channel = this.channels.get(id);
+      const hook = channel?.wakes.get(name);
+      if (!channel || !hook) continue;
+      const now = this.now();
+      if (hook.lastFiredAt && now - hook.lastFiredAt < hook.cooldownSeconds * 1000) return;
+      hook.lastFiredAt = now;
+      this.sendWake(hook, channel, 'dm', dm);
+      return;
+    }
+  }
+
+  private sendWake(hook: WakeState, channel: Channel, reason: WakePayload['reason'], message: { id: string; from: AgentRef; content: string; timestamp: number }): void {
+    const text = message.content.slice(0, 2000);
+    const payload: WakePayload = {
+      type: 'crosstalk.wake',
+      reason,
+      hub: this.publicUrl,
+      channel: { id: channel.id, name: channel.name },
+      agent: hook.agent,
+      from: message.from,
+      text,
+      message: { id: message.id, from: message.from, content: text, timestamp: message.timestamp },
+      pending: reason === 'dm' ? hook.pending + 1 : hook.pending
+    };
+    hook.pending = 0;
+    void this.postWake(hook, payload);
   }
 
   private async postWake(hook: WakeState, payload: WakePayload): Promise<void> {
@@ -1193,6 +1282,7 @@ export class MeshHub {
     const meta = this.metadata(metadata);
     if (meta) message.metadata = meta;
     target.peer.send({ type: 'dm', message });
+    this.fireDmWake(conn, target, message);
     return message;
   }
 
@@ -1681,6 +1771,7 @@ export class MeshHub {
   /** Expires stale locks and deletes channels that have been empty too long. */
   sweep(): void {
     this.sweepInvites();
+    this.sweepListeners();
     for (const lock of this.locks.sweepExpired()) {
       this.changes++;
       const channel = this.channels.get(lock.channel);
