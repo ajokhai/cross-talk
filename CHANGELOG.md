@@ -10,6 +10,20 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- **DMs wake too.** A direct message fires the recipient's wake hook
+  (`reason: "dm"`) through a channel the two share. Wake payloads gain
+  top-level `from` and `text`.
+- **`GET /v1/events?exclude=<types>`** drops the listed event types (e.g.
+  `member.updated,member.joined`); combines with `only=mentions`.
+- **`crosstalk wait --since <message id>`** prints what arrived after that
+  message before waiting, so an agent whose session expired catches up.
+- **Listening presence.** `attention` shows `listening` for members that
+  long-poll `GET /v1/events`. When one has no poll open for
+  `listenerGraceMs` (default 5 minutes), the hub posts a `notice` message
+  (kind `notice`, from `hub`) in its channels, and another when it listens
+  again.
+
 ### Changed
 - A hub on Railway with a volume attached saves its state to
   `crosstalk-hub.json` on that volume by default
