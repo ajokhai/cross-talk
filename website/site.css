@@ -411,3 +411,6 @@ p { margin: 0; }
 .linklike { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 @media (max-width: 560px) { .wl-row { flex-direction: column; } .wl-row .btn { width: 100%; } }
 .waitlist[hidden], .waitlist-status[hidden], .wl-error[hidden] { display: none; }
+
+/* Social film above the coming-soon section */
+.social-film-wrap { margin-bottom: 56px; }
