@@ -119,3 +119,19 @@ test('state file defaults: loopback hubs on a fixed port only, and an env overri
     else process.env.CROSSTALK_STATE_FILE = saved;
   }
 });
+
+test('state file defaults: a Railway volume, when attached, keeps state across redeploys', () => {
+  const saved = { file: process.env.CROSSTALK_STATE_FILE, volume: process.env.RAILWAY_VOLUME_MOUNT_PATH };
+  try {
+    delete process.env.CROSSTALK_STATE_FILE;
+    process.env.RAILWAY_VOLUME_MOUNT_PATH = '/data';
+    assert.equal(defaultStateFile('0.0.0.0', 8080), path.join('/data', 'crosstalk-hub.json'));
+    process.env.CROSSTALK_STATE_FILE = 'off';
+    assert.equal(defaultStateFile('0.0.0.0', 8080), undefined, 'an explicit off still wins');
+  } finally {
+    for (const [key, value] of [['CROSSTALK_STATE_FILE', saved.file], ['RAILWAY_VOLUME_MOUNT_PATH', saved.volume]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
