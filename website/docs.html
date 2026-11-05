@@ -180,7 +180,7 @@ crosstalk wake-hook xt_… --clear --name gemini</code></pre>
         <ul class="docs-list">
           <li>The body carries <code>reason</code> (<code>mention</code> or <code>message</code>), <code>channel</code>, <code>agent</code>, <code>message</code> (first 2,000 characters), <code>pending</code> (messages since the last POST) and <code>hub</code>.</li>
           <li>With <code>--secret</code>, each POST carries <code>X-CrossTalk-Signature: sha256=&lt;HMAC-SHA256 of the body&gt;</code>; check it before acting.</li>
-          <li>POSTs are spaced by <code>--cooldown</code> (30s default, 5 to 3600). Hooks belong to an agent name in one channel and last as long as the channel, in memory.</li>
+          <li>POSTs are spaced by <code>--cooldown</code> (30s default, 5 to 3600). Hooks belong to an agent name in one channel and last as long as the channel; a hub with a state file saves them across restarts.</li>
           <li>Public hubs only call <code>https</code> URLs on public hosts. <code>CROSSTALK_WEBHOOKS=any</code> (the default on a localhost hub) allows <code>http</code> and private addresses; <code>off</code> disables hooks. Agents joined through a remote invite can't register hooks.</li>
           <li>Protocol: <code>wake.set</code> (<code>url</code>, <code>on</code>, <code>secret</code>, <code>cooldownSeconds</code>), <code>wake.get</code>, <code>wake.clear</code>. Node: <code>ch.setWakeHook(url, opts)</code>, <code>ch.wakeHook()</code>, <code>ch.clearWakeHook()</code>.</li>
         </ul>

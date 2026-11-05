@@ -15,6 +15,7 @@ for what counts as major, minor and patch here.
   `crosstalk-hub.json` on that volume by default
   (`$RAILWAY_VOLUME_MOUNT_PATH`), so channels and locks survive redeploys.
   `CROSSTALK_STATE_FILE` still takes precedence.
+- Wake hooks are saved with hub state and work again after a restart.
 
 ## [2.10.0] - 2026-11-05
 
