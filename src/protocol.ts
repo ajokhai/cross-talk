@@ -168,6 +168,12 @@ export interface ChannelMessage {
    * may not see this soon.
    */
   idleMentions?: MemberAttention[];
+  /**
+   * Only on the sender's own `message.send` result when it asked for
+   * `split: true` and the text was over the channel limit: how many messages
+   * it was posted as. The result is the first part.
+   */
+  parts?: number;
   /** Present when kind === 'shorthand'. `content` holds the English expansion. */
   shorthand?: {
     raw: string;
@@ -267,6 +273,54 @@ export interface ChannelSnapshot {
   claims: TaskClaim[];
   /** Slots in use or waited for. Missing from hubs older than 2.9. */
   slots?: Slot[];
+  /**
+   * On `channel.join` only (2.10+): how to stay reachable in this channel.
+   * Plain text meant to be shown to the agent as-is.
+   */
+  guidance?: string;
+}
+
+/**
+ * A wake hook (2.10+): when its agent is @mentioned in the channel (or, with
+ * `on: 'all'`, on any message from someone else), the hub POSTs a
+ * `crosstalk.wake` JSON body to `url`, so an agent with nothing running can be
+ * started by whatever listens there (a serverless function, a CI dispatch, a
+ * local daemon that runs your agent). Kept in memory for the channel's life.
+ */
+export interface WakeHook {
+  channel: string;
+  agent: string;
+  url: string;
+  on: 'mentions' | 'all';
+  /** Minimum seconds between two POSTs for this hook. */
+  cooldownSeconds: number;
+  /** True when a secret was set: each POST then carries X-CrossTalk-Signature: sha256=<hex HMAC of the body>. */
+  signed: boolean;
+  createdAt: number;
+  lastFiredAt?: number;
+  /** HTTP status of the last POST, or 0 when it failed to connect or timed out. */
+  lastStatus?: number;
+  lastError?: string;
+}
+
+/** Shown to an agent when it joins a channel (snapshot.guidance), and in invites. */
+export const STAY_AWAKE_GUIDANCE = [
+  'Stay reachable: keep a listener running between turns so you answer without anyone nudging you.',
+  'Clients with background tasks (Claude Code and similar): run `crosstalk wait <channel> --timeout 0` (or long-poll GET /v1/events?wait=50&only=mentions) as a background command and end your turn; it returns when someone needs you, which wakes you. Restart it after each wake.',
+  'Nothing can run between turns? Register a wake hook (wake.set, `crosstalk wake-hook`) so the hub POSTs to your URL when you are @mentioned.',
+  'If someone you are working with goes quiet for 30+ minutes, @mention them.'
+].join('\n');
+
+/** The body the hub POSTs to a wake hook. */
+export interface WakePayload {
+  type: 'crosstalk.wake';
+  reason: 'mention' | 'message';
+  hub: string;
+  channel: { id: string; name: string };
+  agent: string;
+  message: { id: string; from: AgentRef; content: string; timestamp: number };
+  /** Messages posted in the channel since this hook last fired, including this one. */
+  pending: number;
 }
 
 /** `channel.create` also returns the owner key, once. Keep it private: it answers questions. */
@@ -302,7 +356,12 @@ export type RequestFrame =
   | { type: 'channel.list'; id: string; scope?: 'joined' | 'public'; limit?: number; cursor?: string }
   | { type: 'channel.state'; id: string; channel: string; since?: string }
   /** `text` is accepted as an alias for `content`. */
-  | { type: 'message.send'; id: string; channel: string; content: string; text?: string; metadata?: Record<string, unknown> }
+  /**
+   * `split: true` posts text over the channel limit as numbered parts
+   * (`[1/3] …`) instead of failing. Without it, oversize text fails with
+   * `bad_request` and `details.maxMessageChars`.
+   */
+  | { type: 'message.send'; id: string; channel: string; content: string; text?: string; metadata?: Record<string, unknown>; split?: boolean }
   | { type: 'shorthand.send'; id: string; channel: string; shorthand: string }
   | { type: 'dm.send'; id: string; to: string; content: string; text?: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
   | { type: 'lock.acquire'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
@@ -335,6 +394,18 @@ export type RequestFrame =
   | { type: 'question.cancel'; id: string; channel: string; question: string }
   | { type: 'question.answer'; id: string; channel: string; question: string; answer: string; ownerKey: string }
   | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode }
+  /**
+   * Sets (or replaces) your wake hook in a channel: the hub POSTs to `url` when
+   * you are @mentioned (`on: 'mentions'`, default) or on any message from
+   * someone else (`on: 'all'`). `secret` signs each POST. `cooldownSeconds`
+   * (default 30, 5 to 3600) spaces POSTs. The hook outlives your connection,
+   * so you can disconnect and still be woken. Hooks are kept by agent name.
+   */
+  | { type: 'wake.set'; id: string; channel: string; url: string; on?: 'mentions' | 'all'; secret?: string; cooldownSeconds?: number }
+  /** Removes your wake hook in a channel. */
+  | { type: 'wake.clear'; id: string; channel: string }
+  /** Your wake hook in a channel, with its last delivery result. */
+  | { type: 'wake.get'; id: string; channel: string }
   /** Marks the channel read, up to message `upTo` (default: everything so far). */
   | { type: 'channel.read'; id: string; channel: string; upTo?: string }
   /** Read receipts for the newest `limit` messages (default 20, max 100). */
@@ -380,6 +451,9 @@ export interface ResultData {
   'question.cancel': UserQuestion;
   'question.answer': UserQuestion;
   'channel.configure': ChannelInfo;
+  'wake.set': WakeHook;
+  'wake.clear': { channel: string; cleared: boolean };
+  'wake.get': { hook: WakeHook | null };
   'channel.read': MemberAttention;
   'channel.close': { channel: string };
   'channel.receipts': { receipts: MessageReceipt[] };

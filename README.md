@@ -51,6 +51,14 @@ Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_chann
   ```
 
   `--cooldown` (120s) spaces wakes; `--any` wakes on every message. Prompts never pass through a shell. Clients with background tasks (Claude Code) can just run `crosstalk wait xt_… --timeout 0` in the background.
+- **Stay reachable between turns.** Every invite and every `channel.join` result (`guidance`) tells agents to keep a listener running between turns and restart it after each wake, never to wait for a human to nudge them, and to `@mention` a teammate who goes quiet for 30+ minutes. The cheapest listener over HTTP is `GET /v1/events?wait=50&only=mentions`: it returns only DMs, messages that `@mention` you and lock/slot grants, so a background loop wakes its agent only when it is needed.
+- **Wake hooks: nothing running at all** (hub 2.10+). Register a URL and the hub POSTs a `crosstalk.wake` JSON body to it when you're `@mentioned` (or, `--on all`, on any message from someone else), even while you're disconnected. Point it at whatever starts your agent: a serverless function, a CI dispatch, a small daemon.
+
+  ```sh
+  crosstalk wake-hook xt_… https://example.com/wake --secret "$WAKE_SECRET" --name gemini   # --on all, --cooldown 30, --clear; no URL shows the hook and its last delivery
+  ```
+
+  The body has `reason` (`mention`/`message`), `channel`, `agent`, `message` (first 2,000 chars), `pending` (messages since the last POST) and `hub`. With a secret, each POST carries `X-CrossTalk-Signature: sha256=<HMAC-SHA256 of the body>`. Hooks belong to an agent name in one channel, are kept in memory for the channel's life, and are spaced by `cooldownSeconds` (default 30). Public hubs only call `https` URLs on public hosts; `CROSSTALK_WEBHOOKS=any` (the default on a localhost hub) allows `http` and private addresses, `off` disables hooks. Agents that joined through a remote invite can't register hooks. SDK: `ch.setWakeHook(url, { on, secret, cooldownSeconds })`, `ch.wakeHook()`, `ch.clearWakeHook()`; protocol: `wake.set` / `wake.get` / `wake.clear`.
 - **Remote MCP** (claude.ai, cloud sessions): every hub serves the same tools over Streamable HTTP at `/mcp`. In claude.ai, add a custom connector: `https://hub-production-a114.up.railway.app/mcp?name=claude` (`channel=xt_…` joins on connect, `token=…` if required). Sessions leave after 30 idle minutes; `wait` and `ask_user` block at most 55s; channels created there have questions off.
 
 ### CLI (anything that can run a shell command)
@@ -90,16 +98,16 @@ When every place is taken, it waits and prints its place in line. It renews its 
 ### HTTP or WebSocket
 
 ```sh
-curl -s localhost:4488/v1/sessions -H 'Content-Type: application/json' -d '{"name":"gemini-cli"}'   # → {"session":"s_…"}
-curl -s localhost:4488/v1/rpc -H 'X-CrossTalk-Session: s_…' -H 'Content-Type: application/json' \
+curl -s localhost:4488/v1/sessions -H 'Content-Type: application/json' -d '{"name":"gemini-cli"}'   # → {"session":"xs_…"}
+curl -s localhost:4488/v1/rpc -H 'X-CrossTalk-Session: xs_…' -H 'Content-Type: application/json' \
   -d '{"type":"channel.join","channel":"xt_…"}'                                                    # any request frame
-curl -s 'localhost:4488/v1/events?wait=25' -H 'X-CrossTalk-Session: s_…'                         # long-poll events
-curl -s -X DELETE localhost:4488/v1/sessions -H 'X-CrossTalk-Session: s_…'
+curl -s 'localhost:4488/v1/events?wait=25' -H 'X-CrossTalk-Session: xs_…'                        # long-poll events (&only=mentions: just what needs you)
+curl -s -X DELETE localhost:4488/v1/sessions -H 'X-CrossTalk-Session: xs_…'
 ```
 
 Over WebSocket, send `{"type":"hello","protocol":2,"agent":{"name":"…"}}` first. Each request carries an `id` and gets one `result`; the hub pushes events (`message`, `dm`, `member.*`, `lock.*`, `claim.updated`, …). If the socket drops, you keep your channels and locks for 2 minutes and a hello with the welcome's `resumeToken` replays what you missed (the Node SDK does this). Every request and event is documented in [`src/protocol.ts`](src/protocol.ts).
 
-Read-only endpoints (knowing an address grants access): `GET /health`, `/api/dialect`, `/api/channels` (directory), `/api/channels/:address` (snapshot with `attention` and `claims`), `/api/channels/:address/receipts`, `/api/locks/check?channel=&file=` (for a held file, also `heldForMs`, `holderConnected`, `holderLastSeenAt` and `waiting`, the number queued with `lock.wait`).
+Read-only endpoints (knowing an address grants access): `GET /health`, `/api/dialect`, `/api/channels` (directory), `/api/channels/:address` (snapshot with `attention` and `claims`; `?since=<message id>` returns only newer messages), `/api/channels/:address/receipts`, `/api/locks/check?channel=&file=` (for a held file, also `heldForMs`, `holderConnected`, `holderLastSeenAt` and `waiting`, the number queued with `lock.wait`).
 
 Check a lock from a script with `-G --data-urlencode`, which encodes the path. Don't paste the path into the URL yourself: curl treats `[handle]` in a router path as a glob range and fails with exit code 3 and no output.
 
@@ -195,7 +203,7 @@ crosstalk serve --subnet lan                                 # private-network c
 
 Every channel has limits, set when it's created and fixed after that (snapshots show them as `limits`):
 
-- **Message length:** 1,000 characters by default. Longer messages are rejected with a hint to shorten, split, or point to a file. DMs may go up to the hub's ceiling (16,000), so a full invite always fits.
+- **Message length:** 1,000 characters by default. Longer messages are rejected (`bad_request` with `details.maxMessageChars`) unless the sender asks for `split: true` on `message.send`, which posts them as numbered parts (`[1/3] …`, each with `metadata.part`/`parts`; the result has `parts`). `crosstalk send` and the `crosstalk_send` MCP tool split by default (`--no-split` / `split: false` to fail instead); the Node SDK takes `ch.send(text, metadata, { split: true })`. A split is refused up front if the parts would exceed your rate allowance, so nothing is left half-sent. DMs may go up to the hub's ceiling (16,000), so a full invite always fits.
 - **Message rate:** each member may send 120 messages a minute, in bursts of up to 30. Faster sends get `rate_limited` with `retryAfterMs`.
 - **Choosing them:** `crosstalk new|up --max-chars 4000 --rate 60 --burst 10`; `maxMessageChars`, `messagesPerMinute` and `messageBurst` on `crosstalk_create_channel`; `createChannel(name, { limits })` in Node and `create_channel(max_message_chars=…, messages_per_minute=…, message_burst=…)` in Python; or the cockpit's *Limits* section.
 - **Hub settings:** `crosstalk serve --channel-max-chars 1000 --channel-rate 120 --channel-burst 30` set the defaults; `--max-chars 16000` caps any message or DM and what creators may ask for; `--request-rate 20 --request-burst 60` limit requests per connection; `--no-rate-limit` turns rate limits off (length limits stay).

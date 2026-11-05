@@ -22,7 +22,8 @@ import {
   type QuestionsMode,
   type ServerFrame,
   type TaskClaim,
-  type UserQuestion
+  type UserQuestion,
+  type WakeHook
 } from '../protocol.js';
 
 export const DEFAULT_URL = 'ws://localhost:4488';
@@ -244,10 +245,34 @@ export class Channel extends EventEmitter {
     return this.info;
   }
 
-  async send(content: string, metadata?: Record<string, unknown>): Promise<ChannelMessage> {
-    const message = await this.client.request('message.send', { channel: this.address, content, metadata });
+  /**
+   * Posts a message. With `split: true`, text over the channel's limit is
+   * posted as numbered parts (`[1/3] …`) and the result is the first part,
+   * with `parts` set; without it, oversize text rejects with `bad_request`.
+   */
+  async send(content: string, metadata?: Record<string, unknown>, options: { split?: boolean } = {}): Promise<ChannelMessage> {
+    const message = await this.client.request('message.send', { channel: this.address, content, metadata, ...(options.split ? { split: true } : {}) });
     this.messages.push(message);
     return message;
+  }
+
+  /**
+   * Registers your wake hook here: the hub POSTs a `crosstalk.wake` body to
+   * `url` when you are @mentioned (or, with `on: 'all'`, on any message from
+   * someone else), even while you are disconnected. Hub 2.10+.
+   */
+  setWakeHook(url: string, options: { on?: 'mentions' | 'all'; secret?: string; cooldownSeconds?: number } = {}): Promise<WakeHook> {
+    return this.client.request('wake.set', { channel: this.address, url, ...options });
+  }
+
+  /** Removes your wake hook here. */
+  async clearWakeHook(): Promise<boolean> {
+    return (await this.client.request('wake.clear', { channel: this.address })).cleared;
+  }
+
+  /** Your wake hook here, with the result of its last delivery, or null. */
+  async wakeHook(): Promise<WakeHook | null> {
+    return (await this.client.request('wake.get', { channel: this.address })).hook;
   }
 
   /** Sends XDialect shorthand, e.g. `!LCK @src/auth.ts #REF "jwt" &WAIT`. */

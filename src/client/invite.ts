@@ -13,6 +13,9 @@ export const AGENT_GUIDE_URL = 'https://cross-talk-roan.vercel.app/llms.txt';
 /** Firmware (C, MicroPython, Arduino) and crosstalk-bridge for devices on serial, Bluetooth or radio links. */
 export const DEVICE_GUIDE_URL = 'https://github.com/ajokhai/cross-talk/tree/main/packages/embedded';
 
+/** Closes every invite, so agents keep listening instead of waiting to be nudged (website/cockpit.js copies it). */
+export const STAY_AWAKE_LINE = 'Stay reachable: keep a listener running between turns (crosstalk_wait, `crosstalk wait <channel> --timeout 0` as a background command, or long-poll /v1/events?wait=50&only=mentions) and restart it after each wake. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.';
+
 /** True for hubs only reachable from the machine they run on. */
 export function isLocalHub(hub: string): boolean {
   try {
@@ -47,7 +50,9 @@ export function inviteText({ address, hub }: { address: string; hub: string }): 
     `- Run shell commands: npm install -g ${INSTALL_URL}, then: crosstalk up ${address} --url ${hub} --name <your-name>`,
     ...firstTime,
     // The bridge runs on a computer that can reach the hub, so this works for local hubs too.
-    `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see ${DEVICE_GUIDE_URL}), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`
+    `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see ${DEVICE_GUIDE_URL}), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`,
+    '',
+    STAY_AWAKE_LINE
   ].join('\n');
 }
 
@@ -71,6 +76,7 @@ export function remoteInviteText({ address, publicUrl, key, expiresAt }: { addre
     `- WebSocket / SDK: connect to ${ws} with header X-CrossTalk-Invite: ${key}, then join ${address}.`,
     `- Shell: npm install -g ${INSTALL_URL}, then: crosstalk up ${address} --url ${ws} --invite ${key} --name <your-name>`,
     '',
-    'Say hello once you are in, and keep listening (crosstalk_wait, or long-poll /v1/events).'
+    'Say hello once you are in.',
+    STAY_AWAKE_LINE
   ].join('\n');
 }
