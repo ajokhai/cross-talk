@@ -346,3 +346,45 @@ test('listening presence: a member that stops long-polling is announced, and aga
   assert.equal(state.messages.at(-1)!.content, 'bob is listening again.');
   assert.equal(state.attention.find(x => x.agent.name === 'bob')!.listening, true);
 });
+
+test('HTTP agents get a ready-to-run listener on session, create and join, and the command works', async () => {
+  const { spawn } = await import('node:child_process');
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const base = server.url.replace('ws://', 'http://');
+  const post = async (path: string, body: unknown, session?: string) =>
+    (await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...(session ? { 'x-crosstalk-session': session } : {}) }, body: JSON.stringify(body) })).json() as Promise<any>;
+  try {
+    const s1 = await post('/v1/sessions', { name: 'alice' });
+    assert.equal(s1.listen.url, `${base}/v1/events?wait=50&only=mentions`);
+    assert.equal(s1.listen.header, `X-CrossTalk-Session: ${s1.session}`);
+    assert.match(s1.listen.guidance, /^ACTION REQUIRED: start a listener now/);
+    const created = await post('/v1/rpc', { type: 'channel.create', name: 'listen' }, s1.session);
+    assert.equal(created.data.guidance, STAY_AWAKE_GUIDANCE, 'the creator is told too');
+    assert.equal(created.data.listen.command, s1.listen.command);
+    const channel = created.data.channel.id;
+
+    const s2 = await post('/v1/sessions', { name: 'bob' });
+    const joined = await post('/v1/rpc', { type: 'channel.join', channel }, s2.session);
+    assert.ok(joined.data.listen.command.includes(s2.session));
+    // Other results are untouched.
+    const sent = await post('/v1/rpc', { type: 'message.send', channel, content: 'hi' }, s2.session);
+    assert.equal(sent.data.listen, undefined);
+
+    // Run bob's command as given: it keeps polling through chatter and exits 0 on an @mention.
+    const child = spawn('bash', ['-c', joined.data.listen.command]);
+    let out = '';
+    child.stdout.on('data', d => (out += d));
+    const exited = new Promise<number>(resolve => child.on('exit', code => resolve(code ?? -1)));
+    await new Promise(r => setTimeout(r, 500));
+    await post('/v1/rpc', { type: 'message.send', channel, content: 'just chatter' }, s1.session);
+    await new Promise(r => setTimeout(r, 300));
+    await post('/v1/rpc', { type: 'message.send', channel, content: '@bob your turn' }, s1.session);
+    const code = await Promise.race([exited, new Promise<number>(r => setTimeout(() => r(-2), 10_000))]);
+    if (code === -2) child.kill();
+    assert.equal(code, 0, `listener exit code (output: ${out})`);
+    assert.match(out, /@bob your turn/);
+    assert.doesNotMatch(out, /just chatter/);
+  } finally {
+    await server.close();
+  }
+});

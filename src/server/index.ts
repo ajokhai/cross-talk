@@ -10,7 +10,25 @@ import { CLIENT_HEADER, INTERNAL_HEADER, INVITE_HEADER } from './internal.js';
 import { hasCloudflared, startQuickTunnel, type Tunnel } from './tunnel.js';
 import type { McpEndpoint } from './mcp-http.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
-import { PROTOCOL_VERSION, type HelloFrame, type ServerFrame } from '../protocol.js';
+import { PROTOCOL_VERSION, httpListen, type HelloFrame, type ServerFrame } from '../protocol.js';
+
+/** The hub's http(s) base as this client reached it (X-Forwarded-* behind a proxy), for listen commands. */
+function httpBaseOf(req: http.IncomingMessage, trustProxy: boolean): string {
+  const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.split(',')[0].trim();
+  const fwdHost = trustProxy ? first(req.headers['x-forwarded-host']) : undefined;
+  const host = fwdHost || first(req.headers.host) || 'localhost';
+  const safeHost = /^[\w.:[\]-]+$/.test(host) ? host : 'localhost';
+  const secure = (trustProxy && first(req.headers['x-forwarded-proto']) === 'https') || !!(req.socket as { encrypted?: boolean }).encrypted;
+  return `${secure ? 'https' : 'http'}://${safeHost}`;
+}
+
+/** Adds the ready-to-run listener to successful channel.create / channel.join results over HTTP. */
+function withListen(result: any, type: unknown, base: string, token: string): any {
+  if ((type === 'channel.create' || type === 'channel.join') && result?.ok && result.data) {
+    return { ...result, data: { ...result.data, listen: httpListen(base, token) } };
+  }
+  return result;
+}
 
 export interface ServerOptions {
   port?: number;
@@ -401,7 +419,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         try {
           const welcome = hub.hello(session.conn, { type: 'hello', protocol: PROTOCOL_VERSION, agent: body.agent ?? body } as HelloFrame);
           sessions.set(session.token, session);
-          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, channel: invite.channel });
+          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, channel: invite.channel, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
         } catch (err: any) {
           hub.disconnect(session.conn);
           return json(res, 400, { error: { code: err.code ?? 'bad_request', message: err.message } });
@@ -420,7 +438,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         if (route === 'POST /v1/rpc') {
           const body = await readJson(req);
           const result = await hub.request(session.conn, { ...body, id: typeof body.id === 'string' ? body.id : crypto.randomUUID() });
-          return json(res, result.type === 'result' && !result.ok ? 400 : 200, result);
+          return json(res, result.type === 'result' && !result.ok ? 400 : 200, withListen(result, body.type, httpBaseOf(req, trustProxy), session.token));
         }
         if (route === 'GET /v1/events') {
           const wait = Math.max(0, Math.min(Number(url.searchParams.get('wait') ?? 0) || 0, MAX_POLL_SECONDS));
@@ -522,7 +540,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         try {
           const welcome = hub.hello(session.conn, hello);
           sessions.set(session.token, session);
-          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION });
+          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
         } catch (err: any) {
           hub.disconnect(session.conn);
           return json(res, 400, { error: { code: err.code ?? 'bad_request', message: err.message } });
@@ -543,7 +561,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           const body = await readJson(req);
           const frame = { ...body, id: typeof body.id === 'string' ? body.id : crypto.randomUUID() };
           const result = await hub.request(session.conn, frame);
-          return json(res, result.type === 'result' && !result.ok ? 400 : 200, result);
+          return json(res, result.type === 'result' && !result.ok ? 400 : 200, withListen(result, body.type, httpBaseOf(req, trustProxy), session.token));
         }
         if (route === 'GET /v1/events') {
           const wait = Math.max(0, Math.min(Number(url.searchParams.get('wait') ?? 0) || 0, MAX_POLL_SECONDS));

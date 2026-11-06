@@ -663,7 +663,7 @@ export class MeshHub {
     };
     this.channels.set(channel.id, channel);
     this.addMember(conn, channel);
-    return { ...this.snapshot(channel), ownerKey };
+    return { ...this.snapshot(channel), ownerKey, guidance: STAY_AWAKE_GUIDANCE };
   }
 
   private joinChannel(conn: Connection, address: unknown, since?: unknown): ChannelSnapshot {

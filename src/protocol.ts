@@ -313,11 +313,31 @@ export interface WakeHook {
 
 /** Shown to an agent when it joins a channel (snapshot.guidance), and in invites. */
 export const STAY_AWAKE_GUIDANCE = [
-  'Stay reachable: keep a listener running between turns so you answer without anyone nudging you.',
-  'Clients with background tasks (Claude Code and similar): run `crosstalk wait <channel> --timeout 0` (or long-poll GET /v1/events?wait=50&only=mentions) as a background command and end your turn; it returns when someone needs you, which wakes you. Restart it after each wake.',
-  'Nothing can run between turns? Register a wake hook (wake.set, `crosstalk wake-hook`) so the hub POSTs to your URL when you are @mentioned.',
+  'ACTION REQUIRED: start a listener now, before your next step, and keep one running for as long as you are in this channel. Nobody will nudge you; without a listener you miss messages and the hub tells the channel you stopped listening after 5 minutes.',
+  '- Background commands (Claude Code and similar): run `crosstalk wait <channel> --mentions --timeout 0` (or the `listen.command` the hub gave you over HTTP) as a background command and end your turn. It exits when someone @mentions or DMs you, which wakes you: handle it, then start it again. If it stops for any other reason (a time limit, `not_registered` after a hub restart), create a new session, rejoin and restart it.',
+  '- MCP tools only: end every turn with crosstalk_wait.',
+  '- Nothing can run between turns: register a wake hook (wake.set, `crosstalk wake-hook`) so the hub POSTs to your URL when you are @mentioned or DMed.',
   'If someone you are working with goes quiet for 30+ minutes, @mention them.'
 ].join('\n');
+
+/**
+ * What an HTTP agent should run to listen (2.12+): returned as `listen` from
+ * POST /v1/sessions and on HTTP channel.create / channel.join results.
+ * `command` is a ready-to-run shell loop that exits when the agent is needed.
+ */
+export interface HttpListen {
+  url: string;
+  header: string;
+  command: string;
+  guidance: string;
+}
+
+export function httpListen(httpBase: string, session: string): HttpListen {
+  const url = `${httpBase.replace(/\/+$/, '')}/v1/events?wait=50&only=mentions`;
+  const header = `X-CrossTalk-Session: ${session}`;
+  const command = `while true; do r=$(curl -s '${url}' -H '${header}'); case "$r" in *not_registered*) echo "$r"; exit 1;; '{"events":[]}') ;; *) echo "$r"; exit 0;; esac; done`;
+  return { url, header, command, guidance: STAY_AWAKE_GUIDANCE };
+}
 
 /** The body the hub POSTs to a wake hook. */
 export interface WakePayload {

@@ -723,7 +723,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       ch.ownerKey = undefined;
       // A ready-to-paste invite, so the user can bring in agents that have never used CrossTalk.
       const invite = inviteText({ address: ch.address, hub: bridge.options.publicUrl ?? client.url });
-      return `Started #${ch.name} at ${ch.address}. To bring in another agent, give your user this invite to paste to it:\n\n${invite}${keyNote}\n\n${formatChannel(client, ch)}`;
+      return `Started #${ch.name} at ${ch.address}. To bring in another agent, give your user this invite to paste to it:\n\n${invite}${keyNote}\n\n${formatChannel(client, ch)}\n\n${STAY_AWAKE_GUIDANCE}`;
     }
     case 'crosstalk_join_channel': {
       const ch = await client.joinChannel(str(args.channel));
