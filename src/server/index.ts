@@ -152,36 +152,64 @@ function presentedToken(req: http.IncomingMessage, url: URL): string | undefined
  * `GET /v1/events`, so agents that can only make HTTP calls (or run curl) still
  * receive pushes with low latency.
  */
+/**
+ * An agent connected over plain HTTP. Events queue up until the agent
+ * long-polls `GET /v1/events`, so agents that can only make HTTP calls (or
+ * run curl) still receive pushes with low latency.
+ *
+ * State: `open` until the hub closes the connection (evicted, invite revoked)
+ * or the session is ended; then `closed`, and polls report it. At most one
+ * long-poll is served at a time: each poll takes a new generation, a newer
+ * poll supersedes an older one (which returns at once and stops waiting), and
+ * a superseded poll never wakes anyone, so two listeners on one session can't
+ * keep waking each other.
+ */
 class HttpSession {
   readonly conn: Connection;
   lastSeen = Date.now();
+  state: 'open' | 'closed' = 'open';
+  /** Called once when the hub closes this session's connection. */
+  onClosed?: () => void;
   private queue: ServerFrame[] = [];
-  private waiter?: () => void;
+  private generation = 0;
+  private waiter?: { generation: number; wake: () => void };
 
   constructor(hub: MeshHub, address: string, readonly token: string, inviteKey?: string) {
     const peer: Peer = {
       send: frame => {
         this.queue.push(frame);
         if (this.queue.length > QUEUE_LIMIT) this.queue.shift();
-        this.waiter?.();
+        this.waiter?.wake();
       },
-      close: () => this.waiter?.()
+      close: () => this.close()
     };
     this.conn = hub.connect(peer, address, { inviteKey });
+  }
+
+  /** Ends the session: the current poll returns and later ones are refused. */
+  close(): void {
+    if (this.state === 'closed') return;
+    this.state = 'closed';
+    this.waiter?.wake();
+    this.onClosed?.();
   }
 
   /**
    * `onlyMentions`: return only what needs this agent (DMs, channel messages
    * that @mention it, lock and slot grants), dropping everything else, and
-   * keep waiting through the noise until something matches or time runs out.
+   * keep waiting through the noise until something matches, time runs out, a
+   * newer poll takes over, or the session closes.
    */
   async poll(waitSeconds: number, onlyMentions = false, exclude: ReadonlySet<string> = new Set()): Promise<ServerFrame[]> {
-    if (!onlyMentions && !exclude.size) return this.pollRaw(waitSeconds);
+    const mine = ++this.generation;
+    this.waiter?.wake(); // the older poll is superseded and returns
     const keep = (f: ServerFrame) => !exclude.has(f.type) && (!onlyMentions || this.needsMe(f));
     const deadline = Date.now() + waitSeconds * 1000;
     for (;;) {
-      const frames = (await this.pollRaw(Math.max(0, (deadline - Date.now()) / 1000))).filter(keep);
+      if (this.state === 'closed' || this.generation !== mine) return [];
+      const frames = this.take().filter(keep);
       if (frames.length || Date.now() >= deadline) return frames;
+      await this.waitForEvents(mine, deadline);
     }
   }
 
@@ -192,26 +220,28 @@ class HttpSession {
     return !!me && !!frame.message.mentions?.some(m => m.id === me);
   }
 
-  private async pollRaw(waitSeconds: number): Promise<ServerFrame[]> {
-    if (!this.queue.length && waitSeconds > 0) {
-      await new Promise<void>(resolve => {
-        const timer = setTimeout(done, waitSeconds * 1000);
-        const self = this;
-        function done() {
-          clearTimeout(timer);
-          if (self.waiter === done) self.waiter = undefined;
-          resolve();
-        }
-        this.waiter?.();
-        this.waiter = done;
-      });
-    }
+  private take(): ServerFrame[] {
     this.lastSeen = Date.now();
     return this.queue.splice(0);
   }
 
+  /** Resolves on the next event, the deadline, a newer poll or the session closing. */
+  private waitForEvents(generation: number, deadline: number): Promise<void> {
+    if (this.queue.length) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      const timer = setTimeout(wake, Math.max(0, deadline - Date.now()));
+      const self = this;
+      function wake() {
+        clearTimeout(timer);
+        if (self.waiter?.wake === wake) self.waiter = undefined;
+        resolve();
+      }
+      this.waiter = { generation, wake };
+    });
+  }
+
   wake(): void {
-    this.waiter?.();
+    this.waiter?.wake();
   }
 }
 
@@ -345,14 +375,15 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   const sessionFor = (req: http.IncomingMessage): HttpSession | undefined => {
     const id = req.headers['x-crosstalk-session'];
     const session = typeof id === 'string' ? sessions.get(id) : undefined;
-    if (session) session.lastSeen = Date.now();
+    if (!session || session.state === 'closed') return undefined;
+    session.lastSeen = Date.now();
     return session;
   };
 
   const endSession = (session: HttpSession) => {
     sessions.delete(session.token);
     hub.disconnect(session.conn);
-    session.wake();
+    session.close();
   };
 
   const reaper = setInterval(() => {
@@ -416,6 +447,9 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         let session: HttpSession;
         try {
           session = new HttpSession(hub, addressOf(req), `xs_${crypto.randomBytes(24).toString('base64url')}`, key);
+          // The hub closing the connection (evicted, invite revoked) ends the session too.
+          const ended = session;
+          ended.onClosed = () => sessions.delete(ended.token);
         } catch (err) {
           if (err instanceof HubFailure) return json(res, err.code === 'unauthorized' ? 401 : 429, { error: { code: err.code, message: err.message } });
           throw err;
@@ -536,6 +570,9 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         let session: HttpSession;
         try {
           session = new HttpSession(hub, addressOf(req), `xs_${crypto.randomBytes(24).toString('base64url')}`);
+          // The hub closing the connection (evicted, invite revoked) ends the session too.
+          const ended = session;
+          ended.onClosed = () => sessions.delete(ended.token);
         } catch (err) {
           if (err instanceof HubFailure) return json(res, 429, { error: { code: err.code, message: err.message } });
           throw err;
