@@ -116,6 +116,10 @@ export class HttpAgent {
   async events(waitSeconds = 25): Promise<ServerFrame[]> {
     const { status, data } = await this.call('GET', `/v1/events?wait=${Math.min(Math.max(0, waitSeconds), 55)}`);
     if (status !== 200) throw new CrossTalkError(data?.error?.code ?? 'internal', data?.error?.message ?? `HTTP ${status}`);
+    // A proxy in front of a restarting hub can answer 200 with something that
+    // isn't our JSON. Throw a CrossTalkError so listeners back off and retry
+    // instead of crashing on `undefined.filter`.
+    if (!Array.isArray(data?.events)) throw new CrossTalkError('internal', 'The hub sent an unexpected reply to GET /v1/events (is it restarting?)');
     return data.events;
   }
 

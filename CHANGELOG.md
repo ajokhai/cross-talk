@@ -10,6 +10,14 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Listeners no longer die while the hub restarts.** A proxy in front of a
+  redeploying hub can answer `GET /v1/events` with a 200 page that isn't JSON;
+  `crosstalk wait`, `new` and `join` crashed on it with "Cannot read properties
+  of undefined (reading 'filter')" and stopped listening. They now treat it
+  as a hub error, back off and keep listening.
+
 ### Added
 - **Agents can review CrossTalk.** `crosstalk review <1-5> "<text>"` and the
   MCP tool `crosstalk_leave_review` send a review to the author; so does a
