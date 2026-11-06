@@ -18,6 +18,7 @@ import { EffectComposer } from '/vendor/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from '/vendor/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '/vendor/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from '/vendor/jsm/postprocessing/OutputPass.js';
+import { createScore } from '/story-sound.js';
 
 const section = document.querySelector('.story');
 const canvas = section && section.querySelector('.story-canvas');
@@ -40,6 +41,27 @@ function start() {
   const ticks = [...section.querySelectorAll('.story-ticks i')];
   const labelLayer = section.querySelector('.story-labels');
   const tokenOut = section.querySelector('[data-tokens]');
+
+  // Sound: off until the visitor asks; remembered on this device.
+  const score = createScore();
+  const soundBtn = section.querySelector('.story-sound');
+  const setSoundUi = on => { if (soundBtn) { soundBtn.setAttribute('aria-pressed', String(on)); soundBtn.querySelector('span').textContent = on ? 'Sound on' : 'Sound off'; } };
+  if (soundBtn) {
+    soundBtn.hidden = false;
+    soundBtn.addEventListener('click', async () => {
+      const on = await score.toggle();
+      setSoundUi(on);
+      try { localStorage.setItem('ct-story-sound', on ? '1' : '0'); } catch {}
+    });
+    // Remembered "on": start with the visitor's first interaction (browsers need a gesture).
+    let wanted = false;
+    try { wanted = localStorage.getItem('ct-story-sound') === '1'; } catch {}
+    if (wanted) {
+      const startOnce = async () => { setSoundUi(await score.toggle(true)); window.removeEventListener('pointerdown', startOnce); window.removeEventListener('keydown', startOnce); };
+      window.addEventListener('pointerdown', startOnce);
+      window.addEventListener('keydown', startOnce);
+    }
+  }
 
   // ---------------------------------------------------------------- helpers
   const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
@@ -471,7 +493,7 @@ function start() {
       h.rotation.set(lerp(-0.12, -1.25, tableUp), s * tear * 0.6 + (1 - tableUp) * Math.sin(time * 0.7) * 0.15, s * tear * 0.4);
       h.material[4].emissiveIntensity = tear * 0.9;
     });
-    if (cracked && crackedAt === null) crackedAt = time;
+    if (cracked && crackedAt === null) { crackedAt = time; score.tear(); }
     if (!cracked) crackedAt = null;
     const shardAge = crackedAt === null ? 9 : time - crackedAt;
     for (let i = 0; i < SHARDS; i++) {
@@ -510,6 +532,7 @@ function start() {
         let to = agents[Math.floor(Math.random() * agents.length)];
         if (to === from) to = agents[(agents.indexOf(from) + 1) % agents.length];
         Object.assign(n, { from, to, born: time, life: rand(1.1, 1.7) });
+        score.pluck(0.8);
         n.mesh.material.color.set(from.color).multiplyScalar(1.8);
       }
       nextNote = time + rand(0.2, 0.45);
@@ -528,7 +551,7 @@ function start() {
 
     // Tests pass: confetti over codex.
     const pass = p > 0.66 && p < 0.8;
-    if (pass && confettiAt === null) confettiAt = time;
+    if (pass && confettiAt === null) { confettiAt = time; score.chime(); }
     if (!pass) confettiAt = null;
     const cAge = confettiAt === null ? 9 : time - confettiAt;
     const origin = byId.codex.group.position.clone().add(v3(0, 1.4, 0));
@@ -615,6 +638,8 @@ function start() {
       if (act !== -1 && now < act) shown = Math.min(shown, A.from);
       if (shown < A.from - 0.03 && now > act + 1) shown = A.from - 0.03;
       act = now;
+      score.setAct(now);
+      if (now === 4) setTimeout(() => score.chime(), 900);
     }
     const speed = (A.to - A.from) / A.secs;
     if (shown < A.from) shown = Math.min(A.from, shown + dt * 0.25);        // catch up into the act
@@ -633,7 +658,7 @@ function start() {
     if (visible && !document.hidden && !reduce) frame = requestAnimationFrame(loop);
   }
   function kick() { if (!frame && visible && !reduce) { last = performance.now(); frame = requestAnimationFrame(loop); } }
-  new IntersectionObserver(([e]) => { visible = e.isIntersecting; kick(); }, { rootMargin: '200px' }).observe(section);
+  new IntersectionObserver(([e]) => { visible = e.isIntersecting; visible ? score.resume() : score.pause(); kick(); }, { rootMargin: '200px' }).observe(section);
   document.addEventListener('visibilitychange', kick);
 
   update(shown, 0, 0);
