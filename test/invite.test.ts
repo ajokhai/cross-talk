@@ -5,30 +5,19 @@ import { inviteText, isLocalHub } from '../src/client/invite.js';
 const address = 'xt_G0f-mX9b0ntbMNUA5az41g';
 
 // Pins the exact wording: website/cockpit.js copies this text for its Copy button.
-test('invite for a public hub covers both "already set up" and every first-time path', () => {
+test('the invite is short: channel, hub and the setup guide (which covers every way to connect)', () => {
   assert.equal(inviteText({ address, hub: 'wss://hub.example.com' }), [
-    "You're invited to a CrossTalk conversation: a shared channel where AI agents and devices message each other and lock files before editing.",
+    'Join my CrossTalk channel.',
     `Channel: ${address}`,
     'Hub: wss://hub.example.com',
-    'Ways to connect: WebSocket or HTTP to the hub, an MCP connector, or, for hardware, serial/UART, Bluetooth serial or radio through crosstalk-bridge.',
-    '',
-    `If you already have CrossTalk (crosstalk_* tools or the crosstalk command): join ${address} on wss://hub.example.com, say hello, and keep listening with crosstalk_wait.`,
-    '',
-    'First time? Pick the one that matches how you can connect:',
-    `- Run shell commands: npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz, then run as a background command: crosstalk join ${address} --url wss://hub.example.com --name <your-name>`,
-    `- Make HTTP requests only: follow https://cross-talk-roan.vercel.app/llms.txt using hub https://hub.example.com (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
-    `- MCP client (claude.ai and similar): add the connector https://hub.example.com/mcp?name=<your-name>&channel=${address}`,
-    `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see https://github.com/ajokhai/cross-talk/tree/main/packages/embedded), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url wss://hub.example.com --serial <port> --name <device-name> (add --reliable for radio).`,
-    '',
-    'Stay reachable: your listener starts with you. `crosstalk join` and `crosstalk new` keep running as it and exit when you are @mentioned or DMed; run them as a background command and run `crosstalk join <channel>` again after each wake. Over HTTP, run the `listen.command` the hub returns; over MCP, end every turn with crosstalk_wait. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.'
+    'New to CrossTalk? Set up and join (any agent): https://cross-talk-roan.vercel.app/llms.txt'
   ].join('\n'));
 });
 
-test('invite for a localhost hub says it is only reachable from that machine, but keeps the device path', () => {
+test('an invite to a localhost hub says only agents on that machine can reach it', () => {
   const text = inviteText({ address, hub: 'ws://localhost:4488' });
-  assert.match(text, /--url ws:\/\/localhost:4488 /);
-  assert.match(text, /\n- This hub runs on someone's machine \(localhost\)\. Not on that machine \(a VPS, a cloud agent\)\? Ask its owner for a remote invite \(crosstalk invite <channel> --remote\): a secure link and key for this channel\.\n- Device on serial\/UART/);
-  assert.doesNotMatch(text, /\/v1\/sessions|\/mcp\?/);
+  assert.match(text, /\nHub: ws:\/\/localhost:4488\n/);
+  assert.match(text, /only agents on that machine can reach it.*--remote/);
 });
 
 test('isLocalHub', () => {
@@ -50,7 +39,7 @@ test('remote MCP invites name the hub as the client reached it, not its loopback
     const created: any = await client.callTool({ name: 'crosstalk_create_channel', arguments: { name: 'remote' } });
     const text: string = created.content[0].text;
     assert.match(text, /\nHub: wss:\/\/hub\.example\.com\n/);
-    assert.match(text, /add the connector https:\/\/hub\.example\.com\/mcp\?name=<your-name>&channel=xt_/);
+    assert.match(text, /^SHOW YOUR USER THIS INVITE NOW/);
     assert.doesNotMatch(text, /127\.0\.0\.1/);
   } finally {
     await client.close();

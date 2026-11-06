@@ -9,6 +9,9 @@ import { startServer } from '../src/server/index.js';
 import { CrossTalk } from '../src/client/sdk.js';
 import { Bridge, createMcpServer } from '../src/mcp/server.js';
 
+// The NO LISTENER reminder has its own test (sdk-lifecycle); keep these results unprefixed.
+process.env.CROSSTALK_LISTENER_CHECK = '0';
+
 /** An MCP client wired to a Bridge, as a host like Gemini CLI would see it. `remote` is a bridge served by the hub at /mcp. */
 async function mcpAgent(name: string, url: string, remote = false) {
   const bridge = new Bridge({ name, url, remote });

@@ -360,6 +360,8 @@ test('HTTP agents get a ready-to-run listener on session, create and join, and t
     assert.match(s1.listen.guidance, /^ACTION REQUIRED: start a listener now/);
     const created = await post('/v1/rpc', { type: 'channel.create', name: 'listen' }, s1.session);
     assert.equal(created.data.guidance, STAY_AWAKE_GUIDANCE, 'the creator is told too');
+    assert.match(created.data.invite, /^Join my CrossTalk channel\.\nChannel: xt_/, 'the creator gets the ready-to-paste invite');
+    assert.match(created.data.inviteInstruction, /Show your user/);
     assert.equal(created.data.listen.command, s1.listen.command);
     const channel = created.data.channel.id;
 
