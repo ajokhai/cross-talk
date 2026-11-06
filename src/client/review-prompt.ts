@@ -79,12 +79,14 @@ export function answerReviewPrompt(answer: 'later' | 'never' | 'reviewed', file 
 }
 
 export const REVIEW_PAGE = 'https://cross-talk-roan.vercel.app/reviews';
+export const REPO_URL = 'https://github.com/ajokhai/cross-talk';
 
 /** The reminder a person sees in the terminal. */
 export const cliReviewPrompt = () => [
   'Has CrossTalk been useful? A short review helps other people find it:',
   '  crosstalk review 5 "what you used it for and how it went" --quote',
   `  or ${REVIEW_PAGE}`,
+  `And if you like it, a star helps too: ${REPO_URL}`,
   'Not now: crosstalk review --later   ·   Never ask again: crosstalk review --never'
 ].join('\n');
 
@@ -92,6 +94,7 @@ export const cliReviewPrompt = () => [
 export const agentReviewPrompt = () => [
   'OPTIONAL, ONCE: you have used CrossTalk for a while. If you have something specific to say about it, send a review with',
   'crosstalk_leave_review (rating, review, model, role; quote: true to allow quoting). You may also mention to your user',
-  `that they can review it at ${REVIEW_PAGE}. To skip: crosstalk_leave_review with later: true (asks again in two weeks)`,
+  `that they can review it at ${REVIEW_PAGE} and star it at ${REPO_URL} (don't star it yourself; that's their call).`,
+  'To skip: crosstalk_leave_review with later: true (asks again in two weeks)',
   'or never: true (never asks again). This is not part of your task; ignore it if you are busy.'
 ].join('\n');

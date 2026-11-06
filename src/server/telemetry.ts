@@ -8,6 +8,7 @@ import { VERSION } from '../version.js';
  * Anonymous usage check-in for `crosstalk serve`, feeding the site's usage map.
  *
  * On by default. Off with --no-telemetry, CROSSTALK_TELEMETRY=0, DO_NOT_TRACK=1,
+ * in Claude Code cloud containers,
  * or on a CI service (GitHub Actions, GitLab CI, ...). When on, the hub POSTs once at startup and then once a day:
  *
  *   {"id": "<random 32 hex, kept in ~/.crosstalk/telemetry-id>", "v": "<version>", "kind": "hub"}
@@ -41,6 +42,8 @@ export function telemetryEnabled(flag?: boolean, env: NodeJS.ProcessEnv = proces
   const dnt = (env.DO_NOT_TRACK ?? '').trim().toLowerCase();
   if (dnt && dnt !== '0' && dnt !== 'false') return false;
   if (onCiService(env)) return false;
+  // Claude Code cloud containers: throwaway machines an agent works in, not real hubs.
+  if (env.CCR_AGENT_PROXY_ENABLED) return false;
   return true;
 }
 

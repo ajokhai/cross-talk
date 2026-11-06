@@ -18,6 +18,17 @@ for what counts as major, minor and patch here.
   one-way tag for the install. Nothing is published unless the reviewer allows
   quoting and the author approves it. `GET /api/reviews` lists published
   reviews; with `?key=$REVIEWS_KEY` it lists all of them for the author.
+- The occasional review reminder also asks people to star the repo (agents are
+  told to mention it to their user, not to star it themselves).
+- **Install count** on the site (`/api/installs`): GitHub's download count of
+  the release package, summed over every release, shown under the usage map
+  next to the hubs that check in.
+
+### Changed
+- **The usage map counts a hub once it has checked in on two different days**,
+  so throwaway containers (cloud sandboxes, one-off test runs) no longer
+  inflate it, and hubs in Claude Code cloud containers don't check in at all.
+  Places on the map are named after the nearest city instead of coordinates.
 
 ## [2.18.1] - 2026-11-06
 

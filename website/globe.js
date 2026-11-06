@@ -10,7 +10,7 @@
  * projection, land drawn as dots from /data/land-dots.json, and beacons sized
  * by distinct hubs over the last 30 days: one per published 1° cell (every
  * cell under 20 hubs, then cells with 3+), and one at each country's centre
- * for the rest. Drag to spin. Respects
+ * for the rest, each named after the nearest city (data/cities.json). Drag to spin. Respects
  * prefers-reduced-motion, follows the site's light/dark tokens, and stops
  * drawing while off screen.
  */
@@ -262,10 +262,12 @@
 
   async function load() {
     const json = url => fetch(url).then(r => (r.ok ? r.json() : Promise.reject(new Error(url))));
-    const [dots, countries, usage] = await Promise.all([
+    const [dots, countries, usage, cityData, installs] = await Promise.all([
       json('/data/land-dots.json'),
       json('/data/countries.json'),
-      json('/api/usage').catch(() => ({ configured: false, total: 0, countries: {}, places: [] }))
+      json('/api/usage').catch(() => ({ configured: false, total: 0, countries: {}, places: [] })),
+      json('/data/cities.json').catch(() => ({ cities: [] })),
+      json('/api/installs').catch(() => null)
     ]);
 
     land = new Float32Array(dots.points.length);
@@ -277,11 +279,24 @@
     const places = (usage.places || []).filter(p => countries[p.country] && Number.isFinite(p.lat) && Number.isFinite(p.lon));
     const placed = {};
     for (const p of places) placed[p.country] = (placed[p.country] || 0) + p.n;
-    const deg = (v, pos, neg) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? pos : neg}`;
+    // Name a place by the nearest city of 40,000+ people in the same country
+    // (Natural Earth, public domain), not by coordinates.
+    const cities = cityData.cities || [];
+    const nearestCity = (lat, lon, code) => {
+      let best = null;
+      let bestD = Infinity;
+      const k = Math.cos(lat * RAD);
+      for (const c of cities) {
+        if (c[1] !== code) continue;
+        const d = (c[2] - lat) ** 2 + ((c[3] - lon) * k) ** 2;
+        if (d < bestD) { bestD = d; best = c[0]; }
+      }
+      return best;
+    };
     const raw = [
       ...places.map(p => ({
         code: p.country, count: p.n,
-        name: `${countries[p.country][2]}, near ${deg(p.lat, 'N', 'S')} ${deg(p.lon, 'E', 'W')}`,
+        name: (city => (city ? `Near ${city}, ${countries[p.country][2]}` : countries[p.country][2]))(nearestCity(p.lat, p.lon, p.country)),
         lon: p.lon * RAD, lat: p.lat * RAD
       })),
       ...counts
@@ -299,7 +314,10 @@
     const busiest = markers.slice().sort((a, b) => b.count - a.count)[0];
     if (busiest) rotation = -busiest.lon;
 
-    const text = describe(usage, countries);
+    // Installs, counted by GitHub as release downloads, alongside the hubs that check in.
+    const installed = installs && Number.isFinite(installs.installs) && installs.installs > 0
+      ? ` Installed ${installs.installs.toLocaleString('en-US')} time${installs.installs === 1 ? '' : 's'} from GitHub releases.` : '';
+    const text = describe(usage, countries) + installed;
     if (summary) summary.textContent = text;
     canvas.setAttribute('aria-label', `Globe of CrossTalk usage. ${text}`);
     canvas.setAttribute('role', 'img');

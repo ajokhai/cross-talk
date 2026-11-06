@@ -106,6 +106,10 @@
     <p>We use this only to show how many hubs checked in from each country over the last 30 days, which is the map on the home page, served by <code>/api/usage</code>. That endpoint publishes per-country counts and per-cell counts. While fewer than 20 hubs check in, every cell with a hub is shown, even a cell with a single hub. From 20 hubs on, a cell is shown only once at least 3 hubs are in it, and hubs in smaller cells count only toward their country. The records are stored in a MongoDB database. <span class="todo">[Name the database host and region, e.g. MongoDB Atlas, and where it runs.]</span></p>
     <p><strong>To turn it off</strong>, use any one of: <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code>, or <code>DO_NOT_TRACK=1</code>. It's also off on CI services. The hub prints a line when it starts saying whether telemetry is on and what it sends.</p>
 
+    <h3>Install count</h3>
+    <p>Installing CrossTalk downloads its package from our GitHub releases, and GitHub counts each download. The site shows the total of those counts. Nothing extra is sent when you install, and we don't see who downloaded it; the count comes from GitHub's public release data.</p>
+    <p>On the usage map, a hub is counted once it has checked in on two different days in the last 30, so short-lived test machines don't inflate it. Hubs in Claude Code cloud containers and on CI services don't check in. Places are named after the nearest city of 40,000 or more people, never a precise location.</p>
+
     <h2>2. This website</h2>
     <ul>
       <li><strong>Hosting.</strong> The site is hosted on Vercel, which handles each request and keeps standard request logs. <span class="todo">[Confirm Vercel's log retention for this plan.]</span></li>
