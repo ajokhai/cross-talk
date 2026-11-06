@@ -101,13 +101,16 @@ export async function runWithSlot(o: RunWithSlotOptions): Promise<number> {
     return 1;
   }
 
+  // acquiring ──granted──▶ running ──command exits──▶ done
+  //     └──full──▶ queued ──granted (or re-asked after a reconnect)──┘
+  // A signal while acquiring or queued means: don't run the command at all.
+  let phase: { kind: 'acquiring' } | { kind: 'queued'; wake: () => void } | { kind: 'running'; child: ReturnType<typeof runCommand> } = { kind: 'acquiring' };
   let stopped: NodeJS.Signals | undefined;
-  let child: ReturnType<typeof runCommand> | undefined;
-  let wake: (() => void) | undefined;
+  const signalled = () => 128 + (stopped === 'SIGINT' ? 2 : 15);
   const onSignal = (signal: NodeJS.Signals) => {
     stopped = signal;
-    if (child) child.kill(signal);
-    else wake?.();
+    if (phase.kind === 'running') phase.child.kill(signal);
+    else if (phase.kind === 'queued') phase.wake();
   };
   const onInt = () => onSignal('SIGINT');
   const onTerm = () => onSignal('SIGTERM');
@@ -118,16 +121,25 @@ export async function runWithSlot(o: RunWithSlotOptions): Promise<number> {
 
   try {
     const first = await acquire();
+    if (stopped) return signalled();
     if ('queued' in first) {
       const holders = first.slot.holders.map((h: SlotHold) => h.holder.name).join(', ');
       log(`crosstalk run: slot ${o.slot} is full (${first.slot.capacity} held by ${holders}); waiting, number ${first.position} in line`);
       await new Promise<void>(resolve => {
-        wake = resolve;
+        phase = { kind: 'queued', wake: resolve };
         client.on('event', (f: ServerFrame) => {
           if (f.type === 'slot.granted' && f.slot.channel === o.channel && f.slot.name === o.slot) resolve();
         });
+        // Queue places don't survive a hub restart or a new agent id: ask again.
+        client.on('reconnected', () => {
+          if (phase.kind !== 'queued') return;
+          acquire().then(r => {
+            if (!('queued' in r)) resolve();
+            else log(`crosstalk run: reconnected; back in line for slot ${o.slot}, number ${r.position}`);
+          }, err => log(`crosstalk run: couldn't rejoin the line for slot ${o.slot}: ${(err as Error).message}`));
+        });
       });
-      if (stopped) return 128 + (stopped === 'SIGINT' ? 2 : 15);
+      if (stopped) return signalled();
     }
     if (lowDisk()) return 1;
     log(`crosstalk run: holding slot ${o.slot} (1 of ${o.max}); running ${o.command.join(' ')}`);
@@ -140,7 +152,8 @@ export async function runWithSlot(o: RunWithSlotOptions): Promise<number> {
       );
     }, (ttl * 1000) / 3);
     renew.unref();
-    child = runCommand(o.command);
+    const child = runCommand(o.command);
+    phase = { kind: 'running', child };
     return await child.done;
   } catch (err) {
     log(`crosstalk run: ${(err as Error).message}`);

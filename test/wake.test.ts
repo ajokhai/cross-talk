@@ -23,7 +23,7 @@ async function scene(options: { graceMs?: number } = {}) {
     adapter: async p => { prompts.push(p); }
   });
   return {
-    server, ch, gch, prompts, skew: (ms: number) => (skew = ms),
+    server, ch, gch, prompts, supervisor, skew: (ms: number) => (skew = ms),
     close: async () => {
       supervisor.stop();
       for (const c of [human, gemini, sup]) await c.close();
@@ -74,6 +74,26 @@ test('wake: a stalled claim wakes its agent at once', async () => {
     await sleep(150);
     assert.equal(s.prompts.length, 1);
     assert.match(s.prompts[0], /claim cl_\w+ \("add tests"\) is stalled/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('wake: two checks at once wake the agent once, and a failed wake keeps its triggers', async () => {
+  const s = await scene({ graceMs: 60_000 });
+  try {
+    s.skew(10 * 60_000); // gemini looks idle
+    const sup: any = s.supervisor;
+    sup.pending.push({ at: Date.now(), text: 'alice: @gemini ping' });
+    const [one, two] = await Promise.all([sup.check(), sup.check()]);
+    assert.deepEqual([one, two].sort(), [false, true], 'exactly one check woke it');
+    assert.equal(s.prompts.length, 1);
+
+    sup.opts.adapter = async () => { throw new Error('tmux gone'); };
+    sup.pending.push({ at: Date.now(), text: 'alice: @gemini again' });
+    await assert.rejects(sup.check(), /tmux gone/);
+    assert.equal(sup.pending.length, 1, 'the trigger is kept for the next try');
+    assert.equal(sup.busy, 'idle');
   } finally {
     await s.close();
   }
