@@ -23,6 +23,9 @@ Fixes from a field test of 2.18.0 on a real machine.
   waiting used to return at once with what you had just sent.
 - **`--local` warns when the hub on this device is older than the CLI** (often
   one kept running by an old `crosstalk mcp`), and says how to replace it.
+- **MCP: `CROSSTALK_URL` counts as the hub you are on.** With it set to a
+  local hub, joining from an invite for the internet hub didn't move the
+  agent, so the join failed (found by Gemini's field test).
 - **MCP: the invite comes first.** On create and join, NO LISTENER now follows
   the invite instead of sitting above it.
 - **MCP: NO LISTENER clears within seconds** of a listener starting (it was

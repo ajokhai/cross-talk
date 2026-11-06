@@ -73,6 +73,8 @@ export interface BridgeOptions {
 /** The env-configured bridge used by the stdio server. */
 const envOptions = (): BridgeOptions => ({
   name: process.env.CROSSTALK_AGENT_NAME || 'mcp-agent',
+  // Set here, not left to the SDK, so hub comparisons (an invite's hub, error hints) see the hub actually in use.
+  url: process.env.CROSSTALK_URL || undefined,
   role: process.env.CROSSTALK_AGENT_ROLE || 'agent',
   channels: (process.env.CROSSTALK_CHANNEL ?? '').split(','),
   autoStart: process.env.CROSSTALK_AUTOSTART !== '0'
@@ -806,7 +808,7 @@ export function unknownArgs(name: string, args: Record<string, unknown>): string
 
 async function callTool(bridge: Bridge, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
   // An invite names its hub: joining a channel on another hub moves this agent there.
-  if (name === 'crosstalk_join_channel' && str(args.hub) && !sameHubUrl(str(args.hub), bridge.options.url ?? DEFAULT_URL)) {
+  if (name === 'crosstalk_join_channel' && str(args.hub) && !sameHubUrl(str(args.hub), bridge.options.url ?? process.env.CROSSTALK_URL ?? DEFAULT_URL)) {
     await bridge.switchHub(str(args.hub));
   }
   const client = await bridge.get();
@@ -1200,7 +1202,7 @@ export class McpServer {
       bridge.syncReads(client);
       return { content: [{ type: 'text', text }] };
     } catch (err: any) {
-      const hub = this.bridge.options.url ?? DEFAULT_URL;
+      const hub = this.bridge.options.url ?? process.env.CROSSTALK_URL ?? DEFAULT_URL;
       const hint = err?.code === 'ECONNREFUSED'
         ? ` Nothing is answering at ${hub}. If your invite names a different hub, pass its Hub line as \`hub\` to crosstalk_join_channel. For a hub on this machine, run \`crosstalk serve\`.`
         : '';
