@@ -26,6 +26,7 @@ import {
   type UserQuestion,
   type WakeHook,
   type WakePayload,
+  type ChannelBan,
   STAY_AWAKE_GUIDANCE
 } from '../protocol.js';
 import { LockManager, type LockManagerOptions } from './locks.js';
@@ -105,6 +106,10 @@ export interface HubOptions {
   publicUrl?: string;
 }
 
+interface BanState extends Omit<ChannelBan, 'ipCount'> {
+  ips: string[];
+}
+
 interface WakeState extends WakeHook {
   secret?: string;
   /** Messages since the hook last fired. */
@@ -160,6 +165,8 @@ interface Channel {
   slots: Map<string, SlotState>;
   /** Wake hooks by lowercased agent name. In memory only. */
   wakes: Map<string, WakeState>;
+  /** Bans by lowercased name (2.17+); `ips` are kept here only, never shown. */
+  bans: Map<string, BanState>;
 }
 
 interface SlotState {
@@ -653,6 +660,24 @@ export class MeshHub {
       case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
       case 'question.answer': return this.answerQuestion(conn, f.channel, f.question, f.answer, f.ownerKey);
       case 'channel.configure': return this.configureChannel(conn, f.channel, f.ownerKey, f.questions);
+      case 'member.kick': return this.kickMember(conn, f.channel, f.ownerKey, f.agent, f.ban === true, f.ip === true, f.reason);
+      case 'member.unban': {
+        const channel = this.memberChannel(conn, f.channel);
+        this.requireOwner(channel, f.ownerKey);
+        const key = cleanText(f.agent, 128).toLowerCase();
+        let unbanned = 0;
+        const ip = key.startsWith('ip:') ? key.slice(3) : undefined;
+        for (const [name, ban] of [...channel.bans]) {
+          if (name === key || ban.ids.includes(cleanText(f.agent, 128)) || (ip && ban.ips.includes(ip))) { channel.bans.delete(name); unbanned++; }
+        }
+        if (unbanned) this.changes++;
+        return { channel: channel.id, unbanned };
+      }
+      case 'member.bans': {
+        const channel = this.memberChannel(conn, f.channel);
+        this.requireOwner(channel, f.ownerKey);
+        return { channel: channel.id, bans: [...channel.bans.values()].map(({ ips, ...b }) => ({ ...b, ids: [...b.ids], ipCount: ips.length })) };
+      }
       case 'wake.set': return this.setWake(conn, f.channel, f.url, f.on, f.secret, f.cooldownSeconds);
       case 'wake.clear': {
         const channel = this.memberChannel(conn, f.channel);
@@ -711,6 +736,7 @@ export class MeshHub {
       claims: new Map(),
       slots: new Map(),
       wakes: new Map(),
+      bans: new Map(),
       limits: fixed,
       senders: new Map()
     };
@@ -723,6 +749,9 @@ export class MeshHub {
     const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
     if (!channel) return fail('not_found', 'No conversation at that address');
     if (!channel.members.has(conn.agent!.id)) {
+      if (this.isBanned(channel, conn.agent!) || this.isBannedAddress(channel, conn.address)) {
+        fail('forbidden', "The channel's owner removed you from this conversation");
+      }
       if (channel.members.size >= this.opts.maxMembersPerChannel) fail('quota_exceeded', 'Channel is full');
       this.ensureRoom(conn);
       this.addMember(conn, channel);
@@ -738,6 +767,69 @@ export class MeshHub {
   }
 
   /** Ends the conversation for everyone. Members are told, then removed; locks and open questions go with it. */
+  private isBanned(channel: Channel, agent: AgentInfo): boolean {
+    if (!channel.bans.size) return false;
+    if (channel.bans.has(agent.name.toLowerCase())) return true;
+    for (const ban of channel.bans.values()) if (ban.ids.includes(agent.id)) return true;
+    return false;
+  }
+
+  private isBannedAddress(channel: Channel, address: string): boolean {
+    for (const ban of channel.bans.values()) if (ban.ips.includes(address)) return true;
+    return false;
+  }
+
+  /**
+   * The owner removes members by id or name. Each is told (`channel.kicked`)
+   * before it leaves; the rest see `member.left` with reason `kicked`. With
+   * `ban`, their ids and name are refused on rejoin.
+   */
+  private kickMember(conn: Connection, address: unknown, ownerKey: unknown, agent: unknown, ban: boolean, byIp: boolean, reason: unknown): ResultData['member.kick'] {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    const key = cleanText(agent, 128);
+    if (!key) fail('bad_request', 'agent (an id, a name, or ip:<address>) is required');
+    const why = cleanText(reason, 280) || undefined;
+    if (key.startsWith('ip:')) {
+      // Ban an address directly, and remove whoever is here from it.
+      const ip = key.slice(3).trim();
+      if (!ip || ip === conn.address) fail('bad_request', ip ? "That's your own address" : 'ip:<address> needs an address');
+      const here = [...channel.members].map(id => this.agents.get(id)).filter((c): c is Connection => !!c?.agent && c.address === ip);
+      const kicked: AgentRef[] = [];
+      for (const target of here) {
+        kicked.push(target.ref);
+        target.peer.send({ type: 'channel.kicked', channel: channel.id, by: conn.ref, reason: why, banned: true });
+        this.removeMember(target, channel.id, 'kicked');
+      }
+      channel.bans.set(key.toLowerCase(), { name: key, ids: [], ips: [ip], at: this.now(), by: conn.ref, reason: why });
+      this.changes++;
+      return { channel: channel.id, kicked, banned: true };
+    }
+    if (byIp && !ban) fail('bad_request', 'ip bans need ban: true');
+    const targets = [...channel.members]
+      .map(id => this.agents.get(id))
+      .filter((c): c is Connection => !!c?.agent && (c.agent.id === key || c.agent.name.toLowerCase() === key.toLowerCase()));
+    if (targets.some(t => t === conn)) fail('bad_request', "You can't kick yourself; leave the channel instead");
+    if (!targets.length && !ban) fail('not_found', `No member called ${key} here`);
+    const kicked: AgentRef[] = [];
+    // Never ban the owner's own address, even if the target shares it.
+    const addresses = byIp ? targets.map(t => t.address).filter(a => a && a !== conn.address && a !== 'restored') : [];
+    for (const target of targets) {
+      kicked.push(target.ref);
+      target.peer.send({ type: 'channel.kicked', channel: channel.id, by: conn.ref, reason: why, banned: ban });
+      this.removeMember(target, channel.id, 'kicked');
+    }
+    if (ban) {
+      const name = targets[0]?.agent!.name ?? key;
+      const existing = channel.bans.get(name.toLowerCase());
+      const ids = new Set([...(existing?.ids ?? []), ...targets.map(t => t.agent!.id), ...(key.startsWith('ag_') ? [key] : [])]);
+      const ips = new Set([...(existing?.ips ?? []), ...addresses]);
+      channel.bans.set(name.toLowerCase(), { name, ids: [...ids], ips: [...ips], at: this.now(), by: conn.ref, reason: why });
+    }
+    this.changes++;
+    return { channel: channel.id, kicked, banned: ban };
+  }
+
   private closeChannel(conn: Connection, address: unknown, ownerKey: unknown): { channel: string } {
     const channel = this.memberChannel(conn, address);
     this.requireOwner(channel, ownerKey);
@@ -763,7 +855,7 @@ export class MeshHub {
     if (this.visible(conn.agent!.id)) this.emit(channel, { type: 'member.joined', channel: channel.id, agent: conn.agent! }, conn.agent!.id);
   }
 
-  private removeMember(conn: Connection, id: string, reason: 'left' | 'disconnected'): void {
+  private removeMember(conn: Connection, id: string, reason: 'left' | 'disconnected' | 'kicked'): void {
     const channel = this.channels.get(id);
     conn.channels.delete(id);
     if (!channel) return;
@@ -2067,7 +2159,8 @@ export class MeshHub {
         claims: [...c.claims.values()],
         limits: c.limits,
         slots: [...c.slots.values()].filter(slot => slot.holds.length).map(slot => ({ name: slot.name, capacity: slot.capacity, holds: slot.holds })),
-        wakes: [...c.wakes.values()].map(({ pending: _pending, deferred: _deferred, ...hook }) => ({ ...hook }))
+        wakes: [...c.wakes.values()].map(({ pending: _pending, deferred: _deferred, ...hook }) => ({ ...hook })),
+        bans: [...c.bans.values()].map(b => ({ ...b, ids: [...b.ids], ips: [...b.ips] }))
       })),
       agents,
       locks: this.locks.list(),
@@ -2096,7 +2189,8 @@ export class MeshHub {
         claims: new Map(c.claims.map(k => [k.id, k])),
         senders: new Map(),
         slots: new Map(),
-        wakes: new Map((c.wakes ?? []).map(hook => [hook.agent.toLowerCase(), { ...hook, pending: 0 }]))
+        wakes: new Map((c.wakes ?? []).map(hook => [hook.agent.toLowerCase(), { ...hook, pending: 0 }])),
+        bans: new Map((c.bans ?? []).map(ban => [ban.name.toLowerCase(), { ...ban, ids: [...ban.ids], ips: [...(ban.ips ?? [])] }]))
       });
     }
     for (const invite of state.invites ?? []) {
@@ -2173,6 +2267,8 @@ export interface PersistedChannel {
   slots?: { name: string; capacity: number; holds: SlotHold[] }[];
   /** Wake hooks, secrets included (the state file is readable only by the hub's user). Missing before 2.10.1. */
   wakes?: (WakeHook & { secret?: string })[];
+  /** Bans, addresses included (the state file is readable only by the hub's user). Missing before 2.17. */
+  bans?: (Omit<ChannelBan, 'ipCount'> & { ips?: string[] })[];
 }
 
 export interface PersistedAgent {

@@ -173,7 +173,9 @@ export class Bridge {
     client.on('channel.lost', (lost: ChannelLost) => {
       this.push({
         kind: 'alert', at: Date.now(), channel: lost.channel,
-        text: `CHANNEL LOST: the hub no longer has #${lost.name} (${lost.channel}), probably because it restarted without its saved state. You are no longer in it, and its locks are gone. Ask your user for a new address, or create a channel and share it.`
+        text: lost.reason === 'kicked'
+          ? `REMOVED: ${lost.by ? `${lost.by.name} (the channel's owner)` : "the channel's owner"} removed you from #${lost.name} (${lost.channel})${lost.note ? `: "${lost.note}"` : ''}.${lost.banned ? ' You are banned and cannot rejoin.' : ''} Stop working in it and tell your user.`
+          : `CHANNEL LOST: the hub no longer has #${lost.name} (${lost.channel}), probably because it restarted without its saved state. You are no longer in it, and its locks are gone. Ask your user for a new address, or create a channel and share it.`
       });
     });
     client.on('error', () => {});
@@ -580,6 +582,21 @@ const TOOLS: Tool[] = [
     inputSchema: { type: 'object', properties: { channel: channelArg } }
   },
   {
+    name: 'crosstalk_kick_member',
+    description: 'Remove an agent from a channel you created (needs the owner key saved on this machine). `agent` is a name or agent id, or ip:<address>. ban=true stops it rejoining; ip=true bans its network address too (agents behind one NAT or cloud proxy share one, so use it sparingly). Ask your user before removing anyone.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: channelArg,
+        agent: { type: 'string', description: 'Name, agent id, or ip:<address>' },
+        ban: { type: 'boolean', description: 'Also stop it rejoining' },
+        ip: { type: 'boolean', description: 'With ban: ban its network address too' },
+        reason: { type: 'string', description: 'Shown to the removed agent' }
+      },
+      required: ['agent']
+    }
+  },
+  {
     name: 'crosstalk_read_inbox',
     description: 'Return (and mark read) everything that arrived since you last checked: channel messages, DMs, joins/leaves and lock activity.',
     inputSchema: { type: 'object', properties: { channel: { type: 'string', description: 'Only this channel, by address or joined name (DMs are always included)' } } }
@@ -831,6 +848,14 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       if (!client.channels.size) lines.push('You are not in any channel.');
       lines.push('Reminder: you are not notified of new messages. If you have open channel work, call crosstalk_wait rather than ending your turn.');
       return lines.join('\n');
+    }
+    case 'crosstalk_kick_member': {
+      const ch = pickChannel(client, args.channel);
+      const owned = ownedKey(bridge, ch);
+      if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there is no owner key here to remove members with. Its creator can run \`crosstalk kick ${ch.address} <agent>\`.`);
+      const r = await ch.kick(str(args.agent), { ban: args.ban === true, ip: args.ip === true, reason: str(args.reason) || undefined }, owned.key);
+      const who = r.kicked.length ? r.kicked.map(a => a.name).join(', ') : 'nobody currently here';
+      return `Removed ${who} from #${ch.name}${r.banned ? ' and banned them from rejoining' : ''}.`;
     }
     case 'crosstalk_close_channel': {
       const ch = pickChannel(client, args.channel);

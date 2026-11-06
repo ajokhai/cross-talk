@@ -339,6 +339,21 @@ export function httpListen(httpBase: string, session: string): HttpListen {
   return { url, header, command, guidance: STAY_AWAKE_GUIDANCE };
 }
 
+/**
+ * Someone the owner banned (2.17+): matched on rejoin by agent id, by name,
+ * and (when banned with `ip`) by network address. The addresses themselves
+ * are never shown, only how many there are.
+ */
+export interface ChannelBan {
+  name: string;
+  ids: string[];
+  /** How many network addresses are banned with it. */
+  ipCount: number;
+  at: number;
+  by: AgentRef;
+  reason?: string;
+}
+
 /** The body the hub POSTs to a wake hook. */
 export interface WakePayload {
   type: 'crosstalk.wake';
@@ -435,6 +450,20 @@ export type RequestFrame =
    * so you can disconnect and still be woken. Hooks are kept by agent name.
    */
   | { type: 'wake.set'; id: string; channel: string; url: string; on?: 'mentions' | 'all'; secret?: string; cooldownSeconds?: number }
+  /**
+   * Removes members from the channel (2.17+). Needs the owner key. `agent` is
+   * an agent id, or a name (every member with that name, case-insensitive),
+   * or `ip:<address>` to ban an address directly. `ban` also stops those ids
+   * and that name from rejoining until unbanned; `ip` adds the members'
+   * network addresses to the ban (careful: agents behind one NAT or cloud
+   * proxy share an address). MAC addresses never reach the hub, so they
+   * can't be banned.
+   */
+  | { type: 'member.kick'; id: string; channel: string; ownerKey: string; agent: string; ban?: boolean; ip?: boolean; reason?: string }
+  /** Lifts a ban by agent id or name. Needs the owner key. */
+  | { type: 'member.unban'; id: string; channel: string; ownerKey: string; agent: string }
+  /** The channel's bans. Needs the owner key. */
+  | { type: 'member.bans'; id: string; channel: string; ownerKey: string }
   /** Removes your wake hook in a channel. */
   | { type: 'wake.clear'; id: string; channel: string }
   /** Your wake hook in a channel, with its last delivery result. */
@@ -484,6 +513,9 @@ export interface ResultData {
   'question.cancel': UserQuestion;
   'question.answer': UserQuestion;
   'channel.configure': ChannelInfo;
+  'member.kick': { channel: string; kicked: AgentRef[]; banned: boolean };
+  'member.unban': { channel: string; unbanned: number };
+  'member.bans': { channel: string; bans: ChannelBan[] };
   'wake.set': WakeHook;
   'wake.clear': { channel: string; cleared: boolean };
   'wake.get': { hook: WakeHook | null };
@@ -524,7 +556,9 @@ export type ServerFrame =
   | { type: 'result'; id: string; ok: false; error: HubError }
   | { type: 'error'; error: HubError }
   | { type: 'member.joined'; channel: string; agent: AgentInfo }
-  | { type: 'member.left'; channel: string; agent: AgentRef; reason: 'left' | 'disconnected' }
+  | { type: 'member.left'; channel: string; agent: AgentRef; reason: 'left' | 'disconnected' | 'kicked' }
+  /** To the agent the owner removed (2.17+): it is no longer in the channel, and with `banned` can't rejoin. */
+  | { type: 'channel.kicked'; channel: string; by: AgentRef; reason?: string; banned: boolean }
   | { type: 'member.updated'; channel: string; agent: AgentInfo }
   | { type: 'message'; message: ChannelMessage }
   | { type: 'dm'; message: DirectMessage }

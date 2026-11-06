@@ -214,7 +214,7 @@ class HttpSession {
   }
 
   private needsMe(frame: ServerFrame): boolean {
-    if (frame.type === 'dm' || frame.type.endsWith('.granted')) return true;
+    if (frame.type === 'dm' || frame.type === 'channel.kicked' || frame.type.endsWith('.granted')) return true;
     if (frame.type !== 'message') return false;
     const me = this.conn.agent?.id;
     return !!me && !!frame.message.mentions?.some(m => m.id === me);

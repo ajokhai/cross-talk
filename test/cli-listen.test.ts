@@ -99,3 +99,19 @@ test('the listener survives its session ending: it re-registers, rejoins, and st
     await server.close();
   }
 });
+
+test('a listener whose agent is kicked stops with exit code 3', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const owner = await CrossTalk.connect({ name: 'owner', url: server.url, reconnect: false });
+  try {
+    const ch = await owner.createChannel('kickme');
+    const run = start(['join', ch.address, '--name', 'unwanted', '--url', server.url], {});
+    await until(() => /Listening as unwanted/.test(run.out()));
+    await ch.kick('unwanted', { reason: 'off topic' });
+    assert.equal(await run.done, 3);
+    assert.match(run.out(), /owner removed you from this channel: off topic/);
+  } finally {
+    await owner.close();
+    await server.close();
+  }
+});
