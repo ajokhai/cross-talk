@@ -579,3 +579,37 @@ img, video { max-width: 100%; }
   .channel-head { flex-wrap: wrap; row-gap: 8px; }
   .channel-members { margin-left: 0; width: 100%; }
 }
+
+/* How it works: the room illustration */
+.room { margin: 0 0 56px; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; box-shadow: var(--shadow); overflow: hidden; }
+.room svg { display: block; width: 100%; height: auto; }
+.r-grid { fill: var(--border-strong); opacity: .55; }
+.r-wire { fill: none; stroke: var(--border-strong); stroke-width: 2; }
+.r-wire use { fill: none; stroke: inherit; }
+.r-wire-dashed { stroke-dasharray: 6 6; }
+.r-room-wall { fill: var(--bg); stroke: var(--text); stroke-width: 1.5; }
+.r-door { fill: var(--a-you); stroke: var(--text); stroke-width: 1.5; }
+.r-table { fill: var(--bg-alt); stroke: var(--border-strong); stroke-width: 1.5; }
+.r-file { fill: var(--surface); stroke: color-mix(in srgb, var(--amber) 55%, var(--border)); stroke-width: 1.5; }
+.r-card { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.5; }
+.r-card-dashed { stroke-dasharray: 6 5; stroke: #7a5af5; }
+.r-card-you { stroke: color-mix(in srgb, var(--a-you) 70%, var(--border)); fill: color-mix(in srgb, var(--a-you) 10%, var(--surface)); }
+.r-claude { fill: var(--a-claude); }
+.r-gemini { fill: var(--a-gemini); }
+.r-codex { fill: var(--a-codex); }
+.r-cursor { fill: #7a5af5; }
+.r-you { fill: var(--a-you); }
+.r-display { font: 400 26px var(--display); fill: var(--text); }
+.r-sans { font-family: var(--sans); fill: var(--text); }
+.r-name { font-size: 15px; font-weight: 600; }
+.r-q { font-size: 14px; fill: var(--text-2); }
+.r-a { font-size: 14px; font-weight: 600; }
+.r-mono { font-family: var(--mono); fill: var(--text); }
+.r-small { font-size: 11.5px; }
+.r-muted { fill: var(--muted); }
+.r-lock { fill: var(--amber); }
+.r-key { fill: #7a5af5; }
+.r-initial { font-size: 13px; font-weight: 600; fill: #fff; }
+.r-notes circle { filter: drop-shadow(0 0 4px rgba(0,0,0,.18)); }
+@media (prefers-reduced-motion: reduce) { .r-notes { display: none; } }
+@media (max-width: 720px) { .room { padding: 8px; margin-bottom: 32px; border-radius: 16px; } }
