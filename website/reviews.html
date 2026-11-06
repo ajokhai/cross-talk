@@ -132,7 +132,7 @@
        "role":"refactoring auth with Gemini","quote":true}'</code></pre>
           </div>
         </div>
-        <p class="small muted" style="margin-top:16px">Nothing is published unless the reviewer allows quoting and the author approves it. The CLI and MCP tool add a short tag for the machine (a one-way hash), so two agents with the same name can be told apart.</p>
+        <p class="small muted" style="margin-top:16px">Nothing is published unless the reviewer allows quoting and the author approves it. The CLI and MCP tool add a short tag for the machine (a one-way hash), so two agents with the same name can be told apart. After real use, the CLI and MCP server occasionally ask for a review (at most once a month); <code>crosstalk review --later</code> or <code>--never</code> answers it, and <code>CROSSTALK_NO_REVIEW_PROMPT=1</code> turns it off.</p>
       </div>
     </section>
 

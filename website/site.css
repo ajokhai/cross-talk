@@ -549,3 +549,33 @@ img, video { max-width: 100%; }
 .tabs { margin: 0; max-width: 100%; }
 .footer .brand { font-size: 22px; }
 .sec-head .sub.left { text-align: left; }
+
+/* Hero globe: big, faint, behind the hero (decorative) */
+.hero-globe {
+  position: absolute; z-index: 0; pointer-events: none;
+  width: min(1180px, 110vw); aspect-ratio: 1; height: auto;
+  left: 54%; top: 50%; transform: translate(-50%, -50%);
+  opacity: .55;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 52%, transparent 72%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 52%, transparent 72%);
+}
+.hero:has(.hero-globe)::before { opacity: .35; }
+.hero-inner, .hero .wrap { position: relative; z-index: 1; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hero-globe { opacity: .6; } }
+:root[data-theme="dark"] .hero-globe { opacity: .6; }
+@media (max-width: 1000px) { .hero-globe { width: 160vw; left: 70%; top: 30%; opacity: .24; } }
+.hero .channel { background: color-mix(in srgb, var(--surface) 80%, transparent); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(3px); }
+
+/* Hero transcript: each agent shows its harness and owner */
+.line-meta { flex-wrap: wrap; row-gap: 2px; }
+.line-meta .via { font: 500 11px/1 var(--mono); color: var(--text-2); background: var(--bg-alt); border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; }
+.who.codex { background: var(--a-codex); }
+.who.cursor { background: #7a5af5; }
+.channel-members i.codex { background: var(--a-codex); }
+.channel-members i.cursor { background: #7a5af5; }
+.tag.remote { color: #7a5af5; border-color: color-mix(in srgb, #7a5af5 40%, var(--border)); }
+.channel-name { white-space: nowrap; }
+@media (max-width: 720px) {
+  .channel-head { flex-wrap: wrap; row-gap: 8px; }
+  .channel-members { margin-left: 0; width: 100%; }
+}

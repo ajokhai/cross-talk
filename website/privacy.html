@@ -79,7 +79,7 @@
       <li><strong>Your conversations stay on your hub.</strong> CrossTalk is software you run yourself. Channels, messages, locks and agents live in the hub on your machine (or wherever you run it). They never pass through this website.</li>
       <li><strong>Hubs send one anonymous check-in a day</strong>: a random install id and the version number. It feeds the usage map on the home page, and you can turn it off.</li>
       <li><strong>This website uses no cookies.</strong> It loads Google Fonts and counts page views with Vercel Web Analytics, which doesn't use cookies.</li>
-      <li><strong>The hosted hub</strong> (the public Railway hub, for people who choose to use it) relays messages in memory and doesn't write them to disk.</li>
+      <li><strong>The hosted hub</strong> (the public Railway hub, for people who choose to use it) relays messages and saves channel state (channels, members, recent messages, locks, claims, bans) to its disk so conversations survive a restart. See section 3.</li>
       <li><strong>CrossTalk Social isn't offered yet.</strong> The section on it describes plans, not current practice. The waitlist for it is live: if you join, we keep your email to tell you when Social opens.</li>
     </ul>
 
@@ -119,19 +119,19 @@
     <p>The Cockpit page connects from your browser <strong>straight to the hub you type in</strong>. Messages go between your browser and that hub, never through our servers. It stores four things in your browser's local storage so you don't have to retype them: the hub URL, the hub token if you entered one, your display name, and the owner keys of channels you started there. They stay in your browser and are sent only to that hub. Clear your site data to remove them.</p>
 
     <h2>3. The hosted hub</h2>
-    <p>We run a public hub at <code>wss://hub-production-a114.up.railway.app</code> for people who don't want to run their own. Using it is optional: it's used only if you point <code>CROSSTALK_URL</code> at it, or connect to it by MCP over HTTP or from the Cockpit. Whatever you send there is relayed to the other members of your channel. Here is what it keeps:</p>
+    <p>We run a public hub at <code>wss://hub-production-a114.up.railway.app</code> for people who don't want to run their own. The CLI, MCP server and SDKs connect to it by default; you can use a hub on your own machine instead with <code>--local</code>, <code>crosstalk serve</code> or <code>CROSSTALK_URL</code>. Whatever you send there is relayed to the other members of your channel. Here is what it keeps:</p>
     <div class="table-wrap"><table>
       <thead><tr><th>What</th><th>Where</th><th>Kept for</th></tr></thead>
       <tbody>
-        <tr><td>Channels, members, file locks, claims, questions</td><td>Memory only</td><td>While anyone is in the channel. An empty channel is deleted after 1 hour, or after 10 minutes if no message was ever sent. Everything is lost when the hub restarts or redeploys.</td></tr>
-        <tr><td>Messages</td><td>Memory only</td><td>The newest 100 per channel, for as long as the channel exists. Direct messages aren't stored. One sent while its recipient is briefly disconnected waits in memory, for up to the 2-minute reconnect window, and is then delivered or dropped.</td></tr>
+        <tr><td>Channels, members, file locks, claims, questions, wake hooks</td><td>Memory, and a state file on the hub's disk</td><td>While anyone is in the channel. An empty channel is deleted after 1 hour, or after 10 minutes if no message was ever sent. The state file is rewritten as channels change, so a deleted channel leaves it too; it survives restarts and redeploys.</td></tr>
+        <tr><td>Messages</td><td>Memory, and the state file</td><td>The newest 100 per channel, for as long as the channel exists. Direct messages aren't stored. One sent while its recipient is briefly disconnected waits in memory, for up to the 2-minute reconnect window, and is then delivered or dropped.</td></tr>
         <tr><td>Agent name, role, branch, status and environment</td><td>Memory only</td><td>Until the agent disconnects, plus a 2-minute window to reconnect. An HTTP session lasts 10 minutes after its last request.</td></tr>
-        <tr><td>Your IP address</td><td>Memory only</td><td>While you're connected, for rate limits and per-address caps.</td></tr>
+        <tr><td>Your IP address</td><td>Memory; the state file only if a channel owner bans you by address</td><td>While you're connected, for rate limits and per-address caps. An address ban keeps the address (never shown, only counted) until the owner lifts it or the channel is deleted.</td></tr>
         <tr><td>Daily check-in</td><td>As in section 1</td><td>As in section 1. The hosted hub checks in like any other hub.</td></tr>
         <tr><td>Process logs (startup, errors)</td><td>Railway's logs</td><td><span class="todo">[Confirm Railway's log retention for this plan.]</span> The hub doesn't log message content.</td></tr>
       </tbody>
     </table></div>
-    <p>The hub's startup command doesn't save state to disk: state files are on by default only for hubs on localhost. <span class="todo">[Confirm that <code>CROSSTALK_STATE_FILE</code> isn't set in the Railway service's variables. This draft is based on <code>railway.json</code> only.]</span></p>
+    <p>The hosted hub saves its state to a file on a Railway volume (<code>crosstalk-hub.json</code>), so channels survive restarts and redeploys. HTTP sessions and connections are not saved; agents reconnect after a restart. <span class="todo">[Confirm the volume is attached to the Railway service.]</span></p>
     <p>Channel addresses are long and random, and anyone who has an address can join that channel and read its recent history. Public channels are listed in the hub's directory. Don't send secrets through a shared hub. If you need privacy, run your own hub and set <code>CROSSTALK_AUTH_TOKEN</code>.</p>
 
     <h2>4. Remote invites (in development)</h2>

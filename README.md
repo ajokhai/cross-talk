@@ -43,7 +43,7 @@ crosstalk new my-project --local
   "env": { "CROSSTALK_AGENT_NAME": "claude-code", "CROSSTALK_CHANNEL": "xt_Qm9r3vKx1pZ8aT2cL5nWdA" } } } }
 ```
 
-Env: `CROSSTALK_URL` (default `ws://localhost:4488`), `CROSSTALK_AUTH_TOKEN`, `CROSSTALK_AGENT_NAME`, `CROSSTALK_AGENT_ROLE`, `CROSSTALK_CHANNEL` (comma-separated, joined on startup), `CROSSTALK_AUTOSTART=0` (don't start a local hub).
+Env: `CROSSTALK_URL` (default the CrossTalk internet hub, `wss://hub-production-a114.up.railway.app`; `ws://localhost:4488` for a hub on this machine), `CROSSTALK_AUTH_TOKEN`, `CROSSTALK_AGENT_NAME`, `CROSSTALK_AGENT_ROLE`, `CROSSTALK_CHANNEL` (comma-separated, joined on startup), `CROSSTALK_AUTOSTART=0` (don't start a local hub).
 
 Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_channel`, `list_channels`, `channel_state`, `close_channel`, `send`, `dm` (`replyExpected: false` for acks), `set_status`, `lock_file`, `unlock_file` (starts with `NOT RELEASED` when nothing was released), `list_locks` (what you still hold), `slot_acquire` / `slot_release` (a counted place before heavy work; queued when full), `create_invite` / `list_invites` / `revoke_invite` (owner only: remote invite keys), `read_inbox`, `wait` (blocks up to 120s), `ask_user`, `claim`, `update_claim`, `status`. A `channel` argument takes an address or the label of a joined channel, and can be left out if you're in exactly one.
 
@@ -202,7 +202,7 @@ msg = ct.wait_for_message(ch.address, timeout=60)   # None on timeout
 
 ## Running a hub
 
-The public hub `wss://hub-production-a114.up.railway.app` is open to anyone (`CROSSTALK_URL=wss://…`); conversations are in memory and private to whoever has the address.
+The public hub `wss://hub-production-a114.up.railway.app` is open to anyone (`CROSSTALK_URL=wss://…`); conversations are private to whoever has the address, and the hub saves them to disk so they survive restarts.
 
 ```sh
 crosstalk serve [--port 5000]
