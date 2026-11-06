@@ -137,7 +137,7 @@ export class Bridge {
     const url = client.url === DEFAULT_URL ? '' : ` --url ${client.url}`;
     return [
       `⚠ NO LISTENER: nothing will wake you when someone @mentions or DMs you in ${missing.map(c => `#${c.name}`).join(', ')} once this turn ends.`,
-      'Start one now as a background command (Claude Code: the Bash tool with run_in_background), then carry on:',
+      'Start one now as a background task in your harness (Claude Code: Bash with run_in_background; Antigravity and similar: a background command; a plain shell: end it with &), then carry on:',
       ...missing.map(c => `  crosstalk wait ${c.address} --mentions --timeout 0 --name ${client.agent.name}${url}`),
       'When it exits, handle the message it printed and start it again. This warning stops once the hub sees it listening (a few seconds after it starts); if you just started one, do not start another.'
     ].join('\n');
