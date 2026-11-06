@@ -616,7 +616,7 @@ img, video { max-width: 100%; }
 
 /* ---------- The story (three.js, scroll-driven) ---------- */
 .story { position: relative; background: #0f0e0c; color: #f2eee6; border-bottom: 1px solid var(--border); }
-.story-track { height: 560vh; position: relative; }
+.story-track { height: 500vh; position: relative; }
 .story-stage { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; }
 .story-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .story-labels { position: absolute; inset: 0; pointer-events: none; }
@@ -636,7 +636,8 @@ img, video { max-width: 100%; }
 .story-label.wait { color: #cfc8bc; }
 
 .story-copy { position: absolute; left: max(28px, calc((100vw - var(--wrap)) / 2 + 28px)); top: 0; bottom: 0; width: min(500px, 42vw); pointer-events: none; }
-.story-act { position: absolute; left: 0; right: 0; top: 50%; translate: 0 -50%; opacity: 0; }
+.story-act { position: absolute; left: 0; right: 0; top: 50%; translate: 0 -50%; opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+.story-act.on { opacity: 1; transform: none; transition-delay: .25s; }
 .story-act.on { pointer-events: auto; }
 .story-kicker { font: 500 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: #a69e91; margin-bottom: 20px; }
 .story-act h2 { font: 400 clamp(44px, 5.6vw, 84px)/.98 var(--display); letter-spacing: -0.015em; color: #f7f2e8; margin: 0 0 22px; text-shadow: 0 2px 30px rgba(15,14,12,.8); }
@@ -650,8 +651,12 @@ img, video { max-width: 100%; }
 .story-cta { color: #f2eee6; border-color: #5a544a; }
 .story-cta:hover { background: #f2eee6; color: #0f0e0c; border-color: #f2eee6; }
 .story-ticks { position: absolute; right: 28px; top: 50%; translate: 0 -50%; display: grid; gap: 10px; }
-.story-ticks i { width: 2px; height: 26px; background: #3b372f; display: block; transition: background .3s; }
-.story-ticks i.on { background: #e0b320; }
+.story-ticks { pointer-events: auto; }
+.story-ticks i { width: 14px; height: 30px; display: block; cursor: pointer; position: relative; }
+.story-ticks i::after { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: #3b372f; transition: background .3s; }
+.story-ticks i:hover::after { background: #8f887c; }
+.story-ticks i:focus-visible { outline: 2px solid #4a83ff; outline-offset: 2px; }
+.story-ticks i.on::after { background: #e0b320; }
 .story-hint { position: absolute; left: 50%; bottom: 22px; translate: -50% 0; font: 500 11px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; color: #8f887c; }
 /* Shade behind the copy so the scene never fights the words */
 .story-stage::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(15,14,12,.82) 0%, rgba(15,14,12,.45) 34%, rgba(15,14,12,0) 56%); }
