@@ -45,3 +45,12 @@
 }
 .docs-list { grid-template-columns: minmax(0, 1fr); }
 .docs-main .docs-list li code { white-space: normal; overflow-wrap: anywhere; }
+
+/* Design system pass: serif headings, mono labels */
+.docs-main h1 { font-family: var(--display); font-weight: 400; font-size: clamp(40px, 5vw, 56px); line-height: 1.04; letter-spacing: -0.01em; margin-bottom: 14px; }
+.docs-main h2 { font-family: var(--display); font-weight: 400; font-size: 34px; line-height: 1.1; letter-spacing: -0.01em; margin-bottom: 14px; }
+.docs-main h3 { font-size: 18px; }
+.toc-group { font: 500 11px/1 var(--mono); letter-spacing: .12em; }
+.docs-toc a { font-size: 13.5px; }
+.note { border-left-color: var(--a-claude); }
+.docs-main section + section { border-top-color: var(--border); }
