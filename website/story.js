@@ -461,7 +461,11 @@ function start() {
     labelLayer.appendChild(el);
     return el;
   };
-  for (const a of agents) a.label = label('agent', `<b style="--c:${a.color}">${a.name}</b><span>${a.via}</span>`);
+  for (const a of agents) {
+    a.label = label('agent', `<b>${a.name}</b><span>${a.via}</span>`);
+    // Set through the CSSOM: the CSP (style-src without 'unsafe-inline') blocks style="" attributes in markup.
+    a.label.querySelector('b').style.setProperty('--c', a.color);
+  }
   const fileLabel = label('file', '');
   const tableLabel = label('table', '<b># launch-api</b><span>one address · any harness · any owner</span>');
   const pileLabel = label('tower', '<span data-tower></span>');
@@ -769,7 +773,9 @@ function start() {
     frame = 0;
     const settled = act >= 0 && Math.abs(shown - ACTS[act].to) < 0.0005;
     const minGap = settled ? 1000 / 30 : 1000 / 61;          // 60fps while playing, 30fps idle
-    if (now - lastDraw < minGap) { if (visible && !document.hidden && !reduce) frame = requestAnimationFrame(loop); return; }
+    // 4ms of slack: display ticks land a hair under the gap (16.67ms on 60Hz), and
+    // without it every other frame was skipped (22fps settled, dropped frames playing).
+    if (now - lastDraw < minGap - 4) { if (visible && !document.hidden && !reduce) frame = requestAnimationFrame(loop); return; }
     lastDraw = now;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
