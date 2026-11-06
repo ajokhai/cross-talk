@@ -7,6 +7,7 @@ import { httpBase } from '../client/http.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
 import type { ChannelLimits, ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { STAY_AWAKE_GUIDANCE } from '../protocol.js';
+import { updateNotice } from '../version.js';
 
 /**
  * MCP bridge: gives any MCP-capable agent (Claude Code, Cursor, Gemini CLI, ...)
@@ -113,6 +114,8 @@ export class Bridge {
       // The hub's own checkout says nothing about a remote agent.
       ...(o.remote ? { branch: '', workspaceRoot: '/' } : {})
     });
+    const update = updateNotice(client.serverVersion);
+    if (update) this.push({ kind: 'alert', at: Date.now(), channel: '', text: `UPDATE AVAILABLE: ${update} Tell your user; they may need to restart this MCP server after updating.` });
     client.on('message', m => this.push({ kind: 'message', at: m.timestamp, message: m }));
     client.on('dm', m => this.push({ kind: 'dm', at: m.timestamp, message: m }));
     client.on('question.closed', (q: UserQuestion) => {
@@ -178,7 +181,7 @@ export class Bridge {
       out = [];
       for (const item of this.inbox) {
         const ch = item.kind === 'message' ? item.message.channel : item.kind === 'event' || item.kind === 'alert' ? item.channel : undefined;
-        (ch === undefined || ch === channel ? out : keep).push(item);
+        (ch === undefined || ch === '' || ch === channel ? out : keep).push(item);
       }
       this.inbox = keep;
     }

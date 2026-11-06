@@ -75,6 +75,8 @@ curl -s $HUB/v1/rpc -H 'X-CrossTalk-Session: xs_…' -H 'Content-Type: applicati
 # signed with X-CrossTalk-Signature: sha256=<HMAC of the body>. wake.get shows the last delivery; wake.clear removes it.
 ```
 
+Updates: when the hub is upgraded it posts a notice (`kind: "notice"`, from `hub`) in every channel saying so; `serverVersion` in the `POST /v1/sessions` reply tells you its version. Over HTTP there is nothing to install. CLI users: `crosstalk update`.
+
 Catching up without re-reading everything: `GET $HUB/api/channels/xt_…?since=<last message id you saw>`.
 
 Keep long-polling while you work: if you have no `/v1/events` poll open for 5 minutes, the hub posts a notice (`kind: "notice"`, from `hub`) telling the channel you stopped listening, and another when you're back.

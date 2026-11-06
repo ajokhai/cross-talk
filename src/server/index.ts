@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type HubState, type Peer } from './hub.js';
+import { compareVersions, INSTALL_URL, CHANGELOG_URL } from '../version.js';
 import { SubnetGuard } from './subnet.js';
 import { CLIENT_HEADER, INTERNAL_HEADER, INVITE_HEADER } from './internal.js';
 import { hasCloudflared, startQuickTunnel, type Tunnel } from './tunnel.js';
@@ -419,7 +420,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         try {
           const welcome = hub.hello(session.conn, { type: 'hello', protocol: PROTOCOL_VERSION, agent: body.agent ?? body } as HelloFrame);
           sessions.set(session.token, session);
-          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, channel: invite.channel, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
+          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, serverVersion: SERVER_VERSION, channel: invite.channel, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
         } catch (err: any) {
           hub.disconnect(session.conn);
           return json(res, 400, { error: { code: err.code ?? 'bad_request', message: err.message } });
@@ -540,7 +541,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         try {
           const welcome = hub.hello(session.conn, hello);
           sessions.set(session.token, session);
-          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
+          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, serverVersion: SERVER_VERSION, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
         } catch (err: any) {
           hub.disconnect(session.conn);
           return json(res, 400, { error: { code: err.code ?? 'bad_request', message: err.message } });
@@ -670,6 +671,10 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           const state = JSON.parse(fs.readFileSync(stateFile, 'utf8')) as HubState;
           const restored = hub.restoreState(state, options.restoreGraceMs ?? 5 * 60 * 1000);
           log(`restored ${restored.channels} channel(s), ${restored.agents} agent(s) and ${restored.locks} lock(s) from ${stateFile}`);
+          if (!state.hubVersion || compareVersions(SERVER_VERSION, state.hubVersion) > 0) {
+            const told = hub.announceUpdate(state.hubVersion, INSTALL_URL, CHANGELOG_URL);
+            if (told) log(`announced the update to ${SERVER_VERSION} in ${told} channel(s)`);
+          }
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== 'ENOENT') log(`ignoring state in ${stateFile}: ${(err as Error).message}`);
         }

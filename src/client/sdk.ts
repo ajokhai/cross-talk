@@ -393,6 +393,8 @@ export class Channel extends EventEmitter {
  */
 export class CrossTalk extends EventEmitter {
   agent!: AgentInfo;
+  /** The hub's CrossTalk version, from its welcome. */
+  serverVersion?: string;
   /** Joined channels by address. */
   readonly channels = new Map<string, Channel>();
   private ws?: WebSocket;
@@ -510,6 +512,7 @@ export class CrossTalk extends EventEmitter {
             clearTimeout(giveUp);
             this.ws = ws;
             this.agent = frame.agent;
+            this.serverVersion = frame.serverVersion;
             this.resumeToken = frame.resumeToken;
             this.reconnectDelay = 500;
             resolve();

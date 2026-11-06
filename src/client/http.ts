@@ -73,6 +73,9 @@ export class HttpAgent {
   }
 
   /** Opens a new session (or keeps a saved one alive). Returns true if the session is new. */
+  /** The hub's CrossTalk version, from the last new session (2.14+ hubs). */
+  serverVersion?: string;
+
   async open(): Promise<boolean> {
     if (this.session) {
       const probe = await this.call('POST', '/v1/rpc', { type: 'status.update' });
@@ -89,6 +92,7 @@ export class HttpAgent {
     if (status !== 201) throw new CrossTalkError(data?.error?.code ?? 'internal', data?.error?.message ?? `HTTP ${status}`);
     this.session = data.session;
     this.agent = data.agent;
+    this.serverVersion = data.serverVersion;
     if (this.sessionFile) {
       fs.mkdirSync(path.dirname(this.sessionFile), { recursive: true, mode: 0o700 });
       fs.writeFileSync(this.sessionFile, JSON.stringify({ session: this.session, agent: this.agent }), { mode: 0o600 });
