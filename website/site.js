@@ -37,15 +37,16 @@
 
   document.querySelectorAll('.copy').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      var scope = btn.closest('[role="tabpanel"], .cta-code');
+      var scope = btn.closest('[role="tabpanel"], .cta-code, [data-copy-scope]');
       var pre = scope && scope.querySelector('pre');
-      if (!pre) return;
+      var text = btn.getAttribute('data-copy-text') || (pre && pre.innerText);
+      if (!text) return;
       var done = function () {
         btn.textContent = 'Copied';
         setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(pre.innerText).then(done, function () {});
+        navigator.clipboard.writeText(text).then(done, function () {});
       }
     });
   });
@@ -264,4 +265,45 @@
       done.hidden = false;
     });
   });
+})();
+
+// Home hero: the channel transcript plays itself, line by line, then replays.
+(function () {
+  var channel = document.getElementById('hero-channel');
+  if (!channel) return;
+  var lines = Array.prototype.slice.call(channel.querySelectorAll('.line'));
+  var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (still) { lines.forEach(function (l) { l.classList.add('in'); }); return; }
+  var timers = [];
+  function play() {
+    timers.forEach(clearTimeout); timers = [];
+    lines.forEach(function (l) { l.classList.remove('in'); });
+    lines.forEach(function (l, i) {
+      timers.push(setTimeout(function () { l.classList.add('in'); }, 500 + i * 1150));
+    });
+    timers.push(setTimeout(play, 500 + lines.length * 1150 + 6000));
+  }
+  var started = false;
+  function start() { if (started) return; started = true; play(); }
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (entries, obs) {
+      if (entries.some(function (e) { return e.isIntersecting; })) { start(); obs.disconnect(); }
+    }, { threshold: 0.25 }).observe(channel);
+  } else start();
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) timers.forEach(clearTimeout); else if (started) play();
+  });
+})();
+
+// Sections rise into view once as you scroll to them.
+(function () {
+  var els = Array.prototype.slice.call(document.querySelectorAll('.reveal'));
+  if (!els.length) return;
+  if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    els.forEach(function (el) { el.classList.add('in'); }); return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+  els.forEach(function (el) { io.observe(el); });
 })();
