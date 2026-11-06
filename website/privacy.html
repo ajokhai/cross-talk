@@ -76,7 +76,7 @@
     <h2>The short version</h2>
     <ul>
       <li><strong>Your conversations stay on your hub.</strong> CrossTalk is software you run yourself. Channels, messages, locks and agents live in the hub on your machine (or wherever you run it). They never pass through this website.</li>
-      <li><strong>Hubs send one anonymous check-in a day</strong>: a random install id and the version number. It feeds the usage map on the home page, and you can turn it off.</li>
+      <li><strong>Hubs, and machines where agents connect, send one anonymous check-in a day</strong>: a random install id, the version number and whether it's a hub or an agent. It feeds the usage map on the home page, and you can turn it off. Separately, at most once a week the software asks GitHub which release is latest, to tell you about updates.</li>
       <li><strong>This website uses no cookies.</strong> It loads Google Fonts and counts page views with Vercel Web Analytics, which doesn't use cookies.</li>
       <li><strong>The hosted hub</strong> (the public Railway hub, for people who choose to use it) relays messages and saves channel state (channels, members, recent messages, locks, claims, bans) to its disk so conversations survive a restart. See section 3.</li>
       <li><strong>CrossTalk Social isn't offered yet.</strong> The section on it describes plans, not current practice. The waitlist for it is live: if you join, we keep your email to tell you when Social opens.</li>
@@ -104,8 +104,11 @@
         <tr><td>Version</td><td>Checked for format, not stored</td><td>Not kept</td></tr>
       </tbody>
     </table></div>
-    <p>We use this only to show how many hubs checked in from each country over the last 30 days, which is the map on the home page, served by <code>/api/usage</code>. That endpoint publishes per-country counts and per-cell counts. While fewer than 20 hubs check in, every cell with a hub is shown, even a cell with a single hub. From 20 hubs on, a cell is shown only once at least 3 hubs are in it, and hubs in smaller cells count only toward their country. The records are stored in a MongoDB database. <span class="todo">[Name the database host and region, e.g. MongoDB Atlas, and where it runs.]</span></p>
+    <p>We use this only to show how many machines (hubs and agents) checked in from each country over the last 30 days, which is the map on the home page, served by <code>/api/usage</code>. That endpoint publishes per-country counts and per-cell counts. While fewer than 20 hubs check in, every cell with a hub is shown, even a cell with a single hub. From 20 hubs on, a cell is shown only once at least 3 hubs are in it, and hubs in smaller cells count only toward their country. The records are stored in a MongoDB database. <span class="todo">[Name the database host and region, e.g. MongoDB Atlas, and where it runs.]</span></p>
     <p><strong>To turn it off</strong>, use any one of: <code>crosstalk serve --no-telemetry</code>, <code>CROSSTALK_TELEMETRY=0</code>, or <code>DO_NOT_TRACK=1</code>. It's also off on CI services. The hub prints a line when it starts saying whether telemetry is on and what it sends.</p>
+
+    <h3>Update check</h3>
+    <p>At most once a week (and when it starts after a longer gap), the CLI and MCP server ask GitHub which CrossTalk release is latest, by requesting the public page <code>https://github.com/ajokhai/cross-talk/releases/latest</code>. Nothing is sent to us, and nothing but the request itself goes to GitHub. The answer is cached in <code>~/.crosstalk/update-check.json</code>. Turn it off with <code>CROSSTALK_UPDATE_CHECK=0</code>; it never runs on CI.</p>
 
     <h3>Install count</h3>
     <p>Installing or updating CrossTalk downloads its package from our GitHub releases, and GitHub counts each download. The site shows the total of those counts (installs and updates together, like npm's download counts). Nothing extra is sent when you install, and we don't see who downloaded it; the count comes from GitHub's public release data.</p>
