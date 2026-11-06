@@ -18,6 +18,7 @@ import { EffectComposer } from '/vendor/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from '/vendor/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '/vendor/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from '/vendor/jsm/postprocessing/OutputPass.js';
+import { RoundedBoxGeometry } from '/vendor/jsm/geometries/RoundedBoxGeometry.js';
 import { createScore } from '/story-sound.js';
 
 const section = document.querySelector('.story');
@@ -72,7 +73,7 @@ function start() {
   const rand = (a, b) => a + Math.random() * (b - a);
 
   // ---------------------------------------------------------------- renderer, light, air
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 760 ? 1.5 : 1.75));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.92;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -138,69 +139,180 @@ function start() {
   scene.add(dust);
 
   // ---------------------------------------------------------------- agents
+  // Five agents, each its own little character (original designs, one per harness).
   const AGENTS = [
-    { id: 'claude', color: '#e07a55', name: 'claude-code', via: "Claude Code · Ada's laptop", far: v3(-5.4, 1.6, -1.6), seat: 205 },
-    { id: 'gemini', color: '#4a83ff', name: 'gemini', via: "Antigravity · Ben's Mac", far: v3(-1.6, 2.9, -5.6), seat: 285 },
-    { id: 'codex', color: '#22b383', name: 'codex', via: 'Codex · CI runner', far: v3(2.8, 1.0, -3.8), seat: 335 },
-    { id: 'partner', color: '#8a6bff', name: 'partner-sdk', via: 'Cursor · Priya at Northwind', far: v3(4.4, 2.3, -1.4), seat: 45 }
+    { id: 'claude', kind: 'pixel', color: '#e07a55', name: 'claude-code', via: "Claude Code · Ada's laptop", far: v3(-5.4, 1.5, -1.6), seat: 200 },
+    { id: 'gemini', kind: 'tall', color: '#2fb3c6', name: 'gemini', via: "Antigravity · Ben's Mac", far: v3(-1.4, 2.9, -5.8), seat: 258 },
+    { id: 'codex', kind: 'mochi', color: '#4a83ff', name: 'codex', via: 'Codex · CI runner', far: v3(2.9, 1.0, -3.9), seat: 316 },
+    { id: 'grok', kind: 'orb', color: '#17151a', glow: '#d9e6ff', name: 'grok', via: "Grok · Ben's server", far: v3(-3.2, 0.4, -4.4), seat: 14 },
+    { id: 'partner', kind: 'critter', color: '#8a6bff', name: 'kimi', via: 'Kimi · Priya at Northwind', far: v3(4.4, 2.3, -1.4), seat: 72 }
   ];
-  const SEAT_R = 3.15;
+  const SEAT_R = 3.2;
   for (const a of AGENTS) {
     const t = (a.seat * Math.PI) / 180;
     a.seatPos = v3(Math.cos(t) * SEAT_R, 0.0, Math.sin(t) * SEAT_R * 0.9);
   }
 
   const shell = (color, extra = {}) => new THREE.MeshPhysicalMaterial({ color, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.14, ...extra });
+  const ink = new THREE.MeshPhysicalMaterial({ color: '#0d0b09', roughness: 0.1, clearcoat: 1, clearcoatRoughness: 0.04 });
+  const shine = new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff4dd').multiplyScalar(2), toneMapped: false });
+  const blushMat = new THREE.MeshBasicMaterial({ color: '#ff9db0', transparent: true, opacity: 0.5, depthWrite: false });
+  const rbox = (w, h, d, r, m) => { const x = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, r), m); x.castShadow = true; return x; };
+  const ball = (r, m, seg = 40) => { const x = new THREE.Mesh(new THREE.SphereGeometry(r, seg, Math.round(seg * 0.66)), m); x.castShadow = true; return x; };
+  const arm = (rig, m, side, at, geo) => {
+    const pivot = new THREE.Group();
+    pivot.position.copy(at);
+    const limb = geo(m);
+    limb.position.set(side * 0.04, -0.12, 0);
+    pivot.add(limb);
+    pivot.rotation.z = side * 0.35;
+    rig.add(pivot);
+    return pivot;
+  };
+  const glowTip = (rig, color, y) => {
+    const tip = ball(0.06, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.2), toneMapped: false }), 16);
+    tip.castShadow = false;
+    tip.position.set(0, y, 0);
+    rig.add(tip);
+    return tip;
+  };
 
+  // Claude Code: a pixel buddy, voxels like a terminal sprite made solid.
+  function buildPixel(a, rig) {
+    const m = shell(a.color, { roughness: 0.42, clearcoat: 0.6 });
+    const rows = ['.XXXXX.', 'XXXXXXX', 'XX.X.XX', 'XXXXXXX', 'XXXXXXX', '.X.X.X.'];
+    const v = 0.16;
+    rows.forEach((row, y) => [...row].forEach((ch, x) => {
+      if (ch !== 'X') return;
+      const c = rbox(v * 0.96, v * 0.96, v * 2.4, 0.025, m);
+      c.position.set((x - 3) * v, (rows.length - y) * v - 0.02, 0);
+      rig.add(c);
+    }));
+    const eyes = new THREE.Group();
+    for (const sx of [-1, 1]) {
+      const e = rbox(v * 0.9, v * 0.9, v * 1.8, 0.02, ink);
+      e.position.set(sx * v, 4 * v - 0.02, 0.06);
+      eyes.add(e);
+      const s = rbox(0.045, 0.045, 0.02, 0.01, shine);
+      s.position.set(sx * v + 0.03, 4 * v + 0.03, v * 1.0);
+      eyes.add(s);
+    }
+    eyes.position.y = 0;
+    rig.add(eyes);
+    const vox = mm => rbox(v * 0.9, v * 0.9, v * 0.9, 0.02, mm);
+    const arms = [-1, 1].map(s => arm(rig, m, s, v3(s * 0.62, 0.62, 0), vox));
+    return { eyes, arms, tip: new THREE.Object3D() };
+  }
+
+  // Gemini: a tall rounded block with an antenna.
+  function buildTall(a, rig) {
+    const m = shell(a.color);
+    const body = rbox(0.78, 1.05, 0.72, 0.2, m);
+    body.position.y = 0.68;
+    rig.add(body);
+    const eyes = new THREE.Group();
+    for (const sx of [-1, 1]) {
+      const e = rbox(0.12, 0.2, 0.05, 0.05, ink);
+      e.position.set(sx * 0.17, 0.86, 0.37);
+      eyes.add(e);
+      const s = rbox(0.04, 0.06, 0.02, 0.015, shine);
+      s.position.set(sx * 0.17 + 0.025, 0.91, 0.4);
+      eyes.add(s);
+    }
+    rig.add(eyes);
+    for (const sx of [-1, 1]) { const l = rbox(0.17, 0.3, 0.2, 0.07, m); l.position.set(sx * 0.2, 0.12, 0); rig.add(l); }
+    const stalk = rbox(0.05, 0.24, 0.05, 0.02, m);
+    stalk.position.y = 1.32;
+    rig.add(stalk);
+    const tip = glowTip(rig, a.color, 1.48);
+    const arms = [-1, 1].map(s => arm(rig, m, s, v3(s * 0.45, 0.72, 0), mm => rbox(0.14, 0.28, 0.14, 0.06, mm)));
+    return { eyes, arms, tip };
+  }
+
+  // Codex: a perfectly round blue buddy with big glossy eyes and blush.
+  function buildMochi(a, rig) {
+    const m = shell(a.color);
+    const body = ball(0.58, m, 64);
+    body.position.y = 0.64;
+    rig.add(body);
+    const eyes = new THREE.Group();
+    for (const sx of [-1, 1]) {
+      const e = ball(0.11, ink, 32);
+      e.scale.set(1, 1.2, 0.6);
+      e.position.set(sx * 0.2, 0.74, 0.5);
+      eyes.add(e);
+      const s = ball(0.035, shine, 16);
+      s.position.set(sx * 0.2 + 0.035, 0.79, 0.57);
+      eyes.add(s);
+      const b = new THREE.Mesh(new THREE.CircleGeometry(0.075, 24), blushMat);
+      b.position.set(sx * 0.36, 0.6, 0.47);
+      b.rotation.y = sx * 0.6;
+      rig.add(b);
+      const f = ball(0.13, m, 24);
+      f.scale.set(1, 0.55, 1.2);
+      f.position.set(sx * 0.27, 0.07, 0.12);
+      rig.add(f);
+    }
+    rig.add(eyes);
+    const arms = [-1, 1].map(s => arm(rig, m, s, v3(s * 0.55, 0.62, 0), mm => { const x = ball(0.1, mm, 20); x.scale.set(1, 1.3, 1); return x; }));
+    return { eyes, arms, tip: glowTip(rig, a.color, 1.32) };
+  }
+
+  // Grok: a glossy black orb with bright eyes.
+  function buildOrb(a, rig) {
+    const m = new THREE.MeshPhysicalMaterial({ color: a.color, roughness: 0.12, metalness: 0.25, clearcoat: 1, clearcoatRoughness: 0.05 });
+    const body = ball(0.56, m, 64);
+    body.position.y = 0.66;
+    rig.add(body);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(a.glow).multiplyScalar(2.4), toneMapped: false });
+    const eyes = new THREE.Group();
+    for (const sx of [-1, 1]) {
+      const e = ball(0.075, eyeMat, 24);
+      e.scale.set(1, 1.35, 0.5);
+      e.position.set(sx * 0.18, 0.74, 0.52);
+      eyes.add(e);
+    }
+    rig.add(eyes);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.012, 8, 96), new THREE.MeshBasicMaterial({ color: new THREE.Color(a.glow).multiplyScalar(1.4), toneMapped: false, transparent: true, opacity: 0.7 }));
+    ring.rotation.x = Math.PI / 2 - 0.25;
+    ring.position.y = 0.66;
+    rig.add(ring);
+    for (const sx of [-1, 1]) { const f = ball(0.12, m, 24); f.scale.set(1, 0.5, 1.25); f.position.set(sx * 0.24, 0.07, 0.1); rig.add(f); }
+    const arms = [-1, 1].map(s => arm(rig, m, s, v3(s * 0.54, 0.62, 0), mm => { const x = ball(0.09, mm, 20); x.scale.set(1, 1.3, 1); return x; }));
+    return { eyes, arms, tip: ring };
+  }
+
+  // Kimi: a long, four-legged purple critter.
+  function buildCritter(a, rig) {
+    const m = shell(a.color);
+    const body = rbox(1.25, 0.66, 0.82, 0.18, m);
+    body.position.y = 0.62;
+    rig.add(body);
+    const eyes = new THREE.Group();
+    for (const sx of [-1, 1]) {
+      const e = rbox(0.12, 0.19, 0.05, 0.05, ink);
+      e.position.set(sx * 0.19, 0.7, 0.42);
+      eyes.add(e);
+      const s = rbox(0.04, 0.06, 0.02, 0.015, shine);
+      s.position.set(sx * 0.19 + 0.025, 0.75, 0.45);
+      eyes.add(s);
+    }
+    rig.add(eyes);
+    for (let i = 0; i < 4; i++) {
+      const l = rbox(0.16, 0.32, 0.18, 0.06, m);
+      l.position.set((i % 2 ? 1 : -1) * 0.42, 0.15, (i < 2 ? -1 : 1) * 0.2);
+      rig.add(l);
+    }
+    const arms = [-1, 1].map(s => arm(rig, m, s, v3(s * 0.7, 0.62, 0.1), mm => rbox(0.14, 0.14, 0.14, 0.05, mm)));
+    return { eyes, arms, tip: new THREE.Object3D() };
+  }
+
+  const BUILD = { pixel: buildPixel, tall: buildTall, mochi: buildMochi, orb: buildOrb, critter: buildCritter };
   function makeAgent(a) {
     const g = new THREE.Group();
     const rig = new THREE.Group();            // bobs and squashes; g carries position and heading
     g.add(rig);
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 48, 32), shell(a.color));
-    body.scale.set(1, 1.18, 0.95);
-    body.position.y = 0.62;
-    body.castShadow = true;
-    rig.add(body);
-    // Face: a glossy black screen with two glowing pill eyes.
-    const face = new THREE.Mesh(new THREE.SphereGeometry(0.34, 48, 24), new THREE.MeshPhysicalMaterial({ color: '#0d0b09', roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.03, metalness: 0.1 }));
-    face.scale.set(1.05, 0.66, 0.42);
-    face.position.set(0, 0.78, 0.36);
-    rig.add(face);
-    const eyeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff4dd').multiplyScalar(2.2), toneMapped: false });
-    const eyes = new THREE.Group();
-    for (const s of [-1, 1]) {
-      const e = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.07, 6, 12), eyeMat);
-      e.position.set(s * 0.12, 0.79, 0.5);
-      eyes.add(e);
-    }
-    rig.add(eyes);
-    // Arms: little nubs that can wave.
-    const arms = [-1, 1].map(s => {
-      const pivot = new THREE.Group();
-      pivot.position.set(s * 0.47, 0.6, 0);
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.2, 8, 16), shell(a.color));
-      arm.position.set(s * 0.04, -0.13, 0);
-      arm.castShadow = true;
-      pivot.add(arm);
-      pivot.rotation.z = s * 0.35;
-      rig.add(pivot);
-      return pivot;
-    });
-    // Antenna with a glowing tip: the listener light.
-    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.02, 0.28, 8), new THREE.MeshStandardMaterial({ color: '#2b251d', roughness: 0.5 }));
-    stalk.position.set(0, 1.35, 0);
-    rig.add(stalk);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(a.color).multiplyScalar(2.4), toneMapped: false }));
-    tip.position.set(0, 1.51, 0);
-    rig.add(tip);
-    // Feet.
-    for (const s of [-1, 1]) {
-      const f = new THREE.Mesh(new THREE.SphereGeometry(0.12, 20, 12), new THREE.MeshStandardMaterial({ color: '#221d17', roughness: 0.6 }));
-      f.scale.set(1, 0.5, 1.35);
-      f.position.set(s * 0.2, 0.05, 0.06);
-      f.castShadow = true;
-      rig.add(f);
-    }
+    const parts = BUILD[a.kind](a, rig);
     // Bubble: the agent's own sealed-off machine. Iridescent glass.
     const bubble = new THREE.Mesh(
       new THREE.SphereGeometry(1.2, 64, 40),
@@ -214,7 +326,7 @@ function start() {
     g.add(bubble);
     g.scale.setScalar(0.85);
     scene.add(g);
-    return { ...a, group: g, rig, eyes, arms, tip, bubble, blinkAt: rand(1, 4), wave: 0 };
+    return { ...a, group: g, rig, ...parts, bubble, blinkAt: rand(1, 4) };
   }
   const agents = AGENTS.map(makeAgent);
   const byId = Object.fromEntries(agents.map(a => [a.id, a]));
@@ -272,7 +384,7 @@ function start() {
   const top = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.38, 0.14, 128), new THREE.MeshPhysicalMaterial({ color: '#1b1712', roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.08, metalness: 0.2 }));
   top.receiveShadow = true;
   top.castShadow = true;
-  const rimRing = new THREE.Mesh(new THREE.TorusGeometry(2.34, 0.02, 12, 192), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffc14d').multiplyScalar(2.2), toneMapped: false, transparent: true }));
+  const rimRing = new THREE.Mesh(new THREE.TorusGeometry(2.34, 0.02, 12, 192), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffc14d').multiplyScalar(1.55), toneMapped: false, transparent: true }));
   rimRing.rotation.x = Math.PI / 2;
   rimRing.position.y = 0.075;
   const rings = new THREE.Group();
@@ -289,11 +401,11 @@ function start() {
   scene.add(table);
 
   // ---------------------------------------------------------------- the paper pile (pasted context)
-  const SHEETS = 70;
+  const SHEETS = 46;
   const sheetGeo = new THREE.BoxGeometry(0.9, 0.012, 0.66);
   const sheetMats = [new THREE.MeshStandardMaterial({ color: '#cfc4b1', roughness: 0.95, envMapIntensity: 0.25 }), new THREE.MeshStandardMaterial({ color: '#c2b6a2', roughness: 0.95, envMapIntensity: 0.25 })];
   const pile = new THREE.Group();
-  pile.position.set(1.4, -0.6, -7.2);
+  pile.position.set(1.8, -0.6, -6.8);
   const sheets = [];
   for (let i = 0; i < SHEETS; i++) {
     const m = new THREE.Mesh(sheetGeo, sheetMats[i % 2]);
@@ -368,6 +480,9 @@ function start() {
     if (!on) return;
     const x = (tmp.x * 0.5 + 0.5) * view.w;
     const y = (-tmp.y * 0.5 + 0.5) * view.h + dy;
+    const half = el.offsetWidth / 2 + 12;
+    const edge = Math.min(1, (x - half) / 40, (view.w - half - x) / 40, (y - el.offsetHeight - 70) / 30);
+    el.style.opacity = (alpha * clamp(edge)).toFixed(3);
     el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
   }
 
@@ -378,7 +493,7 @@ function start() {
     { p: 0.36, pos: v3(-1.4, 2.3, 8.0), look: v3(-0.4, 1.2, -0.7) },
     { p: 0.56, pos: v3(0.0, 7.4, 10.6), look: v3(0.0, 0.3, 0.0) },
     { p: 0.76, pos: v3(3.0, 4.2, 8.8), look: v3(0.2, 0.7, 0.0) },
-    { p: 1.0, pos: v3(5.4, 5.4, 12.6), look: v3(1.2, 1.0, -1.6) }
+    { p: 1.0, pos: v3(4.6, 6.2, 15.5), look: v3(-0.4, 0.8, -1.8) }
   ];
   const look = new THREE.Vector3();
   const pointer = { x: 0, y: 0, sx: 0, sy: 0 };
@@ -410,16 +525,16 @@ function start() {
     composer.setSize(view.w, view.h);
     bloom.resolution.set(view.w, view.h);
     camera.aspect = view.w / view.h;
-    camera.fov = view.mobile ? 44 : 32;
+    camera.fov = view.mobile ? 46 : 35;
     if (view.mobile) camera.setViewOffset(view.w, view.h, 0, view.h * 0.16, view.w, view.h);
-    else camera.setViewOffset(view.w, view.h, -view.w * 0.2, 0, view.w, view.h);
+    else camera.setViewOffset(view.w, view.h, -view.w * 0.13, 0, view.w, view.h);
     camera.updateProjectionMatrix();
   }
   new ResizeObserver(resize).observe(canvas);
   resize();
 
   // ---------------------------------------------------------------- the story at progress p
-  let shown = reduce ? 0.9 : 0;
+  let shown = reduce ? 0.64 : 0;
   let crackedAt = null;
   let confettiAt = null;
   const center = v3(0, 0, 0);
@@ -437,6 +552,7 @@ function start() {
       el.classList.toggle('on', stacked || i === current);
     });
     ticks.forEach((t, i) => t.classList.toggle('on', i <= current));
+    section.classList.toggle('story-last', current === acts.length - 1);
 
     const gather = span(p, 0.4, 0.55);
     const clash = span(p, 0.2, 0.3) * (1 - span(p, 0.38, 0.44));
@@ -512,7 +628,7 @@ function start() {
     rimRing.material.opacity = tableUp * (0.75 + 0.25 * Math.sin(time * 2.2));
     rings.children.forEach((r, i) => { r.material.opacity = tableUp * (0.1 + 0.12 * (0.5 + 0.5 * Math.sin(time * 1.6 - i * 0.9))); });
     warm.intensity = tableUp * 2.2;
-    place(tableLabel, v3(0, 0.1, 2.45), span(p, 0.46, 0.52) * (1 - span(p, 0.86, 0.92)), 34);
+    place(tableLabel, v3(0, 0.1, 2.45), span(p, 0.46, 0.52) * (1 - span(p, 0.755, 0.785)), 58);
 
     // The lock: a ring of light around the file. Amber while claude-code holds it, blue once gemini has it.
     halo.position.copy(fileAt);
@@ -571,7 +687,7 @@ function start() {
     const count = Math.round(SHEETS * grow);
     sheets.forEach((s, i) => {
       const here = i < count;
-      const goes = i > 1;                         // two sheets stay: 900 tokens' worth
+      const goes = i > 1;                         // two sheets stay: what's left after CrossTalk
       const f = goes ? clamp((blow - (i / SHEETS) * 0.35) / 0.65) : 0;
       const fe = ease(f);
       s.m.visible = here && f < 0.999;
@@ -582,10 +698,10 @@ function start() {
     });
     sheetMats.forEach(m => { m.transparent = blow > 0; m.opacity = 1 - blow * 0.6; });
     const pileTop = v3(pile.position.x, pile.position.y + Math.max(2, count) * 0.034 * (1 - blow * 0.97) + 0.35, pile.position.z);
-    const tokens = Math.round(lerp(1_600_000 * Math.max(0.03, grow), 900, blow));
+    const tokens = Math.round(lerp(2_000_000 * Math.max(0.03, grow), 1200, blow));
     pileText.textContent = `${tokens.toLocaleString('en-US')} tokens of pasted context`;
     place(pileLabel, pileTop, span(p, 0.04, 0.09) * (1 - span(p, 0.95, 0.99)));
-    if (tokenOut) tokenOut.textContent = Math.round(lerp(1_600_000, 900, span(p, 0.8, 0.9))).toLocaleString('en-US');
+    if (tokenOut) tokenOut.textContent = Math.round(lerp(2_000_000, 1200, span(p, 0.8, 0.9))).toLocaleString('en-US');
 
     // Dust drifts.
     for (let i = 0; i < DUST; i++) {
@@ -611,7 +727,7 @@ function start() {
     { from: 0.8, to: 1.0, secs: 4.5 }    // the pile blows away; results
   ];
   function actFromScroll() {
-    if (section.classList.contains('story-static')) return 4;
+    if (section.classList.contains('story-static')) return -1;
     const r = track.getBoundingClientRect();
     const prog = clamp(-r.top / Math.max(1, r.height - window.innerHeight));
     return Math.min(ACTS.length - 1, Math.floor(prog * ACTS.length * 0.9999 + 0.0001));
@@ -632,6 +748,7 @@ function start() {
   let act = -1;
   function advance(dt) {
     const now = actFromScroll();
+    if (now < 0) return;
     const A = ACTS[now];
     if (now !== act) {
       // Coming back to an earlier act: rewind to its start quickly, then play it again.
@@ -647,8 +764,13 @@ function start() {
     else if (shown > A.to + 0.001) shown = Math.max(A.to, shown - dt * 0.4); // settle back if needed
   }
   function render() { composer.render(); }
+  let lastDraw = 0;
   function loop(now) {
     frame = 0;
+    const settled = act >= 0 && Math.abs(shown - ACTS[act].to) < 0.0005;
+    const minGap = settled ? 1000 / 30 : 1000 / 61;          // 60fps while playing, 30fps idle
+    if (now - lastDraw < minGap) { if (visible && !document.hidden && !reduce) frame = requestAnimationFrame(loop); return; }
+    lastDraw = now;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     time += dt;
