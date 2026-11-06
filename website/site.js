@@ -1,3 +1,12 @@
+// Links to the old one-page site (/#teams, /#faq, ...) go to the page that now holds that section.
+(function () {
+  if (location.pathname !== '/' && location.pathname !== '/index.html') return;
+  var moved = { 'use-cases': '/use-cases', tokens: '/use-cases#tokens', code: '/start#code',
+    teams: '/teams', globe: '/teams#globe', social: '/social', faq: '/faq', reviews: '/reviews', share: '/reviews#share' };
+  var to = moved[location.hash.slice(1)];
+  if (to) location.replace(to);
+})();
+
 // Tabs (WAI-ARIA tabs pattern) and copy-to-clipboard buttons.
 (function () {
   document.querySelectorAll('[data-tabs]').forEach(function (root) {
