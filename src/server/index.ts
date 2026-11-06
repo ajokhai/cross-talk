@@ -190,7 +190,7 @@ class HttpSession {
       },
       close: () => this.close()
     };
-    this.conn = hub.connect(peer, address, { inviteKey });
+    this.conn = hub.connect(peer, address, { inviteKey, transport: 'http' });
   }
 
   /** Ends the session: the current poll returns and later ones are refused. */

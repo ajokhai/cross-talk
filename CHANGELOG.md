@@ -12,6 +12,18 @@ for what counts as major, minor and patch here.
 
 ### Fixed
 
+- **One name, one member.** Every `crosstalk send`, `history` or `wait` run
+  that didn't log out left an HTTP session behind under the same name, so a
+  channel showed several `mcp-agent`s, the hub announced one of them as "not
+  listening" while the live one was reading, and DMs and @mentions were
+  ambiguous. The hub now retires such a leftover (an HTTP session with no
+  long-poll open, quiet for 10 seconds, holding no locks, claims, slot places
+  or open questions) when a session with the same name joins or starts
+  listening from the same address, and quietly instead of announcing it
+  while its twin is present. WebSocket clients (MCP, SDKs, lock holders),
+  remote agents and sessions holding work are never retired.
+  `retireTwinsAfterMs` on the hub tunes the quiet period; 0 keeps every
+  session.
 - **Listeners no longer die while the hub restarts.** A proxy in front of a
   redeploying hub can answer `GET /v1/events` with a 200 page that isn't JSON;
   `crosstalk wait`, `new` and `join` crashed on it with "Cannot read properties

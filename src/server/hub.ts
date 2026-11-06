@@ -81,6 +81,15 @@ export interface HubOptions {
    * listening (default 5 minutes, under the 10-minute HTTP session expiry; 0 disables).
    */
   listenerGraceMs?: number;
+  /**
+   * An HTTP session with no long-poll open that has been quiet this long is a
+   * leftover (a one-shot CLI run that never logged out, a listener that was
+   * killed). It is retired when a session with the same name joins, or starts
+   * listening, from the same address, and when the sweep would otherwise
+   * announce it as not listening while such a twin is present. Default 10
+   * seconds; 0 keeps every session.
+   */
+  retireTwinsAfterMs?: number;
   /** Token bucket per connection, over every request: burst size and refill per second. */
   rateLimit?: { burst: number; perSecond: number };
   /**
@@ -303,6 +312,7 @@ export class Connection {
   /** @internal Allowance for DMs this agent sends. */ dms: Bucket;
   /** @internal Set when the connection came in through the public listener with an invite key (#13): it may only use the invite's channel. */ invite?: Invite;
   /** @internal Whether this agent is long-polling GET /v1/events; changed only by pollStarted, pollEnded and sweepListeners. */ listener: ListenerState = { kind: 'never' };
+  /** @internal 'http' for a long-poll session (set by the HTTP transport); unset for WebSocket and restored connections. */ transport?: 'http';
   private readonly requests: Bucket;
 
   constructor(
@@ -388,6 +398,7 @@ export class MeshHub {
       presenceGraceMs: options.presenceGraceMs ?? 2 * 60 * 1000,
       idleAfterMs: options.idleAfterMs ?? 5 * 60 * 1000,
       listenerGraceMs: options.listenerGraceMs ?? 5 * 60 * 1000,
+      retireTwinsAfterMs: options.retireTwinsAfterMs ?? 10_000,
       rateLimit: options.rateLimit ?? { burst: 60, perSecond: 20 },
       webhooks: options.webhooks ?? 'public'
     };
@@ -415,7 +426,7 @@ export class MeshHub {
    * Admits a new connection from `address` (an IP, or any stable client key).
    * Throws a HubFailure with code 'rate_limited' when the address or hub is at capacity.
    */
-  connect(peer: Peer, address = 'unknown', options: { inviteKey?: string } = {}): Connection {
+  connect(peer: Peer, address = 'unknown', options: { inviteKey?: string; transport?: 'http' } = {}): Connection {
     // A remote connection must present a live invite before it takes any slot.
     const invite = options.inviteKey === undefined ? undefined : this.liveInvite(options.inviteKey) ?? fail('unauthorized', 'Missing, expired or revoked invite key');
     const open = this.perAddress.get(address) ?? 0;
@@ -424,6 +435,7 @@ export class MeshHub {
     this.perAddress.set(address, open + 1);
     const conn = new Connection(peer, address, this.opts.rateLimit, this.now(), this.opts.channelLimits);
     conn.invite = invite;
+    conn.transport = options.transport;
     return conn;
   }
 
@@ -755,6 +767,7 @@ export class MeshHub {
       if (channel.members.size >= this.opts.maxMembersPerChannel) fail('quota_exceeded', 'Channel is full');
       this.ensureRoom(conn);
       this.addMember(conn, channel);
+      this.retireTwins(conn, [channel.id]);
     }
     this.markRead(channel, conn.agent!.id);
     return { ...this.snapshot(channel, since), guidance: STAY_AWAKE_GUIDANCE };
@@ -1014,6 +1027,7 @@ export class MeshHub {
     const was = conn.listener;
     conn.listener = { kind: 'polling', open: was.kind === 'polling' ? was.open + 1 : 1 };
     this.polled(conn);
+    if (was.kind !== 'polling') this.retireTwins(conn);
     if (was.kind === 'stopped' && conn.agent) this.listenerNotice(conn, `${conn.agent.name} is listening again.`);
   }
 
@@ -1085,10 +1099,103 @@ export class MeshHub {
     for (const conn of new Set(this.agents.values())) {
       const l = conn.listener;
       if (!conn.agent || l.kind !== 'idle' || now - l.since < this.opts.listenerGraceMs) continue;
+      // Its client is here under a newer session: this one is a leftover, not an agent gone quiet.
+      if (this.presentTwin(conn)) {
+        this.retire(conn);
+        continue;
+      }
       conn.listener = { kind: 'stopped', since: now };
       const minutes = Math.round(this.opts.listenerGraceMs / 60_000);
       this.listenerNotice(conn, `${conn.agent.name} has not been listening for ${minutes}+ minute${minutes === 1 ? '' : 's'} (no open GET /v1/events). @mention them or check on them; they may not see new messages.`);
     }
+  }
+
+  /**
+   * Whether `conn` is a leftover session of the client that `twin` is: the
+   * same name from the same address, over HTTP with no long-poll open, quiet
+   * for `retireTwinsAfterMs`, holding nothing (locks, claims, slot places,
+   * open questions) and not remote. Each `crosstalk send`, `history` or
+   * `wait` run that doesn't log out leaves such a session behind; the newer
+   * session is the one its user is actually driving.
+   */
+  private isLeftoverOf(conn: Connection, twin: Connection, now: number): boolean {
+    if (!this.opts.retireTwinsAfterMs || conn === twin || !conn.agent || !twin.agent) return false;
+    if (conn.transport !== 'http' || conn.phase !== 'live' || conn.listener.kind === 'polling') return false;
+    if (conn.invite || twin.invite || conn.address !== twin.address) return false;
+    if (conn.agent.name.toLowerCase() !== twin.agent.name.toLowerCase()) return false;
+    if (now - this.lastHeard(conn) < this.opts.retireTwinsAfterMs) return false;
+    return !this.holdsWork(conn);
+  }
+
+  /** When an HTTP session was last heard from: its last request, or the end of its last long-poll. */
+  private lastHeard(conn: Connection): number {
+    const l = conn.listener;
+    return Math.max(conn.agent?.lastSeen ?? 0, l.kind === 'idle' || l.kind === 'stopped' ? l.since : 0);
+  }
+
+  /** Locks, open claims, slot places or open questions: a session holding any is kept, whatever its name. */
+  private holdsWork(conn: Connection): boolean {
+    const me = conn.agent!.id;
+    if (this.locks.byHolder(me).length) return true;
+    for (const id of conn.channels) {
+      const channel = this.channels.get(id);
+      if (!channel) continue;
+      for (const claim of channel.claims.values()) if (claim.owner.id === me && (claim.status === 'active' || claim.status === 'stalled')) return true;
+      for (const q of channel.questions.values()) if (q.from.id === me) return true;
+      for (const slot of channel.slots.values()) if (slot.holds.some(h => h.holder.id === me)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Retires the leftover sessions of `conn`'s client (see isLeftoverOf) in
+   * the given channels. Called when `conn` joins a channel or starts listening,
+   * so a name stays one member however many CLI runs it has had.
+   */
+  private retireTwins(conn: Connection, channels: Iterable<string> = conn.channels): void {
+    if (!this.opts.retireTwinsAfterMs || !conn.agent) return;
+    const now = this.now();
+    const gone = new Set<Connection>();
+    for (const id of channels) {
+      const channel = this.channels.get(id);
+      if (!channel) continue;
+      for (const member of [...channel.members]) {
+        const other = this.agents.get(member);
+        if (!other || gone.has(other) || !this.isLeftoverOf(other, conn, now)) continue;
+        gone.add(other);
+        this.retire(other);
+      }
+    }
+  }
+
+  /**
+   * A session of `conn`'s client (same name, same address) that is present
+   * (listening, or connected over WebSocket) in one of `conn`'s channels, if
+   * `conn` is a leftover of it.
+   */
+  private presentTwin(conn: Connection): Connection | undefined {
+    const now = this.now();
+    for (const id of conn.channels) {
+      const channel = this.channels.get(id);
+      if (!channel) continue;
+      for (const member of channel.members) {
+        const other = this.agents.get(member);
+        if (!other || !this.isLeftoverOf(conn, other, now)) continue;
+        if (this.isListening(other) === true || (other.transport !== 'http' && other.phase === 'live')) return other;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Ends a leftover session. Its channels see it leave as `disconnected`, and
+   * its HTTP session closes, so the client's next request gets 401 and it
+   * registers afresh instead of driving a dead agent.
+   */
+  private retire(conn: Connection): void {
+    if (conn.phase === 'closed') return;
+    conn.peer.close(4003, 'replaced by a newer session with the same name');
+    this.disconnect(conn);
   }
 
   /** Per message: which members have read it. Newest last. */
