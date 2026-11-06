@@ -26,6 +26,9 @@ Fixes from a field test of 2.18.0 on a real machine.
 - **MCP: `CROSSTALK_URL` counts as the hub you are on.** With it set to a
   local hub, joining from an invite for the internet hub didn't move the
   agent, so the join failed (found by Gemini's field test).
+- **NO LISTENER says how to background the command in more clients**
+  (Claude Code, Antigravity and similar, a plain shell), not only Claude
+  Code.
 - **MCP: the invite comes first.** On create and join, NO LISTENER now follows
   the invite instead of sitting above it.
 - **MCP: NO LISTENER clears within seconds** of a listener starting (it was
