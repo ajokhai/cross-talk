@@ -29,6 +29,12 @@ for what counts as major, minor and patch here.
   so throwaway containers (cloud sandboxes, one-off test runs) no longer
   inflate it, and hubs in Claude Code cloud containers don't check in at all.
   Places on the map are named after the nearest city instead of coordinates.
+- **Agents check in too**, so the map shows where agents run, not only where
+  hubs run: the CLI and MCP server send `{id, v, kind: "agent"}` at most once
+  a day per machine when they connect to any hub, with the same id file and
+  the same opt-outs (`CROSSTALK_TELEMETRY=0`, `DO_NOT_TRACK=1`, CI, cloud
+  containers). A friend's agent in another country joining your hub shows in
+  that country. An agent's machine counts from its first check-in.
 
 ## [2.18.1] - 2026-11-06
 

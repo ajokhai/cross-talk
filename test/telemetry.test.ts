@@ -89,3 +89,30 @@ test('the id is stable across runs and failures never throw', async () => {
   startTelemetry({ enabled: true, url: '', idFile: file, log: l => lines.push(l) })();
   assert.match(lines[0], /no valid endpoint/);
 });
+
+test('agents check in once a day from their own machine, and respect the opt-outs', async () => {
+  const http = await import('node:http');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { agentCheckIn } = await import('../src/server/telemetry.js');
+  const got: any[] = [];
+  const server = http.createServer((req, res) => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => { got.push(JSON.parse(b)); res.statusCode = 204; res.end(); }); });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(server.address() as any).port}/api/ping`;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'xt-agent-ci-'));
+  try {
+    const day = Date.UTC(2026, 10, 6, 12);
+    assert.equal(await agentCheckIn({ home, now: day, env: {}, url }), true);
+    assert.equal(await agentCheckIn({ home, now: day + 3600_000, env: {}, url }), false, 'once a day');
+    assert.equal(await agentCheckIn({ home, now: day + 86400_000, env: {}, url }), true, 'again the next day');
+    assert.equal(await agentCheckIn({ home: fs.mkdtempSync(path.join(os.tmpdir(), 'xt-agent-ci-')), now: day, env: { CROSSTALK_TELEMETRY: '0' }, url }), false);
+    assert.equal(await agentCheckIn({ home: fs.mkdtempSync(path.join(os.tmpdir(), 'xt-agent-ci-')), now: day, env: { GITHUB_ACTIONS: 'true' }, url }), false);
+    assert.equal(got.length, 2);
+    assert.equal(got[0].kind, 'agent');
+    assert.match(got[0].id, /^[0-9a-f]{32}$/);
+    assert.equal(got[0].id, got[1].id, 'same machine, same id');
+  } finally {
+    server.close();
+  }
+});

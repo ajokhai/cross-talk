@@ -1,5 +1,5 @@
 // POST /api/ping: anonymous daily check-in from a CrossTalk hub (on unless CROSSTALK_TELEMETRY=0).
-// Body: {"id":"<32 hex>","v":"<version>","kind":"hub"}, at most 256 bytes.
+// Body: {"id":"<32 hex>","v":"<version>","kind":"hub"|"agent"}, at most 256 bytes.
 // The country and a 1° grid cell (about 111 km; never the precise point) come
 // from Vercel's geo headers. The IP and the id are stored only
 // as salted hashes, and both expire (rate limits after 2h, pings after 35 days).
@@ -55,7 +55,7 @@ export async function handle(req, res, getStore = mongoStore) {
   // x-forwarded-for entry, a caller can't choose it.
   const ip = String(req.headers['x-real-ip'] ?? '').trim() || req.socket?.remoteAddress || '';
   try {
-    const accepted = await recordPing(await getStore(), { id: ping.id, country: countryOf(req.headers), cell: cellOf(req.headers), ip });
+    const accepted = await recordPing(await getStore(), { id: ping.id, kind: ping.kind, country: countryOf(req.headers), cell: cellOf(req.headers), ip });
     return accepted ? send(res, 204) : send(res, 429, { error: 'rate limited' });
   } catch (err) {
     // Never err.message: driver messages can embed the URI's user or host.

@@ -42,7 +42,9 @@ export function utcDay(time = Date.now()) {
 }
 
 /**
- * Validates a check-in body: exactly {"id":"<32 hex>","v":"<version>","kind":"hub"}.
+ * Validates a check-in body: exactly {"id":"<32 hex>","v":"<version>","kind":"hub"|"agent"}.
+ * "agent" comes from a CLI or MCP agent connecting to any hub, from its own machine,
+ * so agents in other countries show on the map, not only the hub they join.
  * Returns the parsed ping or a string saying what is wrong.
  */
 export function parsePing(text) {
@@ -57,7 +59,7 @@ export function parsePing(text) {
   if (keys !== 'id,kind,v') return 'body must have exactly id, v and kind';
   if (typeof body.id !== 'string' || !/^[0-9a-f]{32}$/.test(body.id)) return 'id must be 32 lowercase hex characters';
   if (typeof body.v !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]{1,20})?$/.test(body.v)) return 'v must be a version';
-  if (body.kind !== 'hub') return 'kind must be "hub"';
+  if (body.kind !== 'hub' && body.kind !== 'agent') return 'kind must be "hub" or "agent"';
   return body;
 }
 
@@ -120,10 +122,10 @@ export function mongoStore(env = process.env) {
           );
           return doc?.n ?? 1;
         },
-        async addPing({ hub, country, cell, day }) {
+        async addPing({ hub, country, cell, day, kind = 'hub' }) {
           await pings.updateOne(
             { _id: `${hub}:${day.toISOString().slice(0, 10)}` },
-            { $setOnInsert: cell ? { hub, country, cell, day } : { hub, country, day } },
+            { $setOnInsert: cell ? { hub, country, cell, day } : { hub, country, day }, $addToSet: { kinds: kind } },
             { upsert: true }
           );
         },
@@ -133,8 +135,9 @@ export function mongoStore(env = process.env) {
           const [facets] = await pings.aggregate([
             { $match: { day: { $gte: since } } },
             { $sort: { day: 1 } },
-            { $group: { _id: '$hub', days: { $sum: 1 }, country: { $last: '$country' }, cell: { $last: '$cell' } } },
-            { $match: { days: { $gte: minDays } } },
+            { $group: { _id: '$hub', days: { $sum: 1 }, kinds: { $addToSet: '$kinds' }, country: { $last: '$country' }, cell: { $last: '$cell' } } },
+            // An agent that joined a hub counts on its first day: that's real use, not a test container.
+            { $match: { $or: [{ days: { $gte: minDays } }, { kinds: { $elemMatch: { $elemMatch: { $eq: 'agent' } } } }] } },
             { $facet: {
               total: [{ $count: 'n' }],
               countries: [{ $group: { _id: '$country', n: { $sum: 1 } } }],
@@ -184,10 +187,10 @@ export function storageFailure(err) {
 // ---------------------------------------------------------------------------
 
 /** Records one check-in. Returns false when the IP is over its rate limit. */
-export async function recordPing(store, { id, country, cell, ip, time = Date.now(), limitPerHour = 20, env = process.env }) {
+export async function recordPing(store, { id, country, cell, ip, kind = 'hub', time = Date.now(), limitPerHour = 20, env = process.env }) {
   const n = await store.hit(`${digest(`ip:${ip}`, env)}:${Math.floor(time / 3600_000)}`);
   if (n > limitPerHour) return false;
-  await store.addPing({ hub: digest(`id:${id}`, env), country, cell, day: utcDay(time) });
+  await store.addPing({ hub: digest(`id:${id}`, env), country, cell, day: utcDay(time), kind });
   return true;
 }
 

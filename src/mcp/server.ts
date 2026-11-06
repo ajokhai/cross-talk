@@ -1,4 +1,5 @@
 import { sendReview } from '../client/review.js';
+import { agentCheckIn } from '../server/telemetry.js';
 import { agentReviewPrompt, answerReviewPrompt, countUseAndCheck } from '../client/review-prompt.js';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -172,6 +173,8 @@ export class Bridge {
     const promise = this.start().then(
       client => {
         if (this.state.kind === 'connecting' && this.state.promise === promise) this.state = { kind: 'ready', client };
+        // Connected: the once-a-day anonymous agent check-in (telemetry.ts; same opt-outs as hubs). Not for the hub's own remote-MCP bridges.
+        if (!this.options.remote) void agentCheckIn();
         return client;
       },
       err => {
