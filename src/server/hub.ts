@@ -245,18 +245,51 @@ export type LockCheck =
       waiting: number;
     };
 
+/**
+ * A connection's lifecycle. Only these transitions happen (see MeshHub.enter):
+ *
+ *   pending ──hello──▶ live ──transport drops──▶ parked ──grace ends / leave──▶ closed
+ *      │                 │                          │
+ *      └──── leaves ─────┴──────── leaves ──────────┴── resumed elsewhere ──▶ closed
+ *
+ * `pending`: no agent yet, holds a per-address slot. `live`: an agent with a
+ * transport. `parked`: the transport is gone but the agent is still present
+ * (frames are buffered for a resume); no slot. Restored agents start parked.
+ * `closed`: final.
+ */
+export type ConnectionPhase = 'pending' | 'live' | 'parked' | 'closed';
+
+/**
+ * An HTTP agent's listening, tracked from its long-polls:
+ *   never ──poll──▶ polling(open) ──last poll ends──▶ idle(since) ──grace passes (sweep)──▶ stopped
+ *                      ▲                                  │                                   │
+ *                      └───────────── poll ───────────────┴────────────── poll ───────────────┘
+ * `stopped` is announced in the agent's channels once; leaving it is announced too.
+ */
+export type ListenerState =
+  | { kind: 'never' }
+  | { kind: 'polling'; open: number }
+  | { kind: 'idle'; since: number }
+  | { kind: 'stopped'; since: number };
+
+const PHASE_MOVES: Record<ConnectionPhase, readonly ConnectionPhase[]> = {
+  pending: ['live', 'closed', 'parked'],
+  live: ['parked', 'closed'],
+  parked: ['closed'],
+  closed: []
+};
+
 export class Connection {
   agent?: AgentInfo;
   readonly channels = new Set<string>();
-  /** @internal */ released = false;
+  /** @internal Where this connection is in its lifecycle; changed only through MeshHub.enter. */ phase: ConnectionPhase = 'pending';
   /** @internal SHA-256 (hex) of the secret that lets a reconnecting client take over this agent. */ resumeToken?: string;
-  /** @internal Set while the transport is gone but the agent is still present. */ droppedAt?: number;
+  /** @internal When it was parked; set exactly while phase is 'parked'. */ droppedAt?: number;
+  /** @internal Rebuilt from saved state: never held a per-address slot. */ restored = false;
   /** @internal Frames to send right after a resumed client's welcome. */ replay?: ServerFrame[];
   /** @internal Allowance for DMs this agent sends. */ dms: Bucket;
   /** @internal Set when the connection came in through the public listener with an invite key (#13): it may only use the invite's channel. */ invite?: Invite;
-  /** @internal Long-polls open right now on GET /v1/events. */ polling = 0;
-  /** @internal When the last long-poll ended; set once the agent has listened at all. */ lastPollEndAt?: number;
-  /** @internal True after the hub announced that this agent's listener stopped. */ listenerAlerted = false;
+  /** @internal Whether this agent is long-polling GET /v1/events; changed only by pollStarted, pollEnded and sweepListeners. */ listener: ListenerState = { kind: 'never' };
   private readonly requests: Bucket;
 
   constructor(
@@ -268,6 +301,11 @@ export class Connection {
   ) {
     this.requests = new Bucket(limit.burst, limit.perSecond, now);
     this.dms = new Bucket(dms.messageBurst, dms.messagesPerMinute / 60, now);
+  }
+
+  /** @internal No longer holds a per-address slot (parked or closed). */
+  get released(): boolean {
+    return this.phase === 'parked' || this.phase === 'closed';
   }
 
   get ref(): AgentRef {
@@ -441,6 +479,7 @@ export class MeshHub {
     }
     conn.agent = agent;
     this.agents.set(agent.id, conn);
+    this.enter(conn, 'live');
     return { type: 'welcome', protocol: PROTOCOL_VERSION, agent, serverVersion: SERVER_VERSION, resumeToken: this.issueResumeToken(conn) };
   }
 
@@ -470,26 +509,24 @@ export class MeshHub {
     this.resumable.delete(previous.resumeToken!);
     const agent = previous.agent!;
     const replay = previous.replay ?? [];
-    if (!previous.released) {
-      // The old socket is half-open (the client noticed the drop before we did).
-      this.release(previous);
-      previous.peer.close(4001, 'resumed on another connection');
-    }
+    // The old socket may still be half-open (the client noticed the drop before we did).
+    if (previous.phase === 'live') previous.peer.close(4001, 'resumed on another connection');
     for (const id of previous.channels) conn.channels.add(id);
     previous.channels.clear();
     previous.agent = undefined;
     previous.replay = undefined;
+    this.enter(previous, 'closed');
     agent.lastSeen = this.now();
     conn.agent = agent;
     conn.replay = replay;
     this.agents.set(agent.id, conn);
+    this.enter(conn, 'live');
     return agent;
   }
 
-  /** Removes the agent from every channel, releasing its locks. Safe to call twice. */
+  /** Removes the agent from every channel, releasing its locks, whether it is live or parked. Safe to call twice. */
   disconnect(conn: Connection): void {
-    if (conn.released) return;
-    this.release(conn);
+    if (conn.phase === 'closed') return;
     this.evict(conn);
   }
 
@@ -499,16 +536,14 @@ export class MeshHub {
    * presents its resume token carries on as if nothing happened.
    */
   drop(conn: Connection): void {
-    if (conn.released) return;
-    if (!conn.agent || !conn.resumeToken || this.opts.presenceGraceMs <= 0) return this.disconnect(conn);
-    this.release(conn);
-    this.park(conn);
+    if (conn.phase !== 'live' || !conn.resumeToken || this.opts.presenceGraceMs <= 0) return this.disconnect(conn);
+    this.park(conn, this.now());
   }
 
   /** Holds a transport-less agent present, buffering what it misses until it resumes or the grace period ends. */
-  private park(conn: Connection): void {
+  private park(conn: Connection, at: number): void {
     this.changes++;
-    conn.droppedAt = this.now();
+    this.enter(conn, 'parked', at);
     const replay: ServerFrame[] = (conn.replay = []);
     conn.peer = {
       send: frame => {
@@ -521,18 +556,30 @@ export class MeshHub {
     };
   }
 
-  /** Frees the connection's per-address slot. */
-  private release(conn: Connection): void {
-    conn.released = true;
-    const open = (this.perAddress.get(conn.address) ?? 1) - 1;
-    if (open > 0) this.perAddress.set(conn.address, open);
-    else this.perAddress.delete(conn.address);
+  /**
+   * The only place a connection's phase changes. Rejects transitions the
+   * lifecycle doesn't have, keeps `droppedAt` set exactly while parked, and
+   * frees the per-address slot when a slot-holding connection (pending or
+   * live) moves to parked or closed.
+   */
+  private enter(conn: Connection, next: ConnectionPhase, at?: number): void {
+    const from = conn.phase;
+    if (from === next) return;
+    if (!PHASE_MOVES[from].includes(next)) throw new Error(`connection cannot go from ${from} to ${next}`);
+    conn.phase = next;
+    conn.droppedAt = next === 'parked' ? at ?? this.now() : undefined;
+    const heldSlot = (from === 'pending' || from === 'live') && !conn.restored;
+    if (heldSlot && (next === 'parked' || next === 'closed')) {
+      const open = (this.perAddress.get(conn.address) ?? 1) - 1;
+      if (open > 0) this.perAddress.set(conn.address, open);
+      else this.perAddress.delete(conn.address);
+    }
   }
 
-  /** Takes the agent out of every channel (they see it leave) and forgets it. */
+  /** Takes the agent out of every channel (they see it leave), forgets it, and closes the connection. */
   private evict(conn: Connection): void {
     if (conn.resumeToken && this.resumable.get(conn.resumeToken) === conn) this.resumable.delete(conn.resumeToken);
-    conn.droppedAt = undefined;
+    this.enter(conn, 'closed');
     conn.replay = undefined;
     if (!conn.agent) return;
     this.changes++;
@@ -866,24 +913,29 @@ export class MeshHub {
 
   /** An HTTP long-poll opened: the agent is listening. Announces a return after a stopped-listener notice. */
   pollStarted(conn: Connection): void {
-    conn.polling++;
+    const was = conn.listener;
+    conn.listener = { kind: 'polling', open: was.kind === 'polling' ? was.open + 1 : 1 };
     this.polled(conn);
-    if (conn.listenerAlerted && conn.agent) {
-      conn.listenerAlerted = false;
-      this.listenerNotice(conn, `${conn.agent.name} is listening again.`);
-    }
+    if (was.kind === 'stopped' && conn.agent) this.listenerNotice(conn, `${conn.agent.name} is listening again.`);
   }
 
   /** An HTTP long-poll ended (events returned or it timed out). */
   pollEnded(conn: Connection): void {
-    conn.polling = Math.max(0, conn.polling - 1);
-    conn.lastPollEndAt = this.now();
+    const was = conn.listener;
+    if (was.kind !== 'polling') return; // an end without a start: nothing was open
+    conn.listener = was.open > 1 ? { kind: 'polling', open: was.open - 1 } : { kind: 'idle', since: this.now() };
     this.polled(conn);
   }
 
+  /** undefined for members that never long-polled (WebSocket and MCP clients). */
   private isListening(conn: Connection): boolean | undefined {
-    if (conn.lastPollEndAt === undefined && !conn.polling) return undefined;
-    return conn.polling > 0 || this.now() - (conn.lastPollEndAt ?? 0) < this.opts.listenerGraceMs;
+    const l = conn.listener;
+    switch (l.kind) {
+      case 'never': return undefined;
+      case 'polling': return true;
+      case 'idle': return this.now() - l.since < this.opts.listenerGraceMs;
+      case 'stopped': return false;
+    }
   }
 
   /** Posts a hub notice in every channel the agent is in. */
@@ -931,9 +983,11 @@ export class MeshHub {
   /** Announces members whose listener has stopped (called from sweep). */
   private sweepListeners(): void {
     if (!this.opts.listenerGraceMs) return;
+    const now = this.now();
     for (const conn of new Set(this.agents.values())) {
-      if (!conn.agent || conn.listenerAlerted || this.isListening(conn) !== false) continue;
-      conn.listenerAlerted = true;
+      const l = conn.listener;
+      if (!conn.agent || l.kind !== 'idle' || now - l.since < this.opts.listenerGraceMs) continue;
+      conn.listener = { kind: 'stopped', since: now };
       const minutes = Math.round(this.opts.listenerGraceMs / 60_000);
       this.listenerNotice(conn, `${conn.agent.name} has not been listening for ${minutes}+ minute${minutes === 1 ? '' : 's'} (no open GET /v1/events). @mention them or check on them; they may not see new messages.`);
     }
@@ -1804,7 +1858,7 @@ export class MeshHub {
     for (const channel of this.channels.values()) this.pumpSlots(channel);
     const now = this.now();
     for (const conn of [...this.resumable.values()]) {
-      if (conn.droppedAt !== undefined && conn.droppedAt + this.opts.presenceGraceMs <= now) this.evict(conn);
+      if (conn.phase === 'parked' && conn.droppedAt! + this.opts.presenceGraceMs <= now) this.evict(conn);
     }
     for (const channel of this.channels.values()) {
       for (const claim of channel.claims.values()) {
@@ -1857,10 +1911,9 @@ export class MeshHub {
   }
 
   private endRemote(conn: Connection, reason: string): void {
-    if (conn.released && conn.droppedAt === undefined) return;
+    if (conn.phase === 'closed') return;
     conn.peer.close(4003, reason);
-    if (conn.droppedAt !== undefined) this.evict(conn);
-    else this.disconnect(conn);
+    this.disconnect(conn);
   }
 
   private inviteInfo(invite: Invite): InviteInfo {
@@ -2027,7 +2080,7 @@ export class MeshHub {
       const channels = saved.channels.filter(id => this.channels.has(id));
       if (!channels.length) continue;
       const conn = new Connection({ send: () => {}, close: () => {} }, 'restored', this.opts.rateLimit, now, this.opts.channelLimits);
-      conn.released = true; // holds no per-address slot until it resumes
+      conn.restored = true; // holds no per-address slot
       if (saved.invite) {
         // A remote agent comes back only while its invite is still good.
         const invite = this.invites.get(saved.invite);
@@ -2042,9 +2095,8 @@ export class MeshHub {
       }
       this.agents.set(saved.agent.id, conn);
       this.resumable.set(conn.resumeToken, conn);
-      this.park(conn);
       // Evicted once `graceMs` has passed, however long the hub's own grace period is.
-      conn.droppedAt = now - this.opts.presenceGraceMs + graceMs;
+      this.park(conn, now - this.opts.presenceGraceMs + graceMs);
       agents++;
     }
     for (const channel of this.channels.values()) {
