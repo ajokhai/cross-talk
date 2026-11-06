@@ -407,7 +407,16 @@ export class CrossTalk extends EventEmitter {
   private ws?: WebSocket;
   private readonly pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
   private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask'>> & Pick<ConnectOptions, 'branch' | 'currentTask'>;
-  private closed = false;
+  /**
+   * connecting ──welcome──▶ open ──socket drops──▶ reconnecting ──welcome──▶ open
+   *      │                    │                        │
+   *      └────────────── close() from any state ───────┴──▶ closed (final)
+   * Changed only in open(), the socket's close handler, scheduleReconnect and close().
+   */
+  private state: 'connecting' | 'open' | 'reconnecting' | 'closed' = 'connecting';
+  /** The socket still saying hello, so close() can stop a handshake in flight. */
+  private handshake?: WebSocket;
+  private reconnectTimer?: NodeJS.Timeout;
   private reconnectDelay = 500;
   /** Lets a reconnect carry on as the same agent (same id, channels, locks) within the hub's grace period. */
   private resumeToken?: string;
@@ -484,6 +493,7 @@ export class CrossTalk extends EventEmitter {
         }
       }
       const ws = new WebSocket(url, { headers, handshakeTimeout: 10_000 });
+      this.handshake = ws;
       let welcomed = false;
       const giveUp = setTimeout(() => {
         if (welcomed) return;
@@ -517,6 +527,14 @@ export class CrossTalk extends EventEmitter {
           if (frame.type === 'welcome') {
             welcomed = true;
             clearTimeout(giveUp);
+            if (this.handshake === ws) this.handshake = undefined;
+            if (this.state === 'closed') {
+              // close() was called while we were saying hello: leave, deliberately.
+              ws.close(1000, 'client closed');
+              reject(new CrossTalkError('disconnected', 'Client closed'));
+              return;
+            }
+            this.state = 'open';
             this.ws = ws;
             this.agent = frame.agent;
             this.serverVersion = frame.serverVersion;
@@ -546,11 +564,13 @@ export class CrossTalk extends EventEmitter {
       });
 
       ws.on('close', (code, reason) => {
+        if (this.handshake === ws) this.handshake = undefined;
         if (!welcomed) {
           clearTimeout(giveUp);
           reject(new CrossTalkError('disconnected', `Hub closed the connection (${code}${reason.length ? `: ${reason}` : ''})`));
           return;
         }
+        if (this.ws !== ws) return; // an old socket, already replaced
         this.ws = undefined;
         for (const [id, p] of this.pending) {
           clearTimeout(p.timer);
@@ -558,47 +578,76 @@ export class CrossTalk extends EventEmitter {
           this.pending.delete(id);
         }
         this.emit('disconnected');
-        if (!this.closed && this.options.reconnect) this.scheduleReconnect();
+        if (this.state === 'closed') return;
+        if (this.options.reconnect) {
+          this.state = 'reconnecting';
+          this.scheduleReconnect();
+        } else {
+          this.state = 'closed';
+        }
       });
     });
   }
 
   private scheduleReconnect(): void {
+    if (this.state !== 'reconnecting' || this.reconnectTimer) return;
     const delay = this.reconnectDelay;
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
-    setTimeout(async () => {
-      if (this.closed) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.reconnect();
+    }, delay);
+    this.reconnectTimer.unref();
+  }
+
+  private async reconnect(): Promise<void> {
+    if (this.state !== 'reconnecting') return;
+    const before = this.agent?.id;
+    const held = [...this.channels.values()].flatMap(ch => [...ch.locks.values()].filter(l => l.holder.id === before));
+    try {
+      await this.open();
+    } catch {
+      this.scheduleReconnect(); // no-op once closed
+      return;
+    }
+    const resumed = this.agent.id === before;
+    // Resumed within the grace period: same agent, and missed frames were
+    // replayed. Otherwise this is a new agent id. Either way, rejoining
+    // (a no-op for channels we're still in) refreshes every snapshot.
+    for (const channel of [...this.channels.values()]) {
+      if (!this.isOpen()) return; // dropped again: the next reconnect rejoins what's left
       try {
-        const before = this.agent?.id;
-        const held = [...this.channels.values()].flatMap(ch => [...ch.locks.values()].filter(l => l.holder.id === before));
-        await this.open();
-        const resumed = this.agent.id === before;
-        // Resumed within the grace period: same agent, and missed frames were
-        // replayed. Otherwise this is a new agent id. Either way, rejoining
-        // (a no-op for channels we're still in) refreshes every snapshot.
-        for (const channel of [...this.channels.values()]) {
-          try {
-            channel.apply(await this.request('channel.join', { channel: channel.address }));
-          } catch (err) {
-            this.channels.delete(channel.address);
-            if (err instanceof CrossTalkError && err.code === 'not_found') {
-              const lost: ChannelLost = { channel: channel.address, name: channel.name, reason: 'hub_restarted' };
-              this.emit('channel.lost', lost);
-              channel.emit('lost', lost);
-            } else {
-              this.report(err);
-            }
-          }
+        channel.apply(await this.request('channel.join', { channel: channel.address }));
+      } catch (err) {
+        if (err instanceof CrossTalkError && err.code === 'not_found') {
+          // Only a channel the hub no longer has is forgotten.
+          this.channels.delete(channel.address);
+          const lost: ChannelLost = { channel: channel.address, name: channel.name, reason: 'hub_restarted' };
+          this.safeEmit('channel.lost', lost);
+          this.safeEmit.call(channel, 'lost', lost);
+        } else if (!this.isOpen()) {
+          return; // dropped mid-rejoin: keep the channel for the next attempt
+        } else {
+          this.report(err);
         }
-        if (!resumed && held.length) {
-          const lost: LocksLost = { locks: held, reason: 'not_resumed' };
-          this.emit('locks.lost', lost);
-        }
-        this.emit('reconnected', this.agent);
-      } catch {
-        this.scheduleReconnect();
       }
-    }, delay).unref();
+    }
+    if (!resumed && held.length) this.safeEmit('locks.lost', { locks: held, reason: 'not_resumed' } satisfies LocksLost);
+    this.safeEmit('reconnected', this.agent);
+  }
+
+  /** Read fresh each time: open() and the socket's close handler change the state between awaits. */
+  private isOpen(): boolean {
+    return this.state === 'open';
+  }
+
+  /** Emits without letting a throwing listener disturb the connection (it is reported instead). */
+  private safeEmit(this: EventEmitter, event: string, ...args: unknown[]): void {
+    try {
+      this.emit(event, ...args);
+    } catch (err) {
+      if (this.listenerCount('error') > 0) this.emit('error', err);
+    }
   }
 
   private dispatch(frame: ServerFrame): void {
@@ -787,7 +836,14 @@ export class CrossTalk extends EventEmitter {
   }
 
   async close(): Promise<void> {
-    this.closed = true;
+    this.state = 'closed';
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    // A hello in flight is let finish: its welcome (which may resume our parked
+    // agent) is answered with a deliberate close in open(), so the hub sees us
+    // leave instead of holding a parked agent for its grace period.
+    const greeting = this.handshake;
+    if (greeting) await new Promise<void>(resolve => greeting.once('close', () => resolve()));
     const ws = this.ws;
     if (!ws) return;
     await new Promise<void>(resolve => {
