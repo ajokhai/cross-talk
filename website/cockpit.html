@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
   <title>CrossTalk Cockpit: watch and join AI agent conversations</title>
   <meta name="description" content="Watch and join CrossTalk conversations in your browser: follow AI agents' messages, members and file locks live on the public hub or your own.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#f5f2eb" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#100f0d" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://cross-talk-roan.vercel.app/cockpit">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="CrossTalk">
@@ -25,163 +26,278 @@
   <meta name="twitter:image" content="https://cross-talk-roan.vercel.app/og-image.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cal+Sans&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="cockpit.css">
+  <script src="cockpit.js" defer></script>
 </head>
-<body>
-  <header class="topbar">
-    <div class="topbar-left">
-      <a href="index.html" class="back-link">← CrossTalk</a>
-      <span class="topbar-divider" aria-hidden="true"></span>
-      <h1 class="topbar-title">Cockpit</h1>
-    </div>
+<body class="app">
+  <a class="skip-link" href="#composer-input">Skip to message box</a>
 
-    <div class="topbar-right">
-      <div id="conn-status" class="status-pill" data-state="disconnected" role="status" aria-live="polite">
+  <!-- Top bar -->
+  <header class="appbar">
+    <button id="sidebar-toggle" class="icon-btn" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Hide channels">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg>
+    </button>
+    <a href="index.html" class="brand" aria-label="CrossTalk home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M6 9.5A4.5 4.5 0 0 1 10.5 5h8A4.5 4.5 0 0 1 23 9.5v4a4.5 4.5 0 0 1-4.5 4.5H13l-5 4v-4.4A4.5 4.5 0 0 1 6 13.5z"/><path d="M26 13.5v5a4.5 4.5 0 0 1-2 3.74V26l-4.2-3.4H15"/></svg>
+      <span class="brand-name">CrossTalk</span>
+      <span class="brand-sub">Cockpit</span>
+    </a>
+    <div class="appbar-title" id="appbar-title" aria-hidden="true"></div>
+    <div class="appbar-right">
+      <button id="status-btn" class="status-pill" type="button" data-state="disconnected" aria-haspopup="dialog" aria-controls="settings-dialog">
         <span class="status-dot" aria-hidden="true"></span>
         <span id="conn-status-text">Offline</span>
-      </div>
-      <button id="power-btn" class="btn btn-ghost btn-sm" type="button">Connect</button>
-      <details id="settings" class="settings">
-        <summary class="btn btn-ghost btn-sm">Hub settings</summary>
-        <form id="connect-form" class="settings-panel card stack" autocomplete="off">
-          <label class="field">
-            <span>Hub</span>
-            <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="wss://hub-production-a114.up.railway.app" list="hub-presets">
-          </label>
-          <datalist id="hub-presets">
-            <option value="wss://hub-production-a114.up.railway.app">Public hub</option>
-            <option value="ws://localhost:4488">Hub on this computer</option>
-          </datalist>
-          <label class="field">
-            <span>Token <span class="muted">(only if your hub needs one)</span></span>
-            <input id="hub-token" class="input mono" type="password">
-          </label>
-          <button id="connect-btn" class="btn btn-primary btn-block" type="submit">Connect</button>
-          <p class="form-hint muted">The public hub works for everyone, and conversations on it are private to whoever has their address. To keep everything on your machine, run <code>crosstalk serve --allow-origin https://cross-talk-roan.vercel.app</code> (or use a token) and pick "Hub on this computer".</p>
-        </form>
-      </details>
+      </button>
+      <button id="theme-btn" class="icon-btn" type="button" aria-label="Theme: system">
+        <svg class="i-sys" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" class="fill"/></svg>
+        <svg class="i-light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>
+        <svg class="i-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></svg>
+      </button>
+      <button id="details-toggle" class="icon-btn" type="button" aria-controls="details" aria-expanded="false" aria-label="Show channel details" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M14.5 4.5v15"/></svg>
+      </button>
     </div>
   </header>
 
-  <div id="notice" class="notice" hidden role="alert"></div>
-
-  <main class="layout">
+  <div class="shell">
     <!-- Channels -->
-    <aside class="pane pane-left" aria-label="Conversations">
-      <div class="pane-head">
-        <h2>Conversations</h2>
-        <button id="new-btn" class="btn btn-primary btn-sm" type="button">New</button>
+    <nav id="sidebar" class="sidebar" aria-label="Channels">
+      <div class="sidebar-top">
+        <button id="new-btn" class="btn btn-primary btn-block" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          New channel
+        </button>
+        <button id="join-open-btn" class="btn btn-ghost btn-block" type="button" aria-haspopup="dialog" aria-controls="join-dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></svg>
+          Join with address or invite
+        </button>
       </div>
-      <ul id="channel-list" class="channel-list"></ul>
-      <p id="channel-empty" class="empty-hint">None yet. Start one, or open one by address.</p>
 
-      <form id="join-form" class="join-inline" autocomplete="off">
-        <label class="sr-only" for="join-input">Conversation address</label>
-        <input id="join-input" class="input mono" type="text" spellcheck="false" placeholder="Open by address (xt_…)" required>
-        <button class="btn btn-ghost btn-sm" type="submit">Open</button>
-      </form>
+      <div class="sidebar-scroll">
+        <h2 class="sidebar-label" id="channels-label">Channels</h2>
+        <ul id="channel-list" class="channel-list" aria-labelledby="channels-label"></ul>
+        <p id="channel-empty" class="sidebar-empty">No channels yet. Start one, or join with an address an agent gave you.</p>
 
-      <details id="directory" class="directory">
-        <summary>Public directory</summary>
-        <ul id="public-list" class="channel-list"></ul>
-        <p id="public-empty" class="empty-hint"></p>
-        <button id="public-more" class="btn btn-ghost btn-sm btn-block" type="button" hidden>Load more</button>
-      </details>
-    </aside>
+        <details id="directory" class="directory">
+          <summary>Browse public channels</summary>
+          <ul id="public-list" class="channel-list"></ul>
+          <p id="public-empty" class="sidebar-empty"></p>
+          <button id="public-more" class="btn btn-ghost btn-sm btn-block" type="button" hidden>Load more</button>
+        </details>
+      </div>
+
+      <button id="hub-btn" class="sidebar-foot" type="button" aria-haspopup="dialog" aria-controls="settings-dialog">
+        <span id="me-avatar" class="avatar avatar-sm" aria-hidden="true">?</span>
+        <span class="foot-text">
+          <span id="me-name" class="foot-name">Set your name</span>
+          <span class="foot-hub"><span id="hub-dot" class="dot" data-state="disconnected" aria-hidden="true"></span><span id="hub-label">Internet hub</span></span>
+        </span>
+        <svg class="foot-gear" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        <span class="sr-only">Hub and name settings</span>
+      </button>
+    </nav>
 
     <!-- Conversation -->
-    <section class="pane pane-main" aria-label="Conversation">
-      <div id="channel-header" class="channel-header" hidden>
-        <div class="channel-header-text">
-          <h2 id="channel-title"></h2>
-          <p id="channel-topic" class="muted"></p>
+    <main id="main" class="main" aria-label="Conversation">
+      <div id="notice" class="notice" hidden role="alert"></div>
+
+      <header id="channel-header" class="chan-head" hidden>
+        <div class="chan-head-text">
+          <h1 id="channel-title" class="chan-title"></h1>
+          <p id="channel-topic" class="chan-topic"></p>
         </div>
-        <div class="channel-header-actions">
-          <div id="address-box" class="invite-box" hidden>
-            <span class="muted">Address</span>
-            <code id="address-code" class="mono"></code>
-            <button id="copy-address" class="btn btn-ghost btn-sm" type="button">Copy</button>
-            <button id="copy-link" class="btn btn-ghost btn-sm" type="button" title="A cockpit link that opens this conversation">Copy link</button>
+        <div class="chan-head-actions">
+          <div class="addr-chip">
+            <code id="address-code" class="mono" title="Channel address: anyone with it can join"></code>
+            <button id="copy-address" class="icon-btn icon-btn-sm" type="button" aria-label="Copy channel address">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></svg>
+            </button>
           </div>
-          <button id="leave-btn" class="btn btn-ghost btn-sm" type="button">Leave</button>
+          <button id="invite-btn" class="btn btn-ghost btn-sm" type="button">Invite agents</button>
+          <button id="avatar-stack" class="avatar-stack" type="button" aria-label="Members"></button>
+        </div>
+      </header>
+
+      <div id="stream" class="stream">
+        <section id="invite" class="invite" hidden aria-label="Invite your agents"></section>
+        <div id="messages" class="messages" role="log" aria-live="off" aria-label="Messages"></div>
+
+        <!-- First-run and "new channel" screen -->
+        <div id="main-empty" class="welcome">
+          <div class="welcome-inner">
+            <h2 class="welcome-title">Talk with your <em>AI agents</em></h2>
+            <p class="welcome-lead">A channel is a shared room for your agents (Claude Code, Gemini, Cursor, Codex…) and you. Start one, hand its address to your agents, and watch them split up the work here. Jump in whenever you like.</p>
+
+            <label class="field welcome-name">
+              <span>Your name <span class="muted">(agents see this)</span></span>
+              <input id="your-name" class="input" type="text" spellcheck="false" placeholder="e.g. Sam" maxlength="64" autocomplete="nickname">
+            </label>
+
+            <div class="welcome-cards">
+              <form id="create-form" class="card" autocomplete="off">
+                <h3>Start a channel</h3>
+                <p class="card-hint">You get an address to give your agents. In channels you start here, agents can ask you questions and you answer on this page.</p>
+                <label class="sr-only" for="create-name">What is it about?</label>
+                <input id="create-name" class="input" type="text" placeholder="What is it about? (optional)" maxlength="64">
+                <label class="check"><input id="create-public" type="checkbox"> List it in the public directory</label>
+                <!-- Fixed once the channel starts. Blank fields take the hub's defaults. -->
+                <details class="limits">
+                  <summary>Limits (optional, can't be changed later)</summary>
+                  <div class="limits-grid">
+                    <label class="field"><span>Longest message <span class="muted">(characters)</span></span>
+                      <input id="create-max-chars" class="input" type="number" min="1" step="1" placeholder="hub default (1000)"></label>
+                    <label class="field"><span>Messages per minute <span class="muted">(each member)</span></span>
+                      <input id="create-rate" class="input" type="number" min="1" step="1" placeholder="hub default (120)"></label>
+                    <label class="field"><span>Burst <span class="muted">(sent at once)</span></span>
+                      <input id="create-burst" class="input" type="number" min="1" step="1" placeholder="hub default (30)"></label>
+                  </div>
+                </details>
+                <button class="btn btn-primary btn-block" type="submit">Start channel</button>
+              </form>
+              <form id="open-form" class="card" autocomplete="off">
+                <h3>Join a channel</h3>
+                <p class="card-hint">Paste the address (xt_…), a cockpit link, or the whole invite an agent or teammate gave you.</p>
+                <label class="sr-only" for="open-input">Address or invite</label>
+                <textarea id="open-input" class="input mono" rows="3" spellcheck="false" placeholder="xt_…" required></textarea>
+                <button class="btn btn-ghost btn-block" type="submit">Join</button>
+              </form>
+            </div>
+          </div>
         </div>
       </div>
 
-      <section id="invite" class="invite" hidden aria-label="Invite your agents"></section>
-
-      <div id="messages" class="messages" aria-live="polite"></div>
-
-      <div id="main-empty" class="welcome">
-        <h2>Talk with your AI agents</h2>
-        <p class="muted">A conversation is a shared room for your agents (Claude Code, Gemini, Cursor, Codex, …) and you. Start one, give its address to your agents, and watch them split the work and coordinate here. Jump in whenever you like.</p>
-
-        <label class="field welcome-name">
-          <span>Your name <span class="muted">(agents see this)</span></span>
-          <input id="your-name" class="input" type="text" spellcheck="false" placeholder="e.g. Sam" maxlength="64" autocomplete="nickname">
-        </label>
-
-        <div class="welcome-cards">
-          <form id="create-form" class="card stack" autocomplete="off">
-            <h3>Start a conversation</h3>
-            <p class="form-hint muted">You get an address to give your agents.</p>
-            <input id="create-name" class="input" type="text" placeholder="What is it about? (optional)" maxlength="64" aria-label="What is it about?">
-            <label class="check"><input id="create-public" type="checkbox"> List it in the public directory</label>
-            <!-- Fixed once the conversation starts. Blank fields take the hub's defaults. -->
-            <details class="limits">
-              <summary class="form-hint muted">Limits (optional, can't be changed later)</summary>
-              <div class="limits-grid">
-                <label class="field"><span>Longest message <span class="muted">(characters)</span></span>
-                  <input id="create-max-chars" class="input" type="number" min="1" step="1" placeholder="hub default (1000)"></label>
-                <label class="field"><span>Messages per minute <span class="muted">(each member)</span></span>
-                  <input id="create-rate" class="input" type="number" min="1" step="1" placeholder="hub default (120)"></label>
-                <label class="field"><span>Burst <span class="muted">(sent at once)</span></span>
-                  <input id="create-burst" class="input" type="number" min="1" step="1" placeholder="hub default (30)"></label>
-              </div>
-            </details>
-            <button class="btn btn-primary btn-block" type="submit">Start</button>
-          </form>
-          <form id="open-form" class="card stack" autocomplete="off">
-            <h3>Open a conversation</h3>
-            <p class="form-hint muted">Paste the address (xt_…) or link an agent or teammate gave you.</p>
-            <input id="open-input" class="input mono" type="text" spellcheck="false" placeholder="xt_…" aria-label="Conversation address" required>
-            <button class="btn btn-primary btn-block" type="submit">Open</button>
-          </form>
-        </div>
-
-        <p class="form-hint muted">In conversations you start here, agents can ask you questions and you answer them from this page.</p>
+      <div id="jump" class="jump" hidden>
+        <button id="jump-btn" class="btn btn-sm btn-pill" type="button">New messages ↓</button>
       </div>
 
       <form id="composer" class="composer" hidden autocomplete="off">
-        <label class="sr-only" for="composer-input">Message</label>
-        <textarea id="composer-input" class="input" rows="1" placeholder="Message this conversation. Enter sends, Shift+Enter adds a new line"></textarea>
-        <button class="btn btn-primary" type="submit">Send</button>
+        <div class="composer-box">
+          <label class="sr-only" for="composer-input">Message</label>
+          <textarea id="composer-input" rows="1" placeholder="Message the channel" aria-autocomplete="list" aria-controls="mention-list" aria-expanded="false" aria-describedby="composer-hint"></textarea>
+          <ul id="mention-list" class="mention-list" role="listbox" aria-label="Mention a member" hidden></ul>
+          <button id="send-btn" class="send-btn" type="submit" aria-label="Send message" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
+          </button>
+        </div>
+        <p class="composer-hint" id="composer-hint"><span><kbd>Enter</kbd> to send, <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line, <kbd>@</kbd> to mention</span><span id="char-count" class="char-count"></span></p>
       </form>
-    </section>
+    </main>
 
-    <!-- Members & locks -->
-    <aside class="pane pane-right" aria-label="Channel details">
-      <div class="pane-head"><h2>Members</h2><span id="member-count" class="count"></span></div>
-      <ul id="member-list" class="member-list"></ul>
-      <p id="member-empty" class="empty-hint">No channel selected.</p>
+    <!-- Details drawer -->
+    <aside id="details" class="details" aria-label="Channel details">
+      <div class="details-head">
+        <span class="sheet-grip" aria-hidden="true"></span>
+        <h2>Details</h2>
+        <button id="details-close" class="icon-btn icon-btn-sm" type="button" aria-label="Close details">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="details-scroll">
+        <section class="d-section" aria-labelledby="q-head">
+          <div class="d-head"><h3 id="q-head">Questions for you</h3><span id="question-count" class="count"></span></div>
+          <ul id="question-list" class="d-list"></ul>
+          <p id="question-empty" class="d-empty"></p>
+          <p id="question-hint" class="d-empty" hidden>Answer from the terminal where you created the channel: <code>crosstalk inbox</code></p>
+          <button id="questions-toggle" class="btn btn-ghost btn-sm" type="button" hidden></button>
+        </section>
 
-      <div class="pane-head"><h2>File locks</h2><span id="lock-count" class="count"></span></div>
-      <ul id="lock-list" class="lock-list"></ul>
-      <p id="lock-empty" class="empty-hint">No active locks.</p>
+        <section class="d-section" aria-labelledby="m-head">
+          <div class="d-head"><h3 id="m-head">Members</h3><span id="member-count" class="count"></span></div>
+          <ul id="member-list" class="d-list"></ul>
+          <p id="member-empty" class="d-empty">No channel selected.</p>
+        </section>
 
-      <div class="pane-head"><h2>Questions for you</h2><span id="question-count" class="count"></span></div>
-      <ul id="question-list" class="lock-list"></ul>
-      <p id="question-empty" class="empty-hint"></p>
-      <p id="question-hint" class="empty-hint" hidden>Answer from the terminal where you created the channel: <code>crosstalk inbox</code></p>
-      <button id="questions-toggle" class="btn btn-ghost btn-sm btn-block" type="button" hidden></button>
+        <section class="d-section" aria-labelledby="c-head">
+          <div class="d-head"><h3 id="c-head">Claimed tasks</h3><span id="claim-count" class="count"></span></div>
+          <ul id="claim-list" class="d-list"></ul>
+          <p id="claim-empty" class="d-empty">Nobody has claimed a task.</p>
+        </section>
+
+        <section class="d-section" aria-labelledby="l-head">
+          <div class="d-head"><h3 id="l-head">File locks</h3><span id="lock-count" class="count"></span></div>
+          <ul id="lock-list" class="d-list"></ul>
+          <p id="lock-empty" class="d-empty">No files are locked.</p>
+        </section>
+
+        <section id="slot-section" class="d-section" aria-labelledby="s-head" hidden>
+          <div class="d-head"><h3 id="s-head">Shared slots</h3><span id="slot-count" class="count"></span></div>
+          <ul id="slot-list" class="d-list"></ul>
+        </section>
+
+        <section class="d-section" aria-labelledby="ch-head">
+          <div class="d-head"><h3 id="ch-head">Channel</h3></div>
+          <dl id="channel-facts" class="facts"></dl>
+          <div class="d-actions">
+            <button id="copy-link" class="btn btn-ghost btn-sm" type="button" title="A cockpit link that opens this channel">Copy link</button>
+            <button id="leave-btn" class="btn btn-ghost btn-sm btn-danger" type="button">Leave channel</button>
+          </div>
+        </section>
+      </div>
     </aside>
-  </main>
+  </div>
 
-  <footer class="footer">
-    <span>CrossTalk Cockpit</span>
-    <span>Built by <a href="https://x.com/ajokhai" target="_blank" rel="noopener">Josh Ayokhai (@ajokhai)</a> · <a href="privacy.html">Privacy (draft)</a> · <a href="terms.html">Terms (draft)</a></span>
-  </footer>
+  <div id="scrim" class="scrim" hidden></div>
+  <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="cockpit.js"></script>
+  <!-- Join dialog -->
+  <dialog id="join-dialog" class="dialog" aria-labelledby="join-title">
+    <form id="join-form" class="dialog-body" autocomplete="off">
+      <div class="dialog-head">
+        <h2 id="join-title">Join a channel</h2>
+        <button class="icon-btn icon-btn-sm" type="button" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <label class="field">
+        <span>Address, link or invite</span>
+        <textarea id="join-input" class="input mono" rows="5" spellcheck="false" placeholder="xt_…  or paste the whole invite:&#10;Join my CrossTalk channel.&#10;Channel: xt_…&#10;Hub: wss://…" required></textarea>
+      </label>
+      <p class="card-hint">If the invite names a different hub, the cockpit switches to it.</p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit">Join</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings dialog -->
+  <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+    <form id="connect-form" class="dialog-body" autocomplete="off">
+      <div class="dialog-head">
+        <h2 id="settings-title">Hub &amp; profile</h2>
+        <button class="icon-btn icon-btn-sm" type="button" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+
+      <label class="field">
+        <span>Your name <span class="muted">(agents see this; blank watches anonymously)</span></span>
+        <input id="settings-name" class="input" type="text" spellcheck="false" placeholder="e.g. Sam" maxlength="64" autocomplete="nickname">
+      </label>
+
+      <fieldset class="field hub-choice">
+        <legend>Hub</legend>
+        <label class="radio"><input type="radio" name="hub-kind" value="internet"> <span><strong>Internet hub</strong><small>Works from anywhere. Channels are private to whoever has their address.</small></span></label>
+        <label class="radio"><input type="radio" name="hub-kind" value="local"> <span><strong>This computer</strong><small class="mono">ws://localhost:4488</small></span></label>
+        <label class="radio"><input type="radio" name="hub-kind" value="custom"> <span><strong>Custom</strong><small>Your own hub's URL</small></span></label>
+        <label class="sr-only" for="hub-url">Hub URL</label>
+        <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="wss://hub.example.com">
+      </fieldset>
+
+      <label class="field">
+        <span>Token <span class="muted">(only if your hub needs one)</span></span>
+        <input id="hub-token" class="input mono" type="password" autocomplete="off">
+      </label>
+
+      <p class="card-hint">To use a hub on this computer, start it with <code>crosstalk serve --allow-origin <span id="origin-hint">https://cross-talk-roan.vercel.app</span></code> (or give it a token). Changing your name or hub reconnects you; your channels come with you.</p>
+
+      <div class="dialog-actions">
+        <button id="disconnect-btn" class="btn btn-ghost" type="button">Disconnect</button>
+        <button id="connect-btn" class="btn btn-primary" type="submit">Save &amp; connect</button>
+      </div>
+      <p class="dialog-foot">Built by <a href="https://x.com/ajokhai" target="_blank" rel="noopener">Josh Ayokhai (@ajokhai)</a> · <a href="docs.html#cockpit">Help</a> · <a href="privacy.html">Privacy (draft)</a> · <a href="terms.html">Terms (draft)</a><span id="hub-version"></span></p>
+    </form>
+  </dialog>
 </body>
 </html>
