@@ -1,6 +1,8 @@
-// GET /api/installs: how many times CrossTalk has been installed, counted by
-// GitHub as downloads of the release package (cross-talk.tgz), summed across
-// every release. No ping from the installer: every `npm install -g <release url>`
+// GET /api/installs: downloads of the release package (cross-talk.tgz), summed
+// across every release, as GitHub counts them. Like npm's and PyPI's download
+// counts, this includes updates (`crosstalk update` downloads it again),
+// reinstalls and automated installs, so it is downloads, not unique installs;
+// the hub check-in (api/ping.js) is what counts distinct hubs. No ping from the installer: every `npm install -g <release url>`
 // downloads that file, and GitHub keeps the count. Cached for an hour.
 // GITHUB_TOKEN (optional) raises GitHub's rate limit.
 

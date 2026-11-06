@@ -307,3 +307,88 @@
   }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
   els.forEach(function (el) { io.observe(el); });
 })();
+
+// Cost estimate on the home page: coordination tokens and money, context sharing vs CrossTalk.
+(function () {
+  var root = document.querySelector('[data-cost]');
+  if (!root) return;
+  var MSG = 30;              // tokens in a typical coordination message
+  var GROUP = 8;             // agents per channel: messages go to the others in it, not to everyone
+  var PRESETS = {
+    team: { agents: 5, updates: 20, context: 40000, price: 3 },
+    company: { agents: 200, updates: 120, context: 60000, price: 3 },
+    enterprise: { agents: 3000, updates: 400, context: 100000, price: 2 }
+  };
+  var inputs = {};
+  ['agents', 'updates', 'context', 'price'].forEach(function (k) { inputs[k] = root.querySelector('input[name="' + k + '"]'); });
+  // Log-scale sliders: the range runs 0..1000 and maps onto min..max exponentially.
+  function isLog(el) { return el.getAttribute('data-scale') === 'log'; }
+  var bounds = {};
+  Object.keys(inputs).forEach(function (k) {
+    var el = inputs[k];
+    bounds[k] = { min: +el.min, max: +el.max };
+    if (isLog(el)) { el.min = 0; el.max = 1000; el.step = 1; }
+  });
+  function get(k) {
+    if (pinned) return pinned[k];
+    var el = inputs[k], b = bounds[k];
+    if (!isLog(el)) return +el.value;
+    var v = b.min * Math.pow(b.max / b.min, el.value / 1000);
+    // Snap to friendly numbers: 2 significant figures.
+    var mag = Math.pow(10, Math.max(0, Math.floor(Math.log10(v)) - 1));
+    return Math.max(b.min, Math.round(v / mag) * mag);
+  }
+  function set(k, v) {
+    var el = inputs[k], b = bounds[k];
+    el.value = isLog(el) ? Math.round(1000 * Math.log(v / b.min) / Math.log(b.max / b.min)) : v;
+  }
+  function big(n) {
+    var units = [[1e12, ' trillion'], [1e9, ' billion'], [1e6, ' million'], [1e3, 'k']];
+    for (var i = 0; i < units.length; i++) if (n >= units[i][0]) return (n / units[i][0]).toFixed(n / units[i][0] < 10 ? 1 : 0).replace(/\.0$/, '') + units[i][1];
+    return String(Math.round(n));
+  }
+  function money(n) {
+    if (n >= 1e6) return '$' + big(n);
+    if (n >= 100) return '$' + Math.round(n).toLocaleString('en-US');
+    return '$' + n.toFixed(2);
+  }
+  function out(name, text) { var o = root.querySelector('[data-out="' + name + '"]'); if (o) o.textContent = text; }
+  function res(name, text) { var o = root.querySelector('[data-res="' + name + '"]'); if (o) o.textContent = text; }
+  function render() {
+    var a = get('agents'), u = get('updates'), c = get('context'), p = get('price');
+    var group = Math.min(a, GROUP);
+    var perMonth = 30;
+    var oldTokens = a * u * c * perMonth;                 // every update, every agent re-reads the shared context
+    var newTokens = a * u * MSG * (group - 1) * perMonth; // every update is one short message to the others in its channel
+    var oldCost = oldTokens / 1e6 * p, newCost = newTokens / 1e6 * p;
+    out('agents', a.toLocaleString('en-US'));
+    out('updates', u.toLocaleString('en-US'));
+    out('context', big(c) + ' tokens');
+    out('price', '$' + p.toFixed(2));
+    out('group', String(group));
+    res('oldTokens', big(oldTokens) + ' tokens/mo');
+    res('newTokens', big(newTokens) + ' tokens/mo');
+    res('oldCost', money(oldCost) + '/mo');
+    res('newCost', money(newCost) + '/mo');
+    res('saveYear', money((oldCost - newCost) * 12));
+    res('saveMonth', money(oldCost - newCost));
+    res('saveTokens', big(oldTokens - newTokens));
+  }
+  var pinned = null;   // a preset's exact values, until a slider moves
+  function preset(name) {
+    var v = PRESETS[name];
+    Object.keys(v).forEach(function (k) { set(k, v[k]); });
+    pinned = v;
+    root.querySelectorAll('[data-preset]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-preset') === name)); });
+    render();
+  }
+  root.querySelectorAll('[data-preset]').forEach(function (b) { b.addEventListener('click', function () { preset(b.getAttribute('data-preset')); }); });
+  Object.keys(inputs).forEach(function (k) {
+    inputs[k].addEventListener('input', function () {
+      pinned = null;
+      root.querySelectorAll('[data-preset]').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+      render();
+    });
+  });
+  preset('team');
+})();

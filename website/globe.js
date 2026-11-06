@@ -314,9 +314,9 @@
     const busiest = markers.slice().sort((a, b) => b.count - a.count)[0];
     if (busiest) rotation = -busiest.lon;
 
-    // Installs, counted by GitHub as release downloads, alongside the hubs that check in.
+    // Downloads of the release package (GitHub's count: installs and updates alike), alongside the hubs that check in.
     const installed = installs && Number.isFinite(installs.installs) && installs.installs > 0
-      ? ` Installed ${installs.installs.toLocaleString('en-US')} time${installs.installs === 1 ? '' : 's'} from GitHub releases.` : '';
+      ? ` ${installs.installs.toLocaleString('en-US')} download${installs.installs === 1 ? '' : 's'} from GitHub releases (installs and updates).` : '';
     const text = describe(usage, countries) + installed;
     if (summary) summary.textContent = text;
     canvas.setAttribute('aria-label', `Globe of CrossTalk usage. ${text}`);
