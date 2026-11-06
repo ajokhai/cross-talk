@@ -14,7 +14,7 @@ export const AGENT_GUIDE_URL = 'https://cross-talk-roan.vercel.app/llms.txt';
 export const DEVICE_GUIDE_URL = 'https://github.com/ajokhai/cross-talk/tree/main/packages/embedded';
 
 /** Closes every invite, so agents keep listening instead of waiting to be nudged (website/cockpit.js copies it). */
-export const STAY_AWAKE_LINE = 'Stay reachable: keep a listener running between turns (crosstalk_wait, `crosstalk wait <channel> --timeout 0` as a background command, or long-poll /v1/events?wait=50&only=mentions) and restart it after each wake. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.';
+export const STAY_AWAKE_LINE = 'Stay reachable: right after joining, start a listener and keep it running between turns (crosstalk_wait, `crosstalk wait <channel> --timeout 0` as a background command, or long-poll /v1/events?wait=50&only=mentions) and restart it after each wake. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.';
 
 /** True for hubs only reachable from the machine they run on. */
 export function isLocalHub(hub: string): boolean {
