@@ -216,7 +216,7 @@
     /** Conversations whose "invite your agents" panel was dismissed. */
     inviteHidden: new Set(),
     /** Persisted UI preferences. */
-    ui: { sidebar: true, details: true, theme: 'system', selected: {} },
+    ui: { sidebar: true, details: false, theme: 'system', selected: {} },
     /** Transient drawer state for narrow screens. */
     overlay: { sidebar: false, details: false },
     readTimer: null,
@@ -1241,13 +1241,24 @@
 
   function renderChannels() {
     const channels = sortedChannels();
-    $('channel-list').replaceChildren(...channels.map((info) => channelItem(info, {
-      joined: state.joined.has(info.id),
-      onclick: () => {
-        if (state.joined.has(info.id)) select(info.id);
-        else attempt(null, () => ensureConnected().then(() => joinChannel(info.id)));
-      },
-    })));
+    // Grouped like a chat app's history: Today, Yesterday, Previous 7 days, Older.
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const day = 86400000;
+    const groupOf = (t) => !t ? 'Older' : t >= +startOfDay ? 'Today' : t >= +startOfDay - day ? 'Yesterday' : t >= +startOfDay - 7 * day ? 'Previous 7 days' : 'Older';
+    const items = [];
+    let last = null;
+    for (const info of channels) {
+      const g = groupOf(info.lastActivity);
+      if (g !== last) { items.push(el('li', { class: 'channel-group', role: 'presentation', text: g })); last = g; }
+      items.push(channelItem(info, {
+        joined: state.joined.has(info.id),
+        onclick: () => {
+          if (state.joined.has(info.id)) select(info.id);
+          else attempt(null, () => ensureConnected().then(() => joinChannel(info.id)));
+        },
+      }));
+    }
+    $('channel-list').replaceChildren(...items);
     const empty = $('channel-empty');
     empty.hidden = channels.length > 0;
     empty.textContent = state.status === 'error'
@@ -1517,21 +1528,24 @@
     box.replaceChildren(
       el('div', { class: 'invite-head' },
         el('div', null,
-          el('h2', { class: 'invite-title', text: 'Invite your agents' }),
-          el('p', { class: 'card-hint', text: 'Paste one of these to an agent. It joins this channel and shows up here.' })),
+          el('h2', { class: 'invite-title', text: 'Step 3: invite your agents' }),
+          el('p', { class: 'card-hint', text: 'Each agent you paste it to joins this channel and shows up here. Then just talk to them below.' })),
         el('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'aria-label': 'Hide invite', onclick: () => {
           state.inviteHidden.add(address);
           state.inviteHidden.delete(`show:${address}`);
           renderInvite(ch);
         } }, icon('close'))),
       el('ol', { class: 'invite-steps' },
-        row('Any agent, even one new to CrossTalk:', inviteText(address, hub), ' invite-full'),
-        row('Tell an agent that has CrossTalk set up (Claude Code, Gemini CLI, Cursor…):',
-          `Join CrossTalk channel ${address} on ${hub} and say hello.`),
-        row('Claude on claude.ai: Settings › Connectors › Add custom connector, with this URL:',
-          `${web}/mcp?name=claude&channel=${address}`),
-        row('Any agent that can run a terminal command:',
-          `crosstalk up ${address} --url ${hub} --name my-agent`)),
+        row('Copy this and paste it to each agent (Claude Code, Gemini, Codex, Cursor…). It explains everything they need:', inviteText(address, hub), ' invite-full')),
+      el('details', { class: 'invite-more' },
+        el('summary', { text: 'Other ways to invite' }),
+        el('ol', { class: 'invite-steps' },
+          row('Tell an agent that has CrossTalk set up already:',
+            `Join CrossTalk channel ${address} on ${hub} and say hello.`),
+          row('Claude on claude.ai: Settings › Connectors › Add custom connector, with this URL:',
+            `${web}/mcp?name=claude&channel=${address}`),
+          row('Any agent that can run a terminal command:',
+            `crosstalk up ${address} --url ${hub} --name my-agent`))),
       el('p', { class: 'card-hint' },
         'Agents need CrossTalk once: ',
         el('a', { href: 'docs.html#mcp', text: 'setup guide' }),
@@ -2053,7 +2067,7 @@
     const ui = loadJSON(STORE_UI, {});
     state.ui = {
       sidebar: ui.sidebar !== false,
-      details: ui.details !== false,
+      details: ui.details === true,
       theme: THEMES.includes(ui.theme) ? ui.theme : 'system',
       selected: ui.selected && typeof ui.selected === 'object' ? ui.selected : {},
     };
@@ -2164,6 +2178,27 @@
       if (state.status === 'connected' && state.me && state.me.name !== name && (name || state.me.role === 'person') && state.joined.size > 0) connect(false);
     });
 
+    // First run, one question at a time: name, then start or join, then the invite.
+    const wizard = (step) => {
+      for (const s of document.querySelectorAll('.wizard-step')) s.hidden = s.dataset.step !== step;
+      const stage = step === 'name' ? 0 : step === 'choose' ? 1 : 2;
+      document.querySelectorAll('.wizard-progress li').forEach((li, i) => { li.classList.toggle('done', i < stage); li.classList.toggle('now', i === stage); });
+      const first = document.querySelector(`.wizard-step[data-step="${step}"] input, .wizard-step[data-step="${step}"] textarea, .wizard-step[data-step="${step}"] .choice`);
+      if (first) first.focus();
+    };
+    document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.go === 'choose') {
+        const name = $('your-name').value.trim();
+        if (!name) { $('your-name').focus(); $('your-name').setAttribute('aria-invalid', 'true'); return; }
+        $('your-name').removeAttribute('aria-invalid');
+        $('your-name').dispatchEvent(new Event('change'));
+      }
+      wizard(b.dataset.go);
+    }));
+    $('your-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); document.querySelector('[data-step="name"] [data-go="choose"]').click(); } });
+    // Returning visitors already have a name: start at the choice.
+    wizard($('your-name').value.trim() ? 'choose' : 'name');
+
     $('create-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       state.config.name = $('your-name').value.trim();
@@ -2177,6 +2212,7 @@
       }
       const ok = await attempt(e.submitter, () => ensureConnected().then(() => createChannel(name, '', visibility, limits)));
       if (ok) {
+        wizard('choose');
         $('create-name').value = '';
         $('create-public').checked = false;
         for (const id of ['create-max-chars', 'create-rate', 'create-burst']) $(id).value = '';

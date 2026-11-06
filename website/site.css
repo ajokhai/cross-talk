@@ -729,3 +729,11 @@ img, video { max-width: 100%; }
 .cost-foot { margin-top: 22px; font-size: 12.5px; color: var(--muted); max-width: 90ch; }
 @media (max-width: 900px) { .cost-grid { grid-template-columns: 1fr; gap: 28px; } }
 @media (max-width: 560px) { .cost-presets { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; border-radius: 14px; } .cost-presets button { padding: 10px 6px; font-size: 13px; white-space: normal; border-radius: 10px; } .cost { padding: 22px; } .cost-row { grid-template-columns: 1fr auto; } .cost-row b:nth-of-type(1) { display: none; } }
+
+/* Home: the web app */
+.webapp { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center; }
+.webapp .checks { margin-bottom: 30px; }
+.webapp-shot { display: block; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); box-shadow: var(--shadow); transition: transform .3s; }
+.webapp-shot:hover { transform: translateY(-3px); }
+.webapp-shot img { display: block; width: 100%; height: auto; }
+@media (max-width: 900px) { .webapp { grid-template-columns: 1fr; gap: 36px; } }

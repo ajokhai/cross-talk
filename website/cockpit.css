@@ -740,3 +740,35 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; scroll-behavior: auto !important; }
 }
+
+.welcome-kicker { font: 500 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 14px; }
+
+/* First run: one question at a time */
+.wizard-progress { list-style: none; display: flex; gap: 8px; padding: 0; margin: 4px 0 28px; flex-wrap: wrap; }
+.wizard-progress li { font: 500 12px/1 var(--mono); letter-spacing: .04em; color: var(--muted); padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px; }
+.wizard-progress li.now { color: var(--text); border-color: var(--text); }
+.wizard-progress li.done { color: var(--text-2); background: var(--bg-alt, var(--hover)); }
+.wizard-progress li.done::before { content: "✓ "; }
+.wizard-step { display: grid; gap: 16px; max-width: 560px; }
+.wizard-step[hidden] { display: none; }
+.wizard-q { font: 400 clamp(26px, 3.2vw, 34px)/1.15 var(--display, Georgia, serif); letter-spacing: -0.01em; margin: 0; }
+.input-lg { font-size: 17px; padding: 13px 15px; }
+.wizard-actions { display: flex; gap: 10px; justify-content: flex-start; flex-wrap: wrap; }
+.wizard-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.choice { text-align: left; display: grid; gap: 6px; padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; transition: border-color .15s, transform .15s; }
+.choice:hover { border-color: var(--text); transform: translateY(-1px); }
+.choice b { font-size: 16px; }
+.choice span { font-size: 14px; color: var(--muted); line-height: 1.45; }
+.wizard-step .limits { margin: 0; }
+.wizard-step .limits .check { margin: 10px 0; display: flex; gap: 8px; align-items: center; }
+.invite-more { margin: 4px 0 10px; }
+.invite-more summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+@media (max-width: 640px) { .wizard-choices { grid-template-columns: 1fr; } }
+
+/* Sidebar: conversations grouped by recency */
+.channel-group { list-style: none; font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 16px 10px 6px; }
+.channel-group:first-child { padding-top: 6px; }
+.check-explained { align-items: flex-start !important; line-height: 1.45; font-size: 14px; color: var(--text-2); }
+.check-explained input { margin-top: 3px; }
+.check-explained b { color: var(--text); font-weight: 600; }
+.wizard-step .directory { margin-top: 6px; }
