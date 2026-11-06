@@ -10,6 +10,47 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-11-06
+
+Implicit state machines made explicit. Lifecycles that were spread across
+flags and optional fields now have one state each, with the transitions
+written down next to it, and the bugs that hid between the flags are fixed.
+
+### Fixed
+- **Hub froze with two listeners on one HTTP session.** Two filtered
+  long-polls (`only=mentions` / `exclude=`) on one session woke each other
+  in a microtask loop that blocked every client for up to 55 s. Polls now
+  take a generation; a newer poll supersedes an older one, which returns.
+- **Closed HTTP sessions lived forever.** A session the hub closed (invite
+  revoked, evicted) kept answering `{"events":[]}`; it is now removed and
+  later calls get `401 not_registered`.
+- **Disconnecting a parked agent did nothing**; it stayed in its channels
+  until its grace period ended. Connections now have one `phase`
+  (pending, live, parked, closed) with checked transitions.
+- **SDK: close() during a reconnect left a live agent behind**; a failed
+  rejoin forgot channels after any error; a throwing `reconnected` listener
+  opened a second connection. The client now has one connection state.
+- **MCP bridge closed while connecting left a zombie agent** reconnecting
+  forever (remote MCP sessions ended early).
+- **CLI listeners went deaf after a hub restart** (the agent id changed) and
+  swallowed failed rejoins; rejoining is now a retried step.
+- **Lock holder**: a duplicate holder deleted the live holder's socket after
+  3 minutes; re-taking locks after a hub restart could leave one untracked.
+- **Device bridge**: a device unplugged during start left an orphaned agent.
+- **`crosstalk run`**: Ctrl-C while acquiring a slot still ran the command; a
+  queued wait hung forever after a hub restart.
+- **Wake supervisor**: could wake an agent twice; a failed check was never
+  retried; a failed wake dropped its triggers.
+- **Wake hooks**: a mention during the cooldown was dropped; it is now sent
+  when the cooldown ends.
+- **State restore** closes claims and questions of agents that didn't come
+  back, instead of leaving them stalled and open forever.
+- **Server shutdown** saves state before closing remote-MCP agents, and
+  `close()` is idempotent. A stopped tunnel's URL is no longer advertised.
+- **HTTP client**: only a 401 starts a new session (a rate limit used to mint
+  a duplicate identity). `crosstalk inbox` keeps a question if answering it
+  fails. `crosstalk up` and `crosstalk llm` say so when their channel is lost.
+
 ## [2.15.0] - 2026-11-06
 
 The CrossTalk internet hub is the default.
@@ -621,7 +662,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.16.0...HEAD
+[2.16.0]: https://github.com/ajokhai/cross-talk/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/ajokhai/cross-talk/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/ajokhai/cross-talk/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/ajokhai/cross-talk/compare/v2.12.0...v2.13.0

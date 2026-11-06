@@ -388,3 +388,28 @@ test('HTTP agents get a ready-to-run listener on session, create and join, and t
     await server.close();
   }
 });
+
+test('a mention inside the cooldown is not dropped: the sweep sends it when the cooldown ends', async () => {
+  const { hub, agent, posts, settle, tick } = setup();
+  const a = agent('alice');
+  const b = agent('bob');
+  const { channel } = await a.ok<ChannelSnapshot>({ type: 'channel.create', name: 'cool' });
+  await b.ok({ type: 'channel.join', channel: channel.id });
+  await b.ok({ type: 'wake.set', channel: channel.id, url: 'https://hooks.example.com/b', cooldownSeconds: 60 });
+  await a.ok({ type: 'message.send', channel: channel.id, content: '@bob first' });
+  await settle();
+  assert.equal(posts.length, 1);
+  tick(10_000);
+  await a.ok({ type: 'message.send', channel: channel.id, content: '@bob the important one' });
+  hub.sweep();
+  await settle();
+  assert.equal(posts.length, 1, 'still cooling down');
+  tick(51_000);
+  hub.sweep();
+  await settle();
+  assert.equal(posts.length, 2, 'sent once the cooldown ended');
+  assert.equal(JSON.parse(posts[1].body).text, '@bob the important one');
+  hub.sweep();
+  await settle();
+  assert.equal(posts.length, 2, 'sent once only');
+});

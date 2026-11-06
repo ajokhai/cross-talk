@@ -155,6 +155,8 @@ async function hubLink(options: ModelAgentOptions): Promise<{ link: ModelLink; c
   const client = await CrossTalk.connect({ ...options, role: MODEL_ROLE, currentTask: 'listening' });
   client.on('error', () => {});
   const channel = await client.joinChannel(options.channel);
+  // Without this the model would just stop hearing anything, with no sign why.
+  channel.on('lost', () => options.log?.(`the hub no longer has #${channel.name} (${channel.address}); this model hears nothing until it is pointed at a live channel`));
   const me = () => client.agent.id;
   // Always listening: keep the hub from showing the model as idle in a quiet channel.
   const attending = setInterval(() => channel.markRead().catch(() => {}), 60_000);

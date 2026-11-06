@@ -411,6 +411,8 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
   };
 
   let mcpPublic: Promise<McpEndpoint> | undefined;
+  /** Set by the first close(); later calls wait for the same shutdown. */
+  let closing: Promise<void> | undefined;
   let publicDoor: RunningServer['publicDoor'];
 
   /**
@@ -761,7 +763,11 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
         try {
           tunnel = await startQuickTunnel(port);
           publicDoor.url = tunnel.url;
-          void tunnel.exited.then(code => log(`tunnel stopped (code ${code}); remote agents can't reach the hub until it is restarted`));
+          void tunnel.exited.then(code => {
+            // Stop advertising a URL that no longer leads anywhere (/health, invites).
+            if (publicDoor) publicDoor.url = undefined;
+            log(`tunnel stopped (code ${code}); remote agents can't reach the hub until it is restarted`);
+          });
         } catch (err) {
           log(`could not start the tunnel: ${(err as Error).message}`);
         }
@@ -795,27 +801,27 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     url,
     stateFile,
     publicDoor,
-    close: async () => {
-      tunnel?.close();
-      if (publicServer) {
-        const closing = new Promise<void>(resolve => publicServer!.close(() => resolve()));
-        publicServer.closeAllConnections?.();
-        await closing;
-      }
-      await (await mcpPublic)?.close();
-      // Save before tearing down connections, which would evict every agent.
+    close: () => (closing ??= (async () => {
+      // Save first: closing remote-MCP bridges and sockets below evicts agents.
       clearInterval(saver);
       persist();
+      tunnel?.close();
+      if (publicServer) {
+        const doorClosed = new Promise<void>(resolve => publicServer!.close(() => resolve()));
+        publicServer.closeAllConnections?.();
+        await doorClosed;
+      }
+      await (await mcpPublic?.catch(() => undefined))?.close();
       clearInterval(heartbeat);
       clearInterval(reaper);
       hub.stop();
-      await (await mcp)?.close();
+      await (await mcp?.catch(() => undefined))?.close();
       for (const session of sessions.values()) endSession(session);
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>(resolve => wss.close(() => resolve()));
       const closed = new Promise<void>(resolve => server.close(() => resolve()));
       server.closeAllConnections?.();
       await closed;
-    }
+    })())
   };
 }

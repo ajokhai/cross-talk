@@ -445,6 +445,11 @@ program
     ch.on('lock.contended', e => print(red(`⚠ ${e.requester.name} wants ${e.lock.file}, which you hold`)));
     ct.on('disconnected', () => print(red('disconnected, reconnecting…')));
     ct.on('reconnected', () => print(green('reconnected')));
+    ch.on('lost', () => {
+      // The hub no longer has this conversation: sending more would go nowhere.
+      print(red(`✖ the hub no longer has #${ch.name} (it restarted without its saved state). Start a new one with crosstalk new.`));
+      void ct.close().finally(() => process.exit(1));
+    });
 
     rl.prompt();
     rl.on('line', async line => {
@@ -599,8 +604,10 @@ program
           const n = Number(text);
           const answer = Number.isInteger(n) && n >= 1 && n <= current.options.length ? current.options[n - 1] : text;
           const q = current;
-          queue.shift();
+          // Off the queue only once the hub has the answer: a failed answer stays to retry.
           await here!.answer(q.id, answer);
+          const at = queue.indexOf(q);
+          if (at >= 0) queue.splice(at, 1);
           print(green(`✔ answered ${q.from.name}: ${answer}`));
         }
       } catch (err) {
