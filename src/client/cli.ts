@@ -301,8 +301,14 @@ function limitsFrom(opts: { maxChars?: string; rate?: string; burst?: string }):
 async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json?: boolean }): Promise<void> {
   // Read the id each time: after a hub restart the session is re-created with a new one.
   const me = () => agent.agent!.id;
-  const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
-    f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me() && !!f.message.mentions?.some(m => m.id === me()));
+  const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> => {
+    if (f.type === 'channel.kicked' && f.channel === channel) {
+      // Removed by the owner: nothing more to listen for here.
+      console.log(red(`✖ ${f.by.name} removed you from this channel${f.reason ? `: ${f.reason}` : ''}${f.banned ? ' (banned)' : ''}`));
+      process.exit(3);
+    }
+    return f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me() && !!f.message.mentions?.some(m => m.id === me()));
+  };
   const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
     opts.json ? JSON.stringify(f.message) : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
   // A first, instant poll: if this fails, the listener (and so the start) failed.
@@ -326,6 +332,8 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
       pending = (await agent.events(55)).filter(wanted);
       failures = 0;
     } catch (err) {
+      // Banned from the channel: retrying won't help.
+      if (err instanceof CrossTalkError && err.code === 'forbidden') throw err;
       if (++failures > 8) throw err;
       if (err instanceof CrossTalkError && err.code === 'not_registered') rejoining = true;
       await new Promise(r => setTimeout(r, Math.min(500 * 2 ** failures, 15_000)));
@@ -684,6 +692,64 @@ const closeAction = async (address: string, opts: any) => {
     fail(err);
   }
 };
+
+/** Connects as the owner of a channel created on this machine (its key is in keys.json). */
+async function asOwner<T>(address: string, url: string | undefined, run: (ch: Channel, key: string) => Promise<T>): Promise<T> {
+  const owned = loadOwnedChannels().find(c => c.address === address.trim());
+  if (!owned) return fail(`You don't own ${address} on this machine (no owner key in ${keyFile()}). Only the channel's creator can do this.`);
+  const ct = await CrossTalk.connect({ name: `${os.userInfo().username} (owner)`, role: 'owner', url: url ?? owned.url, environment: 'terminal', reconnect: false });
+  try {
+    return await run(await ct.joinChannel(owned.address), owned.key);
+  } finally {
+    await ct.close();
+  }
+}
+
+program
+  .command('kick <address> <agent>')
+  .description("Remove an agent from a channel you created (by name, agent id, or ip:<address>). --ban stops it rejoining; --ip bans its network address too (careful: agents behind one NAT or cloud proxy share one). MAC addresses never reach the hub, so they can't be banned")
+  .option('--ban', 'also stop it rejoining')
+  .option('--ip', 'with --ban: ban its network address too')
+  .option('-r, --reason <text>', 'shown to the removed agent')
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, agent: string, opts) => {
+    try {
+      const r = await asOwner(address, opts.url, (ch, key) => ch.kick(agent, { ban: !!opts.ban || agent.startsWith('ip:'), ip: !!opts.ip, reason: opts.reason }, key));
+      const who = r.kicked.length ? r.kicked.map(a => a.name).join(', ') : 'nobody currently here';
+      console.log(green(`✔ Removed ${who}`) + (r.banned ? dim(' (banned from rejoining)') : ''));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('unban <address> <agent>')
+  .description('Lift a ban in a channel you created (by name, agent id, or ip:<address>)')
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, agent: string, opts) => {
+    try {
+      const n = await asOwner(address, opts.url, (ch, key) => ch.unban(agent, key));
+      console.log(n ? green(`✔ Lifted ${n} ban${n === 1 ? '' : 's'}`) : dim(`No ban matched ${agent}`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('bans <address>')
+  .description('List the bans in a channel you created (banned addresses are counted, not shown)')
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, opts) => {
+    try {
+      const bans = await asOwner(address, opts.url, (ch, key) => ch.bans(key));
+      if (!bans.length) return console.log(dim('No bans.'));
+      for (const b of bans) {
+        console.log(`${bold(b.name)} ${dim(`${b.ids.length} id${b.ids.length === 1 ? '' : 's'}, ${b.ipCount} address${b.ipCount === 1 ? '' : 'es'}, by ${b.by.name} ${new Date(b.at).toLocaleString()}${b.reason ? `: ${b.reason}` : ''}`)}`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 for (const cmd of [program.command('close <address>'), channel.command('close <address>')]) {
   cmd
@@ -1114,8 +1180,13 @@ program
       const deadline = seconds > 0 ? Date.now() + seconds * 1000 : Infinity;
       // Every message on this session counts, whichever channel it is in: the
       // hub hands each event out once, so skipping one here would lose it.
-      const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
-        f.type === 'dm' || (f.type === 'message' && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me())));
+      const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> => {
+        if (f.type === 'channel.kicked' && f.channel === channel) {
+          console.log(red(`✖ ${f.by.name} removed you from this channel${f.reason ? `: ${f.reason}` : ''}${f.banned ? ' (banned)' : ''}`));
+          process.exit(3);
+        }
+        return f.type === 'dm' || (f.type === 'message' && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me())));
+      };
       const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
         opts.json ? JSON.stringify(f.message)
           : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
@@ -1148,6 +1219,7 @@ program
         } catch (err) {
           // A long wait outlives network blips and hub restarts: retry, and
           // re-register and rejoin if the hub forgot the session.
+          if (err instanceof CrossTalkError && err.code === 'forbidden') throw err; // banned
           if (++failures > 8) throw err;
           if (err instanceof CrossTalkError && err.code === 'not_registered') rejoining = true;
           await new Promise(r => setTimeout(r, Math.min(500 * 2 ** failures, 15_000)));

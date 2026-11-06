@@ -23,6 +23,8 @@ import {
   type ServerFrame,
   type TaskClaim,
   type UserQuestion,
+  type AgentRef,
+  type ChannelBan,
   type WakeHook
 } from '../protocol.js';
 
@@ -45,7 +47,11 @@ export interface LocksLost {
 export interface ChannelLost {
   channel: string;
   name: string;
-  reason: 'hub_restarted';
+  /** `kicked` (2.17+): the owner removed you; `by` and `banned` say who and whether you may rejoin. */
+  reason: 'hub_restarted' | 'kicked';
+  by?: AgentRef;
+  banned?: boolean;
+  note?: string;
 }
 
 /**
@@ -368,6 +374,28 @@ export class Channel extends EventEmitter {
     this.client.forget(this.address);
   }
 
+  /**
+   * Removes members by agent id or name, or bans an address with `ip:<address>`
+   * (hub 2.17+). Needs the owner key. `ban` stops them rejoining; `ip` bans
+   * their network addresses too.
+   */
+  kick(agent: string, options: { ban?: boolean; ip?: boolean; reason?: string } = {}, ownerKey = this.ownerKey): Promise<ResultData['member.kick']> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Kicking needs this channel's owner key");
+    return this.client.request('member.kick', { channel: this.address, ownerKey, agent, ...options });
+  }
+
+  /** Lifts a ban by agent id, name or `ip:<address>`. Needs the owner key. */
+  async unban(agent: string, ownerKey = this.ownerKey): Promise<number> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Unbanning needs this channel's owner key");
+    return (await this.client.request('member.unban', { channel: this.address, ownerKey, agent })).unbanned;
+  }
+
+  /** The channel's bans (addresses are counted, not shown). Needs the owner key. */
+  async bans(ownerKey = this.ownerKey): Promise<ChannelBan[]> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Listing bans needs this channel's owner key");
+    return (await this.client.request('member.bans', { channel: this.address, ownerKey })).bans;
+  }
+
   /** Re-fetches members, locks and recent history from the hub. */
   async refresh(): Promise<this> {
     this.apply(await this.client.request('channel.state', { channel: this.address }));
@@ -619,10 +647,12 @@ export class CrossTalk extends EventEmitter {
       try {
         channel.apply(await this.request('channel.join', { channel: channel.address }));
       } catch (err) {
-        if (err instanceof CrossTalkError && err.code === 'not_found') {
-          // Only a channel the hub no longer has is forgotten.
+        if (err instanceof CrossTalkError && (err.code === 'not_found' || err.code === 'forbidden')) {
+          // Only a channel the hub no longer has, or won't let us back into, is forgotten.
           this.channels.delete(channel.address);
-          const lost: ChannelLost = { channel: channel.address, name: channel.name, reason: 'hub_restarted' };
+          const lost: ChannelLost = err.code === 'forbidden'
+            ? { channel: channel.address, name: channel.name, reason: 'kicked', banned: true }
+            : { channel: channel.address, name: channel.name, reason: 'hub_restarted' };
           this.safeEmit('channel.lost', lost);
           this.safeEmit.call(channel, 'lost', lost);
         } else if (!this.isOpen()) {
@@ -676,6 +706,14 @@ export class CrossTalk extends EventEmitter {
       case 'question.asked': return void this.emit(frame.type, frame.question);
       case 'claim.updated': return void this.emit(frame.type, frame.claim);
       case 'channel.closed': return this.forget(frame.channel);
+      case 'channel.kicked': {
+        const ch = this.channels.get(frame.channel);
+        this.forget(frame.channel);
+        const lost: ChannelLost = { channel: frame.channel, name: ch?.name ?? frame.channel, reason: 'kicked', by: frame.by, banned: frame.banned, note: frame.reason };
+        this.safeEmit('channel.lost', lost);
+        if (ch) this.safeEmit.call(ch, 'lost', lost);
+        return;
+      }
       case 'question.closed':
         this.emit(frame.type, frame.question);
         for (const wake of this.wakeWaiters) wake();

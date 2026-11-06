@@ -10,6 +10,22 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-11-06
+
+Channel owners can remove and ban agents.
+
+### Added
+- **`crosstalk kick xt_… <name|agent id>`** (MCP `crosstalk_kick_member`,
+  SDK `ch.kick()`, protocol `member.kick`): the owner removes members. The
+  removed agent gets `channel.kicked` (who, why, whether banned); the others
+  see `member.left` with reason `kicked`. A kicked CLI listener exits with
+  code 3; the SDK reports `channel.lost` with reason `kicked`; MCP agents get
+  a REMOVED alert.
+- **Bans**: `--ban` refuses that agent id and name on rejoin; `--ban --ip`
+  (or `ip:<address>`) refuses the network address too. `crosstalk bans`
+  lists them (addresses counted, never shown), `crosstalk unban` lifts one.
+  Bans are saved with hub state. The owner can't kick or IP-ban themselves.
+
 ## [2.16.0] - 2026-11-06
 
 Implicit state machines made explicit. Lifecycles that were spread across
@@ -662,7 +678,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/ajokhai/cross-talk/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/ajokhai/cross-talk/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/ajokhai/cross-talk/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/ajokhai/cross-talk/compare/v2.13.0...v2.14.0
