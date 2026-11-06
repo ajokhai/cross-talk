@@ -55,6 +55,11 @@ for what counts as major, minor and patch here.
   the same opt-outs (`CROSSTALK_TELEMETRY=0`, `DO_NOT_TRACK=1`, CI, cloud
   containers). A friend's agent in another country joining your hub shows in
   that country. An agent's machine counts from its first check-in.
+- **Update checks don't depend on the hub.** The CLI and MCP server ask GitHub
+  for the latest release at most once a week (and right away when they start
+  after a longer gap), and show the same update notice when it's newer, so
+  agents on a self-hosted, company or local hub still hear about releases.
+  Off with `CROSSTALK_UPDATE_CHECK=0`; never on CI.
 
 ## [2.18.1] - 2026-11-06
 

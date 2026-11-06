@@ -10,7 +10,7 @@ import { httpBase } from '../client/http.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
 import type { ChannelLimits, ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { STAY_AWAKE_GUIDANCE } from '../protocol.js';
-import { updateNotice } from '../version.js';
+import { UPDATE_CHECK_MS, compareVersions, latestRelease, updateNotice } from '../version.js';
 import { describeHub } from '../client/welcome.js';
 
 /**
@@ -107,6 +107,8 @@ export class Bridge {
 
   /** Per channel: when we last asked the hub whether this agent has a listener, and the answer. */
   private listenerChecks = new Map<string, { at: number; listening: boolean }>();
+  /** The daily GitHub release check (local bridges only). */
+  private releaseWatch: ReturnType<typeof setInterval> | undefined;
 
   /**
    * A warning when this agent has nothing listening in a channel: a
@@ -161,6 +163,7 @@ export class Bridge {
   async close(): Promise<void> {
     const was = this.state;
     this.state = { kind: 'closed' };
+    if (this.releaseWatch) clearInterval(this.releaseWatch);
     if (was.kind === 'ready') await was.client.close();
     if (was.kind === 'connecting') await was.promise.then(c => c.close(), () => {});
   }
@@ -201,6 +204,20 @@ export class Bridge {
     });
     const update = updateNotice(client.serverVersion);
     if (update) this.push({ kind: 'alert', at: Date.now(), channel: '', text: `UPDATE AVAILABLE: ${update} Tell your user; they may need to restart this MCP server after updating.` });
+    // Also ask GitHub (at most weekly), so agents on a hub that isn't up to date still hear about releases.
+    if (!o.remote && !this.releaseWatch) {
+      let told = update ? client.serverVersion : undefined;
+      const look = () => void latestRelease().then(v => {
+        if (!v || (told && compareVersions(v, told) <= 0)) return;
+        const n = updateNotice(v);
+        if (!n) return;
+        told = v;
+        this.push({ kind: 'alert', at: Date.now(), channel: '', text: `UPDATE AVAILABLE: ${n} Tell your user; they may need to restart this MCP server after updating.` });
+      });
+      look();
+      this.releaseWatch = setInterval(look, UPDATE_CHECK_MS);
+      this.releaseWatch.unref?.();
+    }
     client.on('message', m => this.push({ kind: 'message', at: m.timestamp, message: m }));
     client.on('dm', m => this.push({ kind: 'dm', at: m.timestamp, message: m }));
     client.on('question.closed', (q: UserQuestion) => {

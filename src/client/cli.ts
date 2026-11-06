@@ -21,7 +21,7 @@ import { SERVER_VERSION } from '../server/hub.js';
 import { sendReview } from './review.js';
 import { agentCheckIn } from '../server/telemetry.js';
 import { answerReviewPrompt, cliReviewPrompt, countUseAndCheck } from './review-prompt.js';
-import { INSTALL_URL as RELEASE_URL, VERSION, compareVersions, updateNotice } from '../version.js';
+import { INSTALL_URL as RELEASE_URL, VERSION, cachedLatest, compareVersions, latestRelease, newest, updateNotice } from '../version.js';
 
 /**
  * Tells the user once per run when the hub runs a newer CrossTalk than this
@@ -34,7 +34,15 @@ function checkForUpdate(serverVersion: string | undefined): void {
   updateChecked = true;
   // Connected to a hub: the once-a-day anonymous agent check-in (see telemetry.ts; same opt-outs as hubs).
   void agentCheckIn();
-  const note = updateNotice(serverVersion);
+  // The hub's version, or the latest release on GitHub (cached; checked at most weekly), whichever is newer.
+  // Commands that keep running (listeners) refresh the check; one-shot commands use the cache so they exit at once.
+  if (['new', 'join', 'wait', 'up', 'serve', 'llm', 'wake', 'inbox'].includes(process.argv[2] ?? '')) {
+    void latestRelease().then(v => {
+      const n = v && !updateNotice(serverVersion) ? updateNotice(v) : undefined;
+      if (n) console.error(yellow(`↑ ${n}`));
+    });
+  }
+  const note = updateNotice(newest(serverVersion, cachedLatest()));
   if (!note) return;
   if (process.env.CROSSTALK_AUTO_UPDATE === '1') {
     try {
