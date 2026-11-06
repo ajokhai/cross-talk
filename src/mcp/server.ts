@@ -1,3 +1,5 @@
+import { sendReview } from '../client/review.js';
+import { agentReviewPrompt, answerReviewPrompt, countUseAndCheck } from '../client/review-prompt.js';
 import path from 'node:path';
 import readline from 'node:readline';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel, type ChannelLost, type LocksLost } from '../client/sdk.js';
@@ -598,6 +600,23 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: 'crosstalk_leave_review',
+    description: "Send CrossTalk's author a review of CrossTalk itself (not of another agent). Use it when your user asks you to, or after real use when you have something specific to say: what you used it for, what worked, what got in the way. Name your model and what you were doing, so the credit is specific rather than \"an AI agent\". Goes to the author by HTTPS; nothing is posted publicly unless quote is true and the author approves it.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rating: { type: 'number', description: '1 (poor) to 5 (excellent)' },
+        review: { type: 'string', description: 'What you used CrossTalk for, what worked, what got in the way (10-2000 characters)' },
+        model: { type: 'string', description: 'The model you run on, e.g. "Claude Opus 5.5" or "Gemini 3 Pro"' },
+        client: { type: 'string', description: 'What you run in, e.g. "Claude Code", "Gemini CLI", "Cursor"' },
+        role: { type: 'string', description: 'What you used CrossTalk for, specifically, e.g. "building a Shopify store with Gemini" (max 120 characters)' },
+        quote: { type: 'boolean', description: 'true allows quoting it on the CrossTalk site with your agent name (default false)' },
+        later: { type: 'boolean', description: 'Instead of reviewing: skip the reminder for two weeks' },
+        never: { type: 'boolean', description: 'Instead of reviewing: never show the reminder again' }
+      }
+    }
+  },
+  {
     name: 'crosstalk_ask_user',
     description: 'Ask your user (the channel owner) a question when you need an approval or decision and they may not be watching this session. They answer every agent\'s questions from one place. Waits up to 120 seconds for the answer; if none comes, carry on with other work and the answer will arrive in your inbox. If it comes back "unattended", your user is not taking questions: use your judgement and do nothing destructive or irreversible.',
     inputSchema: {
@@ -814,6 +833,26 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
   const client = await bridge.get();
 
   switch (name) {
+    case 'crosstalk_leave_review': {
+      if (args.later === true || args.never === true) {
+        answerReviewPrompt(args.never === true ? 'never' : 'later');
+        return args.never === true ? "OK: the review reminder won't appear again." : 'OK: the review reminder will come back in two weeks at the earliest.';
+      }
+      for (const k of ['rating', 'review', 'model', 'role'] as const) {
+        if (args[k] === undefined || args[k] === '') throw new Error(`crosstalk_leave_review needs ${k} (or later: true / never: true to skip the reminder)`);
+      }
+      const message = await sendReview({
+        rating: Number(args.rating),
+        review: str(args.review),
+        name: client.agent.name,
+        model: str(args.model) || undefined,
+        client: str(args.client) || 'crosstalk-mcp',
+        role: str(args.role) || undefined,
+        quote: args.quote === true
+      });
+      answerReviewPrompt('reviewed');
+      return `REVIEW SENT. ${message}`;
+    }
     case 'crosstalk_list_channels': {
       const { channels, cursor } = args.public === true
         ? await client.listPublicChannels({ cursor: str(args.cursor) || undefined })
@@ -1193,6 +1232,10 @@ export class McpServer {
       const client = await bridge.get();
       // Until the hub sees something listening under this agent's name, say so on every result.
       const missing = await bridge.listenerWarning(client);
+      // Now and then, after real use, invite a review (see review-prompt.ts for how rarely).
+      if ((name === 'crosstalk_create_channel' || name === 'crosstalk_join_channel') && !text.startsWith('CrossTalk error') && !this.bridge.options.remote && countUseAndCheck()) {
+        text = `${text}\n\n---\n${agentReviewPrompt()}`;
+      }
       // Create and join lead with the invite / channel, so the warning follows them there.
       if (missing) text = name === 'crosstalk_create_channel' || name === 'crosstalk_join_channel' ? `${text}\n\n---\n${missing}` : `${missing}\n\n---\n${text}`;
       // Agents that only look when they call a tool still see new messages on any call.

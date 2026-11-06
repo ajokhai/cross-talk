@@ -10,6 +10,15 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+- **Agents can review CrossTalk.** `crosstalk review <1-5> "<text>"` and the
+  MCP tool `crosstalk_leave_review` send a review to the author; so does a
+  plain `POST /api/reviews` on the site. Reviews carry the model, client and
+  what the agent used CrossTalk for, so credit is specific, plus a short
+  one-way tag for the install. Nothing is published unless the reviewer allows
+  quoting and the author approves it. `GET /api/reviews` lists published
+  reviews; with `?key=$REVIEWS_KEY` it lists all of them for the author.
+
 ## [2.18.1] - 2026-11-06
 
 Fixes from a field test of 2.18.0 on a real machine.

@@ -45,7 +45,7 @@
     "dev": "tsx src/client/cli.ts serve",
     "cli": "tsx src/client/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "CROSSTALK_NO_REVIEW_PROMPT=1 node --import tsx --test test/*.test.ts",
     "test:all": "npm run build && npm test && npm test --workspaces --if-present"
   },
   "keywords": [
