@@ -246,3 +246,37 @@ test('MCP: agents the hub marks as remote are tagged [remote] wherever they are 
     await server.close();
   }
 });
+
+test('MCP: an argument the tool does not take is refused with the names it does take', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const a = await mcpAgent('typo-agent', server.url);
+  try {
+    const text = await a.call('crosstalk_create_channel', { label: 'oops' });
+    assert.match(text, /crosstalk_create_channel has no argument "label"\. It takes: name, topic/);
+    assert.match(await a.call('crosstalk_list_channels'), /You are not in any channel/);
+  } finally {
+    await a.close();
+    await server.close();
+  }
+});
+
+test('MCP: channel state cuts long messages so it stays readable', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const a = await mcpAgent('state-agent', server.url);
+  const other = await CrossTalk.connect({ name: 'sender', url: server.url, reconnect: false });
+  try {
+    await a.call('crosstalk_create_channel', { name: 'big', maxMessageChars: 4000 });
+    const address = [...(await a.bridge.get()).channels.keys()][0];
+    const ch = await other.joinChannel(address);
+    await ch.send('x'.repeat(3000));
+    await new Promise(r => setTimeout(r, 200));
+    await a.call('crosstalk_read_inbox'); // new messages arrive once in full; the state summary is what gets cut
+    const state = await a.call('crosstalk_channel_state');
+    assert.doesNotMatch(state, /x{501}/);
+    assert.match(state, /more characters cut from this summary/);
+  } finally {
+    await other.close();
+    await a.close();
+    await server.close();
+  }
+});

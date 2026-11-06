@@ -10,6 +10,35 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.18.1] - 2026-11-06
+
+Fixes from a field test of 2.18.0 on a real machine.
+
+### Fixed
+- **`--listen-timeout` reads `90s`, `10m` and `2h`** as well as plain minutes,
+  and refuses anything else with an error before creating or joining. `1m`
+  used to be read as nothing and fall back to 5 minutes without a word. The
+  off message says "3 seconds" / "1 minute" / "2 hours".
+- **`crosstalk wait` is no longer woken by your own message.** Sending and then
+  waiting used to return at once with what you had just sent.
+- **`--local` warns when the hub on this device is older than the CLI** (often
+  one kept running by an old `crosstalk mcp`), and says how to replace it.
+- **MCP: the invite comes first.** On create and join, NO LISTENER now follows
+  the invite instead of sitting above it.
+- **MCP: NO LISTENER clears within seconds** of a listener starting (it was
+  re-checked once a minute, so agents started second listeners). The warning
+  also says not to start another one.
+- **MCP: arguments a tool doesn't take are refused** with the names it does
+  take (a `label` instead of `name` used to make a channel called #untitled).
+- **MCP: `crosstalk_channel_state` cuts long messages** to 500 characters, so a
+  channel carrying file parts no longer returns a result too big for the
+  client.
+
+### Notes
+- The clipboard copy on `crosstalk new` only happens in a terminal; a `new`
+  run as a background command prints the invite without "(copied)".
+
+
 ## [2.18.0] - 2026-11-06
 
 Clear choices on first run: online channels, channels on this device, or a

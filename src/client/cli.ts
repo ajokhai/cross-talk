@@ -18,7 +18,7 @@ import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
-import { INSTALL_URL as RELEASE_URL, updateNotice } from '../version.js';
+import { INSTALL_URL as RELEASE_URL, VERSION, compareVersions, updateNotice } from '../version.js';
 
 /**
  * Tells the user once per run when the hub runs a newer CrossTalk than this
@@ -159,7 +159,6 @@ function formatStalled(c: TaskClaim, channels: Channel[]): string {
   return `${yellow('⚠ stalled')} ${bold(c.owner.name)} on "${c.task}" ${dim(`in #${ch?.name ?? c.channel}, no update since ${ago(c.lastHeartbeat)} (promised every ${Math.round(c.everyMs / 60_000)}m)`)}`;
 }
 
-/** Prints the address and a paste-ready invite that also works for agents new to CrossTalk. */
 /** Puts text on the clipboard when this machine has one (macOS, Windows, Linux desktops). */
 function copyToClipboard(text: string): boolean {
   if (!process.stdout.isTTY) return false;
@@ -175,6 +174,7 @@ function copyToClipboard(text: string): boolean {
   return false;
 }
 
+/** Prints the address and a paste-ready invite that also works for agents new to CrossTalk. */
 function printShareHint(address: string, hub: string) {
   const invite = inviteText({ address, hub });
   const rule = dim('─'.repeat(Math.min(72, process.stdout.columns || 72)));
@@ -341,11 +341,30 @@ function notListening(address: string, name: string, url: string): void {
  * prints that and exits 0. Run as a background command, its exit wakes the
  * agent. Survives network blips and hub restarts (re-registers and rejoins).
  */
-/** Minutes a listener waits alone in a channel before turning itself off: --listen-timeout, else $CROSSTALK_LISTEN_TIMEOUT, else 5. 0: never. */
+/**
+ * Minutes a listener waits alone in a channel before turning itself off:
+ * --listen-timeout, else $CROSSTALK_LISTEN_TIMEOUT, else 5. 0: never.
+ * Plain numbers are minutes; 90s, 10m and 2h work too. Anything else is an
+ * error rather than a silent default.
+ */
 function listenTimeoutMinutes(opts: { listenTimeout?: string }): number {
-  const raw = opts.listenTimeout ?? process.env.CROSSTALK_LISTEN_TIMEOUT ?? '5';
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : 5;
+  const fromFlag = opts.listenTimeout !== undefined;
+  const raw = (opts.listenTimeout ?? process.env.CROSSTALK_LISTEN_TIMEOUT ?? '5').trim();
+  const m = /^(\d+(?:\.\d+)?)\s*(s|sec|secs|m|min|mins|h|hr|hrs)?$/i.exec(raw);
+  if (!m) {
+    throw new Error(`${fromFlag ? '--listen-timeout' : 'CROSSTALK_LISTEN_TIMEOUT'} must be minutes (like 5), or a number with s, m or h (like 90s, 10m, 2h); 0 keeps listening. Got "${raw}".`);
+  }
+  const n = Number(m[1]);
+  const unit = (m[2] ?? 'm').toLowerCase()[0];
+  return unit === 's' ? n / 60 : unit === 'h' ? n * 60 : n;
+}
+
+/** "1 minute", "90 seconds", "2 hours". */
+function formatMinutes(min: number): string {
+  if (min < 1) { const s = Math.round(min * 60); return `${s} second${s === 1 ? '' : 's'}`; }
+  if (min >= 60 && min % 60 === 0) { const h = min / 60; return `${h} hour${h === 1 ? '' : 's'}`; }
+  const r = Math.round(min * 10) / 10;
+  return `${r} minute${r === 1 ? '' : 's'}`;
 }
 
 async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json?: boolean; listenTimeout?: string; url?: string }): Promise<void> {
@@ -394,7 +413,7 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
       if ((await others().catch(() => 0)) > 0) {
         company = true;
       } else {
-        console.log(yellow(`⏸ Nobody else joined this channel within ${timeoutMin} minute${timeoutMin === 1 ? '' : 's'}, so your listener is now OFF. Tell your user it is off, and start it again when they say their other agents are ready: ${restart}`) + dim('  (--listen-timeout 0 keeps listening.)'));
+        console.log(yellow(`⏸ Nobody else joined this channel within ${formatMinutes(timeoutMin)}, so your listener is now OFF. Tell your user it is off, and start it again when they say their other agents are ready: ${restart}`) + dim('  (--listen-timeout 0 keeps listening.)'));
         process.exit(4);
       }
     }
@@ -421,6 +440,7 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
 
 const createAction = async (label: string | undefined, opts: any) => {
   try {
+    if (opts.listen) listenTimeoutMinutes(opts);
     const agent = new HttpAgent({ name: opts.name, url: opts.url });
     await agent.open();
     checkForUpdate(agent.serverVersion);
@@ -449,7 +469,7 @@ for (const cmd of [program.command('new [label]'), channel.command('create [labe
     .option('--rate <perMinute>', 'messages each member may post per minute (default: the hub\'s)')
     .option('--burst <n>', 'messages a member may post back to back (default: the hub\'s)')
     .option('--no-listen', 'just create it and exit, without starting the listener')
-    .option('--listen-timeout <minutes>', 'turn the listener off if nobody else joins within this many minutes; 0 keeps listening (default: $CROSSTALK_LISTEN_TIMEOUT or 5)')
+    .option('--listen-timeout <time>', 'turn the listener off if nobody else joins within this time (minutes, or 90s / 10m / 2h); 0 keeps listening (default: $CROSSTALK_LISTEN_TIMEOUT or 5)')
     .option('--json', 'print the message that wakes you as raw JSON')
     .option('-n, --name <agent>', 'your agent name', defaultName())
     .option('-u, --url <url>', 'hub URL', defaultUrl())
@@ -473,12 +493,13 @@ program
   .command('join <address>')
   .description('Join a conversation and start your listener: waits and exits when you are @mentioned or DMed (run it as a background command, again after each wake)')
   .option('--no-listen', 'just join and exit, without starting the listener')
-  .option('--listen-timeout <minutes>', 'turn the listener off if nobody else is here within this many minutes; 0 keeps listening (default: $CROSSTALK_LISTEN_TIMEOUT or 5)')
+  .option('--listen-timeout <time>', 'turn the listener off if nobody else is here within this time (minutes, or 90s / 10m / 2h); 0 keeps listening (default: $CROSSTALK_LISTEN_TIMEOUT or 5)')
   .option('--json', 'print the message that wakes you as raw JSON')
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (target: string, opts) => {
     try {
+      if (opts.listen) listenTimeoutMinutes(opts);
       const { agent, channel, snapshot } = await oneShot(target, opts);
       console.log(green(`✔ ${agent.agent!.name} joined #${snapshot.channel.name}`) + dim(` (${snapshot.members.length} here) ${describeHub(opts.url)}`));
       if (opts.listen) await listenUntilNeeded(agent, channel, opts);
@@ -1287,7 +1308,8 @@ program
           console.log(red(`✖ ${f.by.name} removed you from this channel${f.reason ? `: ${f.reason}` : ''}${f.banned ? ' (banned)' : ''}`));
           process.exit(3);
         }
-        return f.type === 'dm' || (f.type === 'message' && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me())));
+        // Your own messages never wake you (the hub echoes them back to you).
+        return f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me() && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me())));
       };
       const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
         opts.json ? JSON.stringify(f.message)
@@ -1508,7 +1530,15 @@ program
 async function ensureLocalHub(): Promise<void> {
   const health = `${LOCAL_URL.replace(/^ws/, 'http')}/health`;
   const up = () => fetch(health, { signal: AbortSignal.timeout(1000) }).then(r => r.ok, () => false);
-  if (await up()) return;
+  const running = await fetch(health, { signal: AbortSignal.timeout(1000) })
+    .then(async r => (r.ok ? ((await r.json()) as { version?: string }) : undefined), () => undefined);
+  if (running) {
+    // An older hub (often one embedded in a long-running `crosstalk mcp`) lacks newer features.
+    if (running.version && compareVersions(running.version, VERSION) < 0) {
+      console.error(yellow(`! The hub on this device (${LOCAL_URL}) runs CrossTalk ${running.version}, older than this CLI (${VERSION}); newer features may not work. Stop it (and any old \`crosstalk mcp\` or \`crosstalk serve\` that runs it) so the next --local command starts a current one.`));
+    }
+    return;
+  }
   const { spawn } = await import('node:child_process');
   const child = spawn(process.execPath, [process.argv[1], 'serve'], { detached: true, stdio: 'ignore', env: { ...process.env, CROSSTALK_NO_WELCOME: '1' } });
   child.unref();
