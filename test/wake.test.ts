@@ -84,13 +84,13 @@ test('wake: two checks at once wake the agent once, and a failed wake keeps its 
   try {
     s.skew(10 * 60_000); // gemini looks idle
     const sup: any = s.supervisor;
-    sup.pending.push({ at: Date.now(), text: 'alice: @gemini ping' });
+    sup.pending.push({ at: 0, text: 'alice: @gemini ping' }); // at 0: always counts as unseen
     const [one, two] = await Promise.all([sup.check(), sup.check()]);
     assert.deepEqual([one, two].sort(), [false, true], 'exactly one check woke it');
     assert.equal(s.prompts.length, 1);
 
     sup.opts.adapter = async () => { throw new Error('tmux gone'); };
-    sup.pending.push({ at: Date.now(), text: 'alice: @gemini again' });
+    sup.pending.push({ at: 0, text: 'alice: @gemini again' });
     await assert.rejects(sup.check(), /tmux gone/);
     assert.equal(sup.pending.length, 1, 'the trigger is kept for the next try');
     assert.equal(sup.busy, 'idle');
