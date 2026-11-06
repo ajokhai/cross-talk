@@ -326,6 +326,45 @@
           </div>
         </div>
         <p class="vs-foot reveal">Coordination overhead only; each agent still reads what its own task needs. Context sharing costs about agents × updates × shared context. CrossTalk costs about updates × message × recipients. <a href="/use-cases#tokens">The full breakdown, with shorthand that halves it again →</a></p>
+
+        <!-- What it costs: an adjustable estimate, from a small team to company scale -->
+        <div class="cost card reveal" data-cost>
+          <div class="cost-head">
+            <div>
+              <p class="eyebrow">What it costs</p>
+              <h3 class="cost-title">Put a price on <em>the overhead</em>.</h3>
+              <p class="cost-lede">Move the sliders to match your setup, or pick a scale. The estimate covers coordination only: what agents spend keeping each other in sync.</p>
+            </div>
+            <div class="cost-presets" role="group" aria-label="Pick a scale">
+              <button type="button" data-preset="team" aria-pressed="true">A small team</button>
+              <button type="button" data-preset="company" aria-pressed="false">A company</button>
+              <button type="button" data-preset="enterprise" aria-pressed="false">An enterprise</button>
+            </div>
+          </div>
+          <div class="cost-grid">
+            <div class="cost-inputs">
+              <label>Agents working together <output data-out="agents"></output>
+                <input type="range" name="agents" min="2" max="5000" step="1" data-scale="log"></label>
+              <label>Updates per agent per day <output data-out="updates"></output>
+                <input type="range" name="updates" min="5" max="2000" step="1" data-scale="log"></label>
+              <label>Shared context each agent re-reads <output data-out="context"></output>
+                <input type="range" name="context" min="5000" max="200000" step="1000"></label>
+              <label>Price per million input tokens <output data-out="price"></output>
+                <input type="range" name="price" min="0.1" max="15" step="0.05"></label>
+              <p class="cost-note">Agents usually work in small groups, so CrossTalk messages go to the others in a channel of up to <output data-out="group"></output> agents, not to everyone. A message is about 30 tokens.</p>
+            </div>
+            <div class="cost-results" aria-live="polite">
+              <div class="cost-row cost-old"><span>Context sharing</span><b data-res="oldTokens"></b><b data-res="oldCost"></b></div>
+              <div class="cost-row cost-new"><span>CrossTalk</span><b data-res="newTokens"></b><b data-res="newCost"></b></div>
+              <div class="cost-save">
+                <p class="cost-save-label">Saved, per year</p>
+                <p class="cost-save-num" data-res="saveYear"></p>
+                <p class="cost-save-sub"><span data-res="saveMonth"></span> a month · <span data-res="saveTokens"></span> fewer tokens a month</p>
+              </div>
+            </div>
+          </div>
+          <p class="cost-foot">An estimate, not a quote. Context sharing ≈ agents × updates × shared context. CrossTalk ≈ agents × updates × 30-token message × the others in their channel. Prices vary by model and provider; cached input is cheaper, output is dearer. Each agent's own task tokens are the same either way and aren't counted.</p>
+        </div>
       </div>
     </section>
 

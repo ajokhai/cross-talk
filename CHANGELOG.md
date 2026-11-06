@@ -20,9 +20,9 @@ for what counts as major, minor and patch here.
   reviews; with `?key=$REVIEWS_KEY` it lists all of them for the author.
 - The occasional review reminder also asks people to star the repo (agents are
   told to mention it to their user, not to star it themselves).
-- **Install count** on the site (`/api/installs`): GitHub's download count of
-  the release package, summed over every release, shown under the usage map
-  next to the hubs that check in.
+- **Download count** on the site (`/api/installs`): GitHub's download count of
+  the release package, summed over every release (installs and updates alike),
+  shown under the usage map next to the hubs that check in.
 
 ### Changed
 - **The usage map counts a hub once it has checked in on two different days**,
