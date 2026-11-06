@@ -409,13 +409,12 @@ function start() {
     // The copy.
     const bounds = [0, 0.2, 0.38, 0.58, 0.78, 1.01];
     const stacked = section.classList.contains('story-static');
+    // The copy follows the act you're on (it fades in CSS), not every frame of the scene.
+    const current = typeof act === 'number' && act >= 0 ? act : bounds.findIndex((b, i) => p >= b && p < bounds[i + 1]);
     acts.forEach((el, i) => {
-      const vis = stacked ? 1 : clamp(Math.min((p - bounds[i]) / 0.05 + 0.0001, (bounds[i + 1] - p) / 0.05));
-      el.style.opacity = vis;
-      el.style.transform = `translateY(${((1 - vis) * 18).toFixed(1)}px)`;
-      el.classList.toggle('on', vis > 0.5);
+      el.classList.toggle('on', stacked || i === current);
     });
-    ticks.forEach((t, i) => t.classList.toggle('on', p >= bounds[i] - 0.001));
+    ticks.forEach((t, i) => t.classList.toggle('on', i <= current));
 
     const gather = span(p, 0.4, 0.55);
     const clash = span(p, 0.2, 0.3) * (1 - span(p, 0.38, 0.44));
@@ -579,10 +578,48 @@ function start() {
   let frame = 0;
   let last = performance.now();
   let time = 0;
-  function progress() {
-    if (section.classList.contains('story-static')) return 0.9;
+  // Acts play by themselves; scrolling only chooses which act you're on.
+  // Each act has a stretch of the timeline it plays through, at its own pace.
+  const ACTS = [
+    { from: 0.0, to: 0.18, secs: 5 },    // alone in bubbles; the pile grows
+    { from: 0.2, to: 0.37, secs: 4 },    // reaching for the same file; it tears
+    { from: 0.38, to: 0.575, secs: 4 },  // bubbles pop, the table rises, they gather
+    { from: 0.58, to: 0.779, secs: 8 },  // lock, hand-off, notes, tests, a question answered
+    { from: 0.8, to: 1.0, secs: 4.5 }    // the pile blows away; results
+  ];
+  function actFromScroll() {
+    if (section.classList.contains('story-static')) return 4;
     const r = track.getBoundingClientRect();
-    return clamp(-r.top / Math.max(1, r.height - window.innerHeight));
+    const prog = clamp(-r.top / Math.max(1, r.height - window.innerHeight));
+    return Math.min(ACTS.length - 1, Math.floor(prog * ACTS.length * 0.9999 + 0.0001));
+  }
+  // Clicking a tick jumps to that act.
+  ticks.forEach((t, i) => {
+    t.setAttribute('role', 'button');
+    t.tabIndex = 0;
+    t.title = `Act ${i + 1}`;
+    const go = () => {
+      const top = track.getBoundingClientRect().top + window.scrollY;
+      const step = (track.offsetHeight - window.innerHeight) / ACTS.length;
+      window.scrollTo({ top: top + step * i + 2, behavior: 'smooth' });
+    };
+    t.addEventListener('click', go);
+    t.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
+  let act = -1;
+  function advance(dt) {
+    const now = actFromScroll();
+    const A = ACTS[now];
+    if (now !== act) {
+      // Coming back to an earlier act: rewind to its start quickly, then play it again.
+      if (act !== -1 && now < act) shown = Math.min(shown, A.from);
+      if (shown < A.from - 0.03 && now > act + 1) shown = A.from - 0.03;
+      act = now;
+    }
+    const speed = (A.to - A.from) / A.secs;
+    if (shown < A.from) shown = Math.min(A.from, shown + dt * 0.25);        // catch up into the act
+    else if (shown < A.to) shown = Math.min(A.to, shown + dt * speed);      // play it
+    else if (shown > A.to + 0.001) shown = Math.max(A.to, shown - dt * 0.4); // settle back if needed
   }
   function render() { composer.render(); }
   function loop(now) {
@@ -590,7 +627,7 @@ function start() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     time += dt;
-    shown += (progress() - shown) * Math.min(1, dt * 5);
+    advance(dt);
     update(shown, time, dt);
     render();
     if (visible && !document.hidden && !reduce) frame = requestAnimationFrame(loop);
