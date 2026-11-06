@@ -1,4 +1,6 @@
 import test from 'node:test';
+// Most tests ping each hub once; the 2-day rule has its own test below.
+process.env.USAGE_MIN_DAYS = '1';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 // @ts-ignore: plain JS Vercel functions
@@ -23,8 +25,13 @@ function memoryStore() {
       const _id = `${doc.hub}:${doc.day.toISOString().slice(0, 10)}`;
       if (!pings.has(_id)) pings.set(_id, doc.cell ? doc : { hub: doc.hub, country: doc.country, day: doc.day });  // $setOnInsert
     },
-    async usage(since: Date) {
-      const recent = [...pings.values()].filter(p => p.day >= since);
+    async usage(since: Date, minDays = 1) {
+      // Same rule as the Mongo store: a hub counts if it checked in on minDays days; its latest place wins.
+      const inWindow = [...pings.values()].filter(p => p.day >= since).sort((a, b) => +a.day - +b.day);
+      const days: Record<string, number> = {};
+      const latest: Record<string, any> = {};
+      for (const p of inWindow) { days[p.hub] = (days[p.hub] ?? 0) + 1; latest[p.hub] = p; }
+      const recent = Object.values(latest).filter(p => days[p.hub] >= minDays);
       const byCountry: Record<string, Set<string>> = {};
       for (const p of recent) (byCountry[p.country] ??= new Set()).add(p.hub);
       const byCell: Record<string, Set<string>> = {};
@@ -122,13 +129,23 @@ test('ping is rate limited per IP', withStore(async () => {
   assert.equal((await call(ping, 'POST', body(201), { ...headers, 'x-real-ip': '8.8.8.8' })).statusCode, 204);
 }));
 
+test('a hub seen on only one day is not counted (throwaway containers)', async () => {
+  const mem = memoryStore();
+  const day = 86400_000, now = Date.UTC(2026, 9, 10, 12);
+  await recordPing(mem, { id: id(1), country: 'US', ip: 'a', time: now - 3 * day });
+  await recordPing(mem, { id: id(1), country: 'US', ip: 'a', time: now });
+  for (let n = 2; n < 7; n++) await recordPing(mem, { id: id(n), country: 'US', ip: 'b' + n, time: now - n * day });
+  assert.deepEqual(await readUsage(mem, { time: now, minDays: 2 }), { windowDays: 30, total: 1, countries: { US: 1 }, places: [] });
+  assert.equal((await readUsage(mem, { time: now, minDays: 1 })).total, 6);
+});
+
 test('the 30-day window drops older pings', async () => {
   const mem = memoryStore();
   const day = 86400_000, now = Date.UTC(2026, 9, 10, 12);
   await recordPing(mem, { id: id(1), country: 'JP', ip: 'a', time: now - 29 * day });
   await recordPing(mem, { id: id(2), country: 'JP', ip: 'b', time: now - 30 * day });
   await recordPing(mem, { id: id(1), country: 'JP', ip: 'a', time: now });
-  assert.deepEqual(await readUsage(mem, { time: now }), { windowDays: 30, total: 1, countries: { JP: 1 }, places: [] });
+  assert.deepEqual(await readUsage(mem, { time: now, minDays: 1 }), { windowDays: 30, total: 1, countries: { JP: 1 }, places: [] });
 });
 
 test('storage failures are reported by category, never by message', async () => {

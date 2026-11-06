@@ -27,6 +27,7 @@ async function collector() {
 test('telemetry is on by default; the flag, CROSSTALK_TELEMETRY, DO_NOT_TRACK and CI services turn it off', () => {
   assert.equal(telemetryEnabled(undefined, {}), true);
   assert.equal(telemetryEnabled(false, {}), false);
+  assert.equal(telemetryEnabled(undefined, { CCR_AGENT_PROXY_ENABLED: '1' }), false, 'Claude Code cloud containers do not check in');
   assert.equal(telemetryEnabled(undefined, { CROSSTALK_TELEMETRY: '0' }), false);
   assert.equal(telemetryEnabled(true, { CROSSTALK_TELEMETRY: 'off' }), false, 'the env var vetoes the flag');
   assert.equal(telemetryEnabled(undefined, { DO_NOT_TRACK: '1' }), false);

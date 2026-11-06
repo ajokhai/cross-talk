@@ -127,19 +127,20 @@ export function mongoStore(env = process.env) {
             { upsert: true }
           );
         },
-        async usage(since) {
+        async usage(since, minDays = 1) {
+          // One row per hub (its latest place), kept only if it checked in on
+          // minDays different days: throwaway containers check in once.
           const [facets] = await pings.aggregate([
             { $match: { day: { $gte: since } } },
+            { $sort: { day: 1 } },
+            { $group: { _id: '$hub', days: { $sum: 1 }, country: { $last: '$country' }, cell: { $last: '$cell' } } },
+            { $match: { days: { $gte: minDays } } },
             { $facet: {
-              total: [{ $group: { _id: '$hub' } }, { $count: 'n' }],
-              countries: [
-                { $group: { _id: { country: '$country', hub: '$hub' } } },
-                { $group: { _id: '$_id.country', n: { $sum: 1 } } }
-              ],
+              total: [{ $count: 'n' }],
+              countries: [{ $group: { _id: '$country', n: { $sum: 1 } } }],
               cells: [
                 { $match: { cell: { $type: 'string' } } },
-                { $group: { _id: { country: '$country', cell: '$cell', hub: '$hub' } } },
-                { $group: { _id: { country: '$_id.country', cell: '$_id.cell' }, n: { $sum: 1 } } }
+                { $group: { _id: { country: '$country', cell: '$cell' }, n: { $sum: 1 } } }
               ]
             } }
           ]).toArray();
@@ -191,14 +192,22 @@ export async function recordPing(store, { id, country, cell, ip, time = Date.now
 }
 
 /**
+ * A hub counts once it has checked in on this many different days in the
+ * window. Short-lived containers (cloud sandboxes, one-off test runs) start a
+ * hub once with a fresh id and are gone the next day; real hubs check in daily.
+ * USAGE_MIN_DAYS overrides it (tests use 1).
+ */
+export const minActiveDays = (env = process.env) => Math.max(1, Number(env.USAGE_MIN_DAYS) || 2);
+
+/**
  * Distinct hubs per country over the last WINDOW_DAYS days (today included),
  * plus `places`: 1° cells with at least minCellHubs(total) hubs, as
  * { country, lat, lon, n } at the cell's centre. Hubs in smaller cells, or
  * with no location, appear only in their country's count.
  */
-export async function readUsage(store, { time = Date.now() } = {}) {
+export async function readUsage(store, { time = Date.now(), minDays = minActiveDays() } = {}) {
   const since = new Date(utcDay(time).getTime() - (WINDOW_DAYS - 1) * 86400_000);
-  const { total, countries, cells = [] } = await store.usage(since);
+  const { total, countries, cells = [] } = await store.usage(since, minDays);
   delete countries.XX;
   const places = cells
     .filter(c => c.n >= minCellHubs(total) && c.country !== 'XX' && countries[c.country])
