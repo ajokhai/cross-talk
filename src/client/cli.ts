@@ -389,7 +389,7 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
   // listening alone ──someone else joins──▶ listening with company (no timeout)
   //        └──alone for the timeout──▶ off (exit 4: tell your user; restart when they say so)
   const timeoutMin = listenTimeoutMinutes(opts);
-  const others = async () => (await agent.request('channel.state', { channel })).members.filter(m => m.id !== me()).length;
+  const others = async () => ((await agent.request('channel.state', { channel })).members ?? []).filter(m => m.id !== me()).length;
   let company = timeoutMin === 0 || (await others().catch(() => 0)) > 0;
   const aloneUntil = Date.now() + timeoutMin * 60_000;
   const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> => {
@@ -1360,7 +1360,7 @@ program
       if (opts.since && !opts.onMessage) {
         // Catch up first: what arrived between the last wait and this one.
         // An id the hub no longer has (too old, or from another channel) catches up nothing.
-        const { messages } = await agent.request('channel.state', { channel });
+        const messages = (await agent.request('channel.state', { channel })).messages ?? [];
         const at = messages.findIndex(m => m.id === opts.since);
         const missed = (at < 0 ? [] : messages.slice(at + 1))
           .filter(m => m.from.id !== me() && (!opts.mentions || !!m.mentions?.some(x => x.id === me())));
