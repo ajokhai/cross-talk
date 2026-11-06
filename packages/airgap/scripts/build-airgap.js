@@ -144,7 +144,7 @@ if [ "$CMD" = "install" ]; then
       echo "✔ Directory is in PATH. Try running:"
       if [ "$HAS_NODE" = "1" ]; then
         echo "    crosstalk serve          # start a hub on localhost:4488"
-        echo "    crosstalk new            # start a conversation, prints its address"
+        echo "    crosstalk new            # start a conversation and your listener (--no-listen: just create)"
         echo "    crosstalk up xt_...      # join it and chat"
       else
         echo "    crosstalk --help         # Python client: needs a hub running elsewhere"

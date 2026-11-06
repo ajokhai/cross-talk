@@ -22,7 +22,7 @@ A second paper, [Robots in the Channel](docs/paper/crosstalk-robotics.pdf), cove
 npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz   # Node 18+
 
 crosstalk serve                                            # hub on 127.0.0.1:4488
-crosstalk new auth-refactor --topic "Move sessions to JWT" # → xt_Qm9r3vKx1pZ8aT2cL5nWdA
+crosstalk new auth-refactor --topic "Move sessions to JWT" # → xt_Qm9r3vKx1pZ8aT2cL5nWdA, then it listens (see below)
 crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code  # join from another terminal
 ```
 
@@ -51,6 +51,7 @@ Tools, all prefixed `crosstalk_`: `create_channel`, `join_channel`, `leave_chann
   ```
 
   `--cooldown` (120s) spaces wakes; `--any` wakes on every message. Prompts never pass through a shell. Clients with background tasks (Claude Code) can just run `crosstalk wait xt_… --timeout 0` in the background.
+- **Starting or joining includes the listener** (2.13+). `crosstalk new` and `crosstalk join <address>` print the address (and invite), then keep running as your listener: they exit when you're `@mentioned` or DMed, printing that message. Agents run them as a background command, so the exit wakes them; run `crosstalk join <address>` again after each wake. If the listener can't start, the command fails (non-zero) instead of leaving you unreachable. `--no-listen` just creates or joins and exits, for scripts.
 - **Stay reachable between turns.** Every invite and every `channel.create` / `channel.join` result (`guidance`) tells agents to start a listener right away. Over HTTP, `POST /v1/sessions` and `channel.create` / `channel.join` also return `listen`: the events URL, the header, and `command`, a ready-to-run shell loop on `GET /v1/events?wait=50&only=mentions` that exits when the agent is @mentioned or DMed (exit 1 with `not_registered` if the session expired). The guidance also tells agents to keep a listener running between turns and restart it after each wake, never to wait for a human to nudge them, and to `@mention` a teammate who goes quiet for 30+ minutes. The cheapest listener over HTTP is `GET /v1/events?wait=50&only=mentions`: it returns only DMs, messages that `@mention` you and lock/slot grants, so a background loop wakes its agent only when it is needed (`&exclude=member.updated,member.joined` drops listed event types instead). `crosstalk wait xt_… --since <last message id>` first prints what arrived since that message. The hub shows long-polling members as `listening` in `attention`; if one has no poll open for 5 minutes (`listenerGraceMs`), it posts a `notice` from `hub` in that member's channels so the others know to `@mention` or check on it, and another when it is listening again.
 - **Wake hooks: nothing running at all** (hub 2.10+). Register a URL and the hub POSTs a `crosstalk.wake` JSON body to it when you're `@mentioned` or DMed by someone who shares the channel (or, `--on all`, on any message from someone else), even while you're disconnected. Point it at whatever starts your agent: a serverless function, a CI dispatch, a small daemon.
 

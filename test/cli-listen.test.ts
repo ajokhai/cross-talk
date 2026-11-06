@@ -1,0 +1,80 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { startServer } from '../src/server/index.js';
+import { CrossTalk } from '../src/client/sdk.js';
+
+const cli = path.resolve('src/client/cli.ts');
+const tsx = import.meta.resolve('tsx');
+
+/** Starts the CLI and collects its output; `done` resolves with the exit code. */
+function start(args: string[], env: Record<string, string>) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'xt-listen-'));
+  const child = spawn(process.execPath, ['--import', tsx, cli, ...args], { env: { ...process.env, NO_COLOR: '1', HOME: home, ...env } });
+  let out = '';
+  child.stdout.on('data', d => (out += d));
+  child.stderr.on('data', d => (out += d));
+  const done = new Promise<number>(resolve => child.on('exit', code => resolve(code ?? -1)));
+  return { child, done, out: () => out };
+}
+
+const until = async (check: () => boolean, ms = 25_000) => {
+  const t = Date.now();
+  while (!check()) {
+    if (Date.now() - t > ms) throw new Error('timed out');
+    await new Promise(r => setTimeout(r, 100));
+  }
+};
+
+test('crosstalk new starts the channel and its listener; it exits when the creator is @mentioned', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const other = await CrossTalk.connect({ name: 'other', url: server.url, reconnect: false });
+  const run = start(['new', 'listen-test', '--name', 'creator', '--url', server.url], {});
+  try {
+    await until(() => /Listening as creator/.test(run.out()));
+    const address = run.out().match(/xt_[A-Za-z0-9_-]{22}/)![0];
+    const ch = await other.joinChannel(address);
+    await ch.send('chatter that should not wake anyone');
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(run.child.exitCode, null, 'still listening through chatter');
+    await ch.send('@creator over to you');
+    assert.equal(await run.done, 0);
+    assert.match(run.out(), /over to you/);
+    assert.doesNotMatch(run.out().split('Listening as creator')[1], /chatter that should not/);
+  } finally {
+    run.child.kill();
+    await other.close();
+    await server.close();
+  }
+});
+
+test('crosstalk join starts the listener and exits on a DM; --no-listen just joins', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const owner = await CrossTalk.connect({ name: 'owner', url: server.url, reconnect: false });
+  try {
+    const ch = await owner.createChannel('join-test');
+    const quick = start(['join', ch.address, '--no-listen', '--name', 'quick', '--url', server.url], {});
+    assert.equal(await quick.done, 0);
+    assert.match(quick.out(), /quick joined #join-test/);
+    assert.doesNotMatch(quick.out(), /Listening/);
+
+    const run = start(['join', ch.address, '--name', 'joiner', '--url', server.url], {});
+    await until(() => /Listening as joiner/.test(run.out()));
+    await owner.dm('joiner', 'private ping');
+    assert.equal(await run.done, 0);
+    assert.match(run.out(), /private ping/);
+  } finally {
+    await owner.close();
+    await server.close();
+  }
+});
+
+test('crosstalk new fails (non-zero) when it cannot start the listener', async () => {
+  const run = start(['new', 'nohub', '--name', 'x', '--url', 'ws://127.0.0.1:9'], {});
+  const code = await run.done;
+  assert.notEqual(code, 0);
+  assert.doesNotMatch(run.out(), /Listening as/);
+});
