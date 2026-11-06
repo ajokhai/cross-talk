@@ -149,6 +149,18 @@ export async function ensureHolder(target: HolderTarget, command: string[]): Pro
   throw new Error(`The lock holder did not start within 20s; see ${path.join(holderDir(), 'holder.log')}`);
 }
 
+/**
+ * The blob id `file` (repo-relative) has in HEAD at `root`, or '' when HEAD
+ * doesn't have it (a new file, no commits yet, not a git checkout).
+ */
+function committedBlob(root: string, file: string): string {
+  try {
+    return execFileSync('git', ['rev-parse', '-q', '--verify', `HEAD:${file}`], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return '';
+  }
+}
+
 /** True when `file` (repo-relative) has uncommitted changes, staged or not, in the git checkout at `root`. */
 function hasUncommittedChanges(root: string, file: string): boolean {
   try {
@@ -161,6 +173,8 @@ function hasUncommittedChanges(root: string, file: string): boolean {
 interface Entry extends HeldLock {
   root: string;
   sawChanges: boolean;
+  /** The file's blob in HEAD when it was locked ('' if not committed then). */
+  baseBlob: string;
 }
 
 /** Runs the holder in this process until it holds nothing for a while, or is stopped. */
@@ -254,7 +268,9 @@ export async function runHolder(target: HolderTarget): Promise<void> {
       }
       const changed = hasUncommittedChanges(e.root, e.file);
       if (changed) e.sawChanges = true;
-      if (e.untilCommit && e.sawChanges && !changed) {
+      // Committed: changes were seen and are gone, or HEAD has a new version of
+      // the file (an edit and its commit can both land between two ticks).
+      if (e.untilCommit && !changed && (e.sawChanges || committedBlob(e.root, e.file) !== e.baseBlob)) {
         await release(e.file, 'committed');
         continue;
       }
@@ -285,7 +301,7 @@ export async function runHolder(target: HolderTarget): Promise<void> {
       case 'ping':
         return { ok: true, pid: process.pid };
       case 'list':
-        return { ok: true, locks: [...held.values()].map(({ root: _root, sawChanges: _seen, ...lock }) => lock) };
+        return { ok: true, locks: [...held.values()].map(({ root: _root, sawChanges: _seen, baseBlob: _base, ...lock }) => lock) };
       case 'lock': {
         // All or nothing: if any file is held by someone else, give back the ones this request took.
         const taken: string[] = [];
@@ -301,7 +317,8 @@ export async function runHolder(target: HolderTarget): Promise<void> {
             untilCommit: req.untilCommit,
             extended: 0,
             root: req.root,
-            sawChanges: already?.sawChanges ?? false
+            sawChanges: already?.sawChanges ?? false,
+            baseBlob: already?.baseBlob ?? committedBlob(req.root, file)
           };
           try {
             const lock = await ch.lock(file, req.reason, lease(entry));
@@ -316,7 +333,7 @@ export async function runHolder(target: HolderTarget): Promise<void> {
           }
         }
         log(`locked ${req.files.join(', ')}`);
-        return { ok: true, locks: req.files.map(f => held.get(f)!).map(({ root: _root, sawChanges: _seen, ...lock }) => lock) };
+        return { ok: true, locks: req.files.map(f => held.get(f)!).map(({ root: _root, sawChanges: _seen, baseBlob: _base, ...lock }) => lock) };
       }
       case 'unlock': {
         const files = req.all ? [...held.keys()] : req.files ?? [];
