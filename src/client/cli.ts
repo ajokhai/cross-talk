@@ -17,6 +17,30 @@ import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
+import { INSTALL_URL as RELEASE_URL, updateNotice } from '../version.js';
+
+/**
+ * Tells the user once per run when the hub runs a newer CrossTalk than this
+ * CLI. With CROSSTALK_AUTO_UPDATE=1 it installs the update itself (it takes
+ * effect on the next run).
+ */
+let updateChecked = false;
+function checkForUpdate(serverVersion: string | undefined): void {
+  if (updateChecked) return;
+  updateChecked = true;
+  const note = updateNotice(serverVersion);
+  if (!note) return;
+  if (process.env.CROSSTALK_AUTO_UPDATE === '1') {
+    try {
+      execFileSync('npm', ['install', '-g', RELEASE_URL], { stdio: 'ignore', timeout: 120_000 });
+      console.error(yellow(`↑ Updated CrossTalk to the latest release (hub runs ${serverVersion}); it takes effect from the next command.`));
+      return;
+    } catch {
+      console.error(yellow('! Automatic update failed; update by hand:'));
+    }
+  }
+  console.error(yellow(`↑ ${note}`));
+}
 
 // ANSI colours, off when NO_COLOR is set or output isn't a terminal (FORCE_COLOR turns them on).
 const colour = !('NO_COLOR' in process.env) && ('FORCE_COLOR' in process.env || (!!process.stdout.isTTY && process.env.TERM !== 'dumb'));
@@ -52,6 +76,7 @@ async function oneShot(address: string, opts: { name: string; url: string }) {
   if (!CrossTalk.isAddress(address)) fail(`"${address}" is not a channel address (they look like xt_Qm9r3vKx1pZ8aT2cL5nWdA)`);
   const agent = new HttpAgent({ name: opts.name, url: opts.url });
   await agent.open();
+  checkForUpdate(agent.serverVersion);
   const snapshot = await agent.request('channel.join', { channel: address });
   return { agent, channel: snapshot.channel.id, snapshot };
 }
@@ -306,6 +331,7 @@ const createAction = async (label: string | undefined, opts: any) => {
   try {
     const agent = new HttpAgent({ name: opts.name, url: opts.url });
     await agent.open();
+    checkForUpdate(agent.serverVersion);
     const snap = await agent.request('channel.create', {
       name: label,
       topic: opts.topic,
@@ -335,6 +361,19 @@ for (const cmd of [program.command('new [label]'), channel.command('create [labe
     .option('-u, --url <url>', 'hub URL', defaultUrl())
     .action(createAction);
 }
+
+program
+  .command('update')
+  .description('Install the latest CrossTalk release (CLI, hub and MCP server), then restart your listener and MCP server. Set CROSSTALK_AUTO_UPDATE=1 to update automatically whenever the hub runs a newer version')
+  .action(() => {
+    console.log(dim(`npm install -g ${RELEASE_URL}`));
+    try {
+      execFileSync('npm', ['install', '-g', RELEASE_URL], { stdio: 'inherit' });
+      console.log(green('✔ CrossTalk updated. Restart your listener (crosstalk join …) and your MCP server to use it.'));
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 program
   .command('join <address>')
@@ -370,6 +409,7 @@ program
     let ch: Channel;
     try {
       ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start, invite: opts.invite });
+      checkForUpdate(ct.serverVersion);
       ch = address ? await ct.joinChannel(address) : await ct.createChannel(opts.label, { limits: limitsFrom(opts) });
     } catch (err) {
       return fail(err);

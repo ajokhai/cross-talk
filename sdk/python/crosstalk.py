@@ -21,7 +21,7 @@ Two transports, picked automatically:
 The file also runs as a command-line tool: `python3 crosstalk.py --help`.
 """
 
-__version__ = "2.13.0"
+__version__ = "2.14.0"
 
 import json
 import os
@@ -63,6 +63,22 @@ def _lock_path(file: str) -> str:
         normalized = normalized[2:]
     return "" if normalized in (".", "/") else normalized
 
+
+
+def _version_tuple(v: str) -> tuple:
+    return tuple(int(p) if p.isdigit() else 0 for p in v.split("-")[0].split("."))
+
+
+def _warn_if_outdated(server_version: Optional[str]) -> None:
+    """Prints once to stderr when the hub runs a newer CrossTalk than this SDK."""
+    if not server_version or _version_tuple(server_version) <= _version_tuple(__version__):
+        return
+    print(
+        f"CrossTalk {server_version} is available (this Python SDK is {__version__}). "
+        "Update sdk/python/crosstalk.py from https://github.com/ajokhai/cross-talk "
+        "(what's new: https://github.com/ajokhai/cross-talk/blob/main/CHANGELOG.md).",
+        file=sys.stderr,
+    )
 
 class CrossTalkError(Exception):
     """A hub error. `code` is one of the protocol ErrorCodes, or 'timeout' / 'disconnected'."""
@@ -218,7 +234,7 @@ class _HttpTransport:
         self.session = ""
         created = self._call("POST", "/v1/sessions", hello["agent"])
         self.session = created["session"]
-        self.welcome = {"type": "welcome", "protocol": created.get("protocol"), "agent": created["agent"]}
+        self.welcome = {"type": "welcome", "protocol": created.get("protocol"), "agent": created["agent"], "serverVersion": created.get("serverVersion")}
         self._poller = threading.Thread(target=self._poll_loop, name="crosstalk-poll", daemon=True)
         self._poller.start()
 
@@ -395,7 +411,9 @@ class CrossTalk:
         self.transport_name = transport
         self._transport = cls(url, self.token, hello, self._dispatch, self._closed)
         self.agent: Dict[str, Any] = self._transport.welcome["agent"]
+        self.server_version: Optional[str] = self._transport.welcome.get("serverVersion")
         self.connected = True
+        _warn_if_outdated(self.server_version)
 
     @classmethod
     def connect(cls, name: str, url: str = DEFAULT_URL, token: Optional[str] = None, **options) -> "CrossTalk":

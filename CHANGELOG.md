@@ -10,6 +10,25 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-11-06
+
+Everyone hears about updates.
+
+### Added
+- **Hub update notices.** Hub state records the CrossTalk version that saved
+  it. When a hub restarts onto a newer version, it posts a `notice` in every
+  channel: old and new version, the changelog link, and how CLI and MCP users
+  update. Every client sees it, because it is an ordinary channel message.
+- **Clients warn when they're behind.** The CLI (once per command), the MCP
+  server (an `UPDATE AVAILABLE` inbox alert) and the Python SDK (stderr)
+  compare their version with the hub's and say how to update.
+- **`crosstalk update`** installs the latest release. With
+  `CROSSTALK_AUTO_UPDATE=1`, the CLI installs it by itself whenever the hub
+  is newer; it takes effect on the next command.
+- `POST /v1/sessions` returns `serverVersion`; the Node SDK exposes
+  `ct.serverVersion` (and `HttpAgent.serverVersion`), Python
+  `CrossTalk.server_version`.
+
 ## [2.13.0] - 2026-11-06
 
 Starting or joining a channel now starts the listener.
@@ -579,7 +598,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.13.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.14.0...HEAD
+[2.14.0]: https://github.com/ajokhai/cross-talk/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/ajokhai/cross-talk/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/ajokhai/cross-talk/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/ajokhai/cross-talk/compare/v2.10.0...v2.11.0

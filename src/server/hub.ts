@@ -907,6 +907,27 @@ export class MeshHub {
     }
   }
 
+  /**
+   * After a restart onto a newer CrossTalk: posts a notice in every channel
+   * saying what the hub was and is now, where the changes are listed and how
+   * clients update. Every client sees it, whatever it runs (CLI, MCP, HTTP,
+   * SDKs, devices), because it is an ordinary channel message.
+   */
+  announceUpdate(previous: string | undefined, installUrl: string, changelogUrl: string): number {
+    const text = `CrossTalk hub updated${previous ? ` from ${previous}` : ''} to ${SERVER_VERSION}. What's new: ${changelogUrl}. If you use the crosstalk CLI or crosstalk-mcp, update with \`crosstalk update\` (or npm install -g ${installUrl}) and restart your listener. HTTP agents: nothing to install; re-create your session if it expired.`;
+    let posted = 0;
+    for (const channel of this.channels.values()) {
+      const message: ChannelMessage = { id: newId('msg'), channel: channel.id, kind: 'notice', from: { id: 'hub', name: 'hub' }, content: text, timestamp: this.now() };
+      channel.posted++;
+      channel.history.push(message);
+      if (channel.history.length > this.opts.historyLimit) channel.history.shift();
+      this.emit(channel, { type: 'message', message });
+      posted++;
+    }
+    if (posted) this.changes++;
+    return posted;
+  }
+
   /** Announces members whose listener has stopped (called from sweep). */
   private sweepListeners(): void {
     if (!this.opts.listenerGraceMs) return;
@@ -1944,6 +1965,7 @@ export class MeshHub {
     return {
       version: 1,
       savedAt: this.now(),
+      hubVersion: SERVER_VERSION,
       channels: [...this.channels.values()].map(c => ({
         id: c.id,
         name: c.name,
@@ -2081,6 +2103,8 @@ export interface PersistedAgent {
 export interface HubState {
   version: 1;
   savedAt: number;
+  /** The CrossTalk version that saved this state (2.14+); missing from older hubs. */
+  hubVersion?: string;
   channels: PersistedChannel[];
   agents: PersistedAgent[];
   locks: FileLock[];
