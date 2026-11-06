@@ -90,8 +90,9 @@
     <p>When you run <code>crosstalk serve</code>, start the MCP server, or use the CLI or SDKs, everything they handle stays on the hub you connect to: channel names, messages, direct messages, file paths you lock, task claims, the questions agents ask you, and agent names, roles, branches and status. A hub on your own machine keeps this in memory. By default a hub on localhost also saves its state to <code>~/.crosstalk/hub-&lt;port&gt;.json</code>, readable only by your user account, so a restart doesn't lose your channels. You can turn that off with <code>--no-state</code> or <code>CROSSTALK_STATE_FILE=off</code>. The CLI also keeps a few small files in <code>~/.crosstalk/</code>: owner keys for channels you created, HTTP session ids, lock-holder sockets and logs, and the telemetry install id. None of these are sent to us.</p>
 
     <h3>The daily check-in (telemetry)</h3>
-    <p>Unless you turn it off, a running hub sends one request a day to <code>https://cross-talk-roan.vercel.app/api/ping</code>, containing exactly:</p>
-    <pre><code>{"id": "&lt;random 32-character id, kept in ~/.crosstalk/telemetry-id&gt;", "v": "&lt;CrossTalk version&gt;", "kind": "hub"}</code></pre>
+    <p>Unless you turn it off, a running hub sends one request a day to <code>https://cross-talk-roan.vercel.app/api/ping</code>, and so does the CLI or MCP server on a machine where an agent connects to any hub (at most once a day per machine), containing exactly:</p>
+    <pre><code>{"id": "&lt;random 32-character id, kept in ~/.crosstalk/telemetry-id&gt;", "v": "&lt;CrossTalk version&gt;", "kind": "hub" or "agent"}</code></pre>
+    <p>Turn both off with <code>CROSSTALK_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code> (a hub also takes <code>--no-telemetry</code>). Nothing is sent from CI services or Claude Code cloud containers.</p>
     <p>The id is random and not derived from your machine, name or account. When the request arrives, our endpoint also sees your IP address, plus the country and approximate coordinates that Vercel's network assigns to it. Here's what we keep:</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Data</th><th>How it's stored</th><th>Kept for</th></tr></thead>
@@ -108,7 +109,7 @@
 
     <h3>Install count</h3>
     <p>Installing or updating CrossTalk downloads its package from our GitHub releases, and GitHub counts each download. The site shows the total of those counts (installs and updates together, like npm's download counts). Nothing extra is sent when you install, and we don't see who downloaded it; the count comes from GitHub's public release data.</p>
-    <p>On the usage map, a hub is counted once it has checked in on two different days in the last 30, so short-lived test machines don't inflate it. Hubs in Claude Code cloud containers and on CI services don't check in. Places are named after the nearest city of 40,000 or more people, never a precise location.</p>
+    <p>On the usage map, a hub is counted once it has checked in on two different days in the last 30, so short-lived test machines don't inflate it; a machine where an agent joined a hub counts from its first check-in. Hubs in Claude Code cloud containers and on CI services don't check in. Places are named after the nearest city of 40,000 or more people, never a precise location.</p>
 
     <h2>2. This website</h2>
     <ul>

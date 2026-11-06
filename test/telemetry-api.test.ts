@@ -21,17 +21,21 @@ function memoryStore() {
       limits.set(key, (limits.get(key) ?? 0) + 1);
       return limits.get(key)!;
     },
-    async addPing(doc: { hub: string; country: string; cell?: string; day: Date }) {
+    async addPing(doc: { hub: string; country: string; cell?: string; day: Date; kind?: string }) {
       const _id = `${doc.hub}:${doc.day.toISOString().slice(0, 10)}`;
-      if (!pings.has(_id)) pings.set(_id, doc.cell ? doc : { hub: doc.hub, country: doc.country, day: doc.day });  // $setOnInsert
+      const { kind = 'hub', ...rest } = doc;
+      if (!pings.has(_id)) pings.set(_id, { ...(rest.cell ? rest : { hub: rest.hub, country: rest.country, day: rest.day }), kinds: [] });  // $setOnInsert
+      const row: any = pings.get(_id);
+      if (!row.kinds.includes(kind)) row.kinds.push(kind);   // $addToSet
     },
     async usage(since: Date, minDays = 1) {
       // Same rule as the Mongo store: a hub counts if it checked in on minDays days; its latest place wins.
       const inWindow = [...pings.values()].filter(p => p.day >= since).sort((a, b) => +a.day - +b.day);
       const days: Record<string, number> = {};
+      const agent: Record<string, boolean> = {};
       const latest: Record<string, any> = {};
-      for (const p of inWindow) { days[p.hub] = (days[p.hub] ?? 0) + 1; latest[p.hub] = p; }
-      const recent = Object.values(latest).filter(p => days[p.hub] >= minDays);
+      for (const p of inWindow) { days[p.hub] = (days[p.hub] ?? 0) + 1; latest[p.hub] = p; if ((p.kinds ?? []).includes('agent')) agent[p.hub] = true; }
+      const recent = Object.values(latest).filter(p => days[p.hub] >= minDays || agent[p.hub]);
       const byCountry: Record<string, Set<string>> = {};
       for (const p of recent) (byCountry[p.country] ??= new Set()).add(p.hub);
       const byCell: Record<string, Set<string>> = {};
@@ -90,7 +94,8 @@ test('parsePing accepts exactly the contract', () => {
   assert.equal(typeof parsePing(JSON.stringify({ id: id(1), v: '2.1.0', kind: 'hub', host: 'x' })), 'string');
   assert.equal(typeof parsePing(JSON.stringify({ id: 'ABC', v: '2.1.0', kind: 'hub' })), 'string');
   assert.equal(typeof parsePing(JSON.stringify({ id: id(1), v: 'latest', kind: 'hub' })), 'string');
-  assert.equal(typeof parsePing(JSON.stringify({ id: id(1), v: '2.1.0', kind: 'agent' })), 'string');
+  assert.deepEqual(parsePing(JSON.stringify({ id: id(1), v: '2.1.0', kind: 'agent' })), { id: id(1), v: '2.1.0', kind: 'agent' });
+  assert.equal(typeof parsePing(JSON.stringify({ id: id(1), v: '2.1.0', kind: 'bot' })), 'string');
   assert.equal(countryOf({ 'x-vercel-ip-country': 'de' }), 'DE');
   assert.equal(countryOf({}), 'XX');
 });
@@ -137,6 +142,18 @@ test('a hub seen on only one day is not counted (throwaway containers)', async (
   for (let n = 2; n < 7; n++) await recordPing(mem, { id: id(n), country: 'US', ip: 'b' + n, time: now - n * day });
   assert.deepEqual(await readUsage(mem, { time: now, minDays: 2 }), { windowDays: 30, total: 1, countries: { US: 1 }, places: [] });
   assert.equal((await readUsage(mem, { time: now, minDays: 1 })).total, 6);
+});
+
+test('an agent checking in from another country shows there on its first day', async () => {
+  const mem = memoryStore();
+  const day = 86400_000, now = Date.UTC(2026, 9, 10, 12);
+  // A hub in the US (seen on two days) and a friend's agent in China joining it once.
+  await recordPing(mem, { id: id(1), country: 'US', ip: 'a', time: now - day });
+  await recordPing(mem, { id: id(1), country: 'US', ip: 'a', time: now });
+  await recordPing(mem, { id: id(2), country: 'CN', ip: 'b', kind: 'agent', time: now });
+  // A throwaway hub seen once doesn't count.
+  await recordPing(mem, { id: id(3), country: 'US', ip: 'c', time: now });
+  assert.deepEqual((await readUsage(mem, { time: now, minDays: 2 })).countries, { US: 1, CN: 1 });
 });
 
 test('the 30-day window drops older pings', async () => {

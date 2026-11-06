@@ -102,12 +102,12 @@ export function telemetryId(file = path.join(os.homedir(), '.crosstalk', 'teleme
 }
 
 /** Sends one check-in. Resolves true on a 2xx, false on anything else; never throws. */
-export async function checkIn(url: string, id: string): Promise<boolean> {
+export async function checkIn(url: string, id: string, kind: 'hub' | 'agent' = 'hub'): Promise<boolean> {
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': `crosstalk-hub/${VERSION}` },
-      body: JSON.stringify({ id, v: VERSION, kind: 'hub' }),
+      headers: { 'Content-Type': 'application/json', 'User-Agent': `crosstalk-${kind}/${VERSION}` },
+      body: JSON.stringify({ id, v: VERSION, kind }),
       redirect: 'error',
       signal: AbortSignal.timeout(3000)
     });
@@ -138,4 +138,35 @@ export function startTelemetry(options: TelemetryOptions = {}): () => void {
   const timer = setInterval(() => void checkIn(url, id), options.intervalMs ?? DAY_MS);
   timer.unref();
   return () => clearInterval(timer);
+}
+
+/**
+ * The agent side of the check-in: a CLI or MCP agent that connects to any hub
+ * sends {id, v, kind: "agent"} from its own machine at most once a day, so the
+ * usage map shows where agents run, not only where hubs run (a friend's agent
+ * in another country joining your hub shows there). Same id file and the same
+ * opt-outs as hubs (CROSSTALK_TELEMETRY=0, DO_NOT_TRACK=1, CI, cloud
+ * containers). The last check-in day is kept in ~/.crosstalk/agent-checkin.
+ * Never throws and never delays the caller.
+ */
+export function agentCheckIn(options: { home?: string; now?: number; env?: NodeJS.ProcessEnv; url?: string } = {}): Promise<boolean> {
+  const env = options.env ?? process.env;
+  if (!telemetryEnabled(undefined, env)) return Promise.resolve(false);
+  const url = (options.url ?? env.CROSSTALK_TELEMETRY_URL ?? TELEMETRY_URL).trim();
+  if (!/^https:\/\//.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(url)) return Promise.resolve(false);
+  const dir = path.join(options.home ?? os.homedir(), '.crosstalk');
+  const stamp = path.join(dir, 'agent-checkin');
+  const today = new Date(options.now ?? Date.now()).toISOString().slice(0, 10);
+  try {
+    if (fs.readFileSync(stamp, 'utf8').trim() === today) return Promise.resolve(false);
+  } catch {
+    // Never checked in from this machine.
+  }
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(stamp, today + '\n', { mode: 0o600 });
+  } catch {
+    // Unwritable home: still check in, it just may happen again today.
+  }
+  return checkIn(url, telemetryId(path.join(dir, 'telemetry-id'), env), 'agent');
 }

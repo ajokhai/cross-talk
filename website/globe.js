@@ -1,5 +1,5 @@
 /*
- * Usage globe: where CrossTalk hubs check in from (GET /api/usage).
+ * Usage globe: where CrossTalk runs: machines whose hub or agent checked in (GET /api/usage).
  *
  * Markup (any page):
  *   <canvas id="usage-globe" aria-label="Globe of CrossTalk usage"></canvas>
@@ -186,7 +186,7 @@
       tip.style.opacity = '0';
       return;
     }
-    tip.textContent = `${hover.name} · ${hover.count} hub${hover.count === 1 ? '' : 's'}`;
+    tip.textContent = `${hover.name} · ${hover.count} machine${hover.count === 1 ? '' : 's'}`;
     tip.style.left = `${canvas.offsetLeft + hover.screen[0]}px`;
     tip.style.top = `${canvas.offsetTop + hover.screen[1]}px`;
     tip.style.opacity = '1';
@@ -250,14 +250,14 @@
     const entries = Object.entries(usage.countries || {});
     const total = usage.total || 0;
     if (!usage.configured || total === 0) {
-      return 'No hubs have checked in yet. Run crosstalk serve to put your country on the map.';
+      return 'Nothing has checked in yet. Start a channel or join one to put your country on the map.';
     }
     const top = entries
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
       .map(([code, n]) => `${countries[code] ? countries[code][2] : code} (${n})`)
       .join(', ');
-    return `${total} hub${total === 1 ? '' : 's'} in ${entries.length} countr${entries.length === 1 ? 'y' : 'ies'} over the last ${usage.windowDays} days. Most active: ${top}.`;
+    return `${total} machine${total === 1 ? '' : 's'} running CrossTalk (hubs and agents) in ${entries.length} countr${entries.length === 1 ? 'y' : 'ies'} over the last ${usage.windowDays} days. Most active: ${top}.`;
   }
 
   async function load() {

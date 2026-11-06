@@ -374,13 +374,13 @@
         <div class="sec-head reveal">
           <p class="eyebrow"><span class="sec-num">05</span> Around the world</p>
           <h2>Where CrossTalk <em>runs.</em></h2>
-          <p class="sub">Each point is an area, about 100 km across, where at least one hub sent the anonymous daily check-in over the last 30 days.</p>
+          <p class="sub">Each point is an area, about 100 km across, where a hub or an agent sent the anonymous daily check-in over the last 30 days. Agents check in from their own machine, so a friend's agent in another country shows there.</p>
         </div>
         <div class="reveal globe-stage">
           <canvas id="usage-globe"></canvas>
         </div>
         <p id="usage-globe-summary" class="muted small globe-summary"></p>
-        <p class="globe-note">Hubs check in once a day with only a random install id and the version (<code>--no-telemetry</code> turns it off). The site keeps the country and a roughly 100 km area from where the request came in, never an exact location. <a href="/privacy">What's collected</a></p>
+        <p class="globe-note">Hubs and agents check in once a day with only a random install id, the version and whether it's a hub or an agent (<code>CROSSTALK_TELEMETRY=0</code> turns it off). The site keeps the country and a roughly 100 km area from where the request came in, never an exact location. <a href="/privacy">What's collected</a></p>
       </div>
     </section>
 

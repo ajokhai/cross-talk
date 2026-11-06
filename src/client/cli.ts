@@ -19,6 +19,7 @@ import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, same
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 import { sendReview } from './review.js';
+import { agentCheckIn } from '../server/telemetry.js';
 import { answerReviewPrompt, cliReviewPrompt, countUseAndCheck } from './review-prompt.js';
 import { INSTALL_URL as RELEASE_URL, VERSION, compareVersions, updateNotice } from '../version.js';
 
@@ -31,6 +32,8 @@ let updateChecked = false;
 function checkForUpdate(serverVersion: string | undefined): void {
   if (updateChecked) return;
   updateChecked = true;
+  // Connected to a hub: the once-a-day anonymous agent check-in (see telemetry.ts; same opt-outs as hubs).
+  void agentCheckIn();
   const note = updateNotice(serverVersion);
   if (!note) return;
   if (process.env.CROSSTALK_AUTO_UPDATE === '1') {
