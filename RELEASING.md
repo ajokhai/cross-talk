@@ -60,6 +60,10 @@ microcontroller decoding the same bits:
    ```sh
    git push origin main --follow-tags
    ```
+   No tag push available (for example a sandbox that can push branches but
+   not tags)? Push the version bump to `main`, then run **Actions → Release →
+   Run workflow** with the version (`2.14.0`): it tests `main`, creates the
+   tag at that commit and publishes the release the same way.
 4. The **Release** workflow runs the full test suite. It then checks that the
    tag, `package.json` and the Python SDK agree, and publishes a GitHub release
    whose notes come from that version's changelog section.

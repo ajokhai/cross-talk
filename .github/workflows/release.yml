@@ -1,9 +1,16 @@
 name: Release
 
-# Push a tag like v2.1.0 (see RELEASING.md) to test and publish a GitHub release.
+# Push a tag like v2.1.0 (see RELEASING.md) to test and publish a GitHub release,
+# or run it by hand (Actions → Release → Run workflow) with the version that is
+# on main: it then tests main, creates the tag at that commit and publishes.
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version on main to release, e.g. 2.14.0 (package.json must match)'
+        required: true
 
 permissions:
   contents: write
@@ -15,12 +22,15 @@ jobs:
   release:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      # The tag being released: pushed (refs/tags/vX.Y.Z) or asked for by hand.
+      TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Check versions agree with the tag
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           pkg=$(node -p "require('./package.json').version")
           py=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' sdk/python/crosstalk.py)
           echo "tag=$tag package.json=$pkg python=$py"
@@ -29,7 +39,7 @@ jobs:
 
       - name: Extract release notes from CHANGELOG.md
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           awk -v v="$tag" '
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
             on && /^## \[/        { exit }
@@ -57,5 +67,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" cross-talk.tgz --title "CrossTalk $GITHUB_REF_NAME" --notes-file notes.md --verify-tag $prerelease
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # Run by hand: create the tag at the commit that was just tested.
+            gh release create "$TAG" cross-talk.tgz --title "CrossTalk $TAG" --notes-file notes.md --target "$GITHUB_SHA" $prerelease
+          else
+            gh release create "$TAG" cross-talk.tgz --title "CrossTalk $TAG" --notes-file notes.md --verify-tag $prerelease
+          fi
