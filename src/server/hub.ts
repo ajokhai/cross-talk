@@ -109,6 +109,12 @@ interface WakeState extends WakeHook {
   secret?: string;
   /** Messages since the hook last fired. */
   pending: number;
+  /**
+   * A wake that came in during the cooldown: sent by the sweep once the
+   * cooldown is over, so the last mention is never dropped. A mention or DM
+   * outranks a plain message; the newest of equal rank wins.
+   */
+  deferred?: { reason: WakePayload['reason']; message: { id: string; from: AgentRef; content: string; timestamp: number } };
 }
 
 const PRIVATE_HOST = /^(localhost|.*\.localhost|.*\.local|.*\.internal|0\.0\.0\.0|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+|::1?|f[cd][0-9a-f]{2}:.*|fe80:.*|::ffff:.*)$/i;
@@ -1239,7 +1245,7 @@ export class MeshHub {
   }
 
   private wakeView(hook: WakeState): WakeHook {
-    const { secret: _secret, pending: _pending, ...view } = hook;
+    const { secret: _secret, pending: _pending, deferred: _deferred, ...view } = hook;
     return { ...view };
   }
 
@@ -1257,10 +1263,34 @@ export class MeshHub {
         mentioned = !/[\p{L}\p{N}_-]/u.test(lower[at + tag.length] ?? '');
       }
       if (!mentioned && hook.on !== 'all') continue;
-      const now = this.now();
-      if (hook.lastFiredAt && now - hook.lastFiredAt < hook.cooldownSeconds * 1000) continue;
-      hook.lastFiredAt = now;
-      this.sendWake(hook, channel, mentioned ? 'mention' : 'message', message);
+      this.tryWake(hook, channel, mentioned ? 'mention' : 'message', message);
+    }
+  }
+
+  /** Sends now, or (inside the cooldown) keeps it for the sweep to send when the cooldown ends. */
+  private tryWake(hook: WakeState, channel: Channel, reason: WakePayload['reason'], message: { id: string; from: AgentRef; content: string; timestamp: number }): void {
+    const now = this.now();
+    if (hook.lastFiredAt && now - hook.lastFiredAt < hook.cooldownSeconds * 1000) {
+      const rank = (r: WakePayload['reason']) => (r === 'message' ? 0 : 1);
+      if (!hook.deferred || rank(reason) >= rank(hook.deferred.reason)) hook.deferred = { reason, message };
+      return;
+    }
+    hook.lastFiredAt = now;
+    hook.deferred = undefined;
+    this.sendWake(hook, channel, reason, message);
+  }
+
+  /** Sends wakes held back by a cooldown that has now ended (called from sweep). */
+  private sweepWakes(): void {
+    const now = this.now();
+    for (const channel of this.channels.values()) {
+      for (const hook of channel.wakes.values()) {
+        const d = hook.deferred;
+        if (!d || (hook.lastFiredAt && now - hook.lastFiredAt < hook.cooldownSeconds * 1000)) continue;
+        hook.deferred = undefined;
+        hook.lastFiredAt = now;
+        this.sendWake(hook, channel, d.reason, d.message);
+      }
     }
   }
 
@@ -1272,10 +1302,7 @@ export class MeshHub {
       const channel = this.channels.get(id);
       const hook = channel?.wakes.get(name);
       if (!channel || !hook) continue;
-      const now = this.now();
-      if (hook.lastFiredAt && now - hook.lastFiredAt < hook.cooldownSeconds * 1000) return;
-      hook.lastFiredAt = now;
-      this.sendWake(hook, channel, 'dm', dm);
+      this.tryWake(hook, channel, 'dm', dm);
       return;
     }
   }
@@ -1847,6 +1874,7 @@ export class MeshHub {
   sweep(): void {
     this.sweepInvites();
     this.sweepListeners();
+    this.sweepWakes();
     for (const lock of this.locks.sweepExpired()) {
       this.changes++;
       const channel = this.channels.get(lock.channel);
@@ -2039,7 +2067,7 @@ export class MeshHub {
         claims: [...c.claims.values()],
         limits: c.limits,
         slots: [...c.slots.values()].filter(slot => slot.holds.length).map(slot => ({ name: slot.name, capacity: slot.capacity, holds: slot.holds })),
-        wakes: [...c.wakes.values()].map(({ pending: _pending, ...hook }) => ({ ...hook }))
+        wakes: [...c.wakes.values()].map(({ pending: _pending, deferred: _deferred, ...hook }) => ({ ...hook }))
       })),
       agents,
       locks: this.locks.list(),

@@ -83,6 +83,11 @@ export class HttpAgent {
         this.agent = probe.data.data;
         return false;
       }
+      // Only an expired or unknown session (401) means "start a new one"; anything
+      // else (rate limit, hub error) would otherwise mint a duplicate identity.
+      if (probe.status !== 401) {
+        throw new CrossTalkError(probe.data?.error?.code ?? 'internal', probe.data?.error?.message ?? `HTTP ${probe.status}`);
+      }
     }
     const { status, data } = await this.call('POST', '/v1/sessions', {
       name: this.options.name,
