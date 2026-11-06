@@ -616,7 +616,7 @@ img, video { max-width: 100%; }
 
 /* ---------- The story (three.js, scroll-driven) ---------- */
 .story { position: relative; background: #0f0e0c; color: #f2eee6; border-bottom: 1px solid var(--border); }
-.story-track { height: 500vh; position: relative; }
+.story-track { height: 300vh; position: relative; }   /* 100vh pinned + 5 acts x 40vh: two or three wheel notches per act */
 .story-stage { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; }
 .story-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .story-labels { position: absolute; inset: 0; pointer-events: none; }
@@ -694,3 +694,7 @@ img, video { max-width: 100%; }
 .story.story-static .story-sound { display: none; }
 @media (max-width: 760px) { .story-sound { right: auto; left: 18px; top: 18px; bottom: auto; } }
 @media (prefers-reduced-motion: reduce) { .story-sound i { animation: none !important; } }
+
+.story.story-last .story-hint { opacity: 0; }
+.story-hint { transition: opacity .4s; }
+@media (max-width: 760px) { .story-hint { display: none; } .story-ticks { top: 22%; } }
