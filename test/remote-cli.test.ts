@@ -29,7 +29,7 @@ test('crosstalk invite --remote / list / revoke', async () => {
     const inv = await run(['invite', address, '--remote', '--label', 'vps', '--expires', '2h', '--max-agents', '2'], env);
     assert.equal(inv.code, 0, inv.err);
     assert.match(inv.out, /Hub \(public door\): https:\/\/door\.example\.test/);
-    assert.match(inv.out, /mcp\?name=<your-name>&channel=xt_.*&key=xi_/);
+    assert.match(inv.out, /Channel: xt_.*\n.*\nInvite key: xi_/);
     const key = /xi_[A-Za-z0-9_-]+/.exec(inv.out)![0];
 
     const door = `http://127.0.0.1:${server.publicDoor!.port}`;

@@ -30,30 +30,18 @@ export function isLocalHub(hub: string): boolean {
 const toHttp = (hub: string) => hub.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
 
 export function inviteText({ address, hub }: { address: string; hub: string }): string {
-  const http = toHttp(hub);
-  const firstTime = isLocalHub(hub)
-    ? ["- This hub runs on someone's machine (localhost). Not on that machine (a VPS, a cloud agent)? Ask its owner for a remote invite (crosstalk invite <channel> --remote): a secure link and key for this channel."]
-    : [
-        `- Make HTTP requests only: follow ${AGENT_GUIDE_URL} using hub ${http} (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
-        `- MCP client (claude.ai and similar): add the connector ${http}/mcp?name=<your-name>&channel=${address}`
-      ];
-  return [
-    "You're invited to a CrossTalk conversation: a shared channel where AI agents and devices message each other and lock files before editing.",
+  // Short on purpose: the guide explains every way to connect (MCP, shell, HTTP,
+  // devices) and how to stay reachable, so the invite only carries what's unique.
+  const lines = [
+    'Join my CrossTalk channel.',
     `Channel: ${address}`,
     `Hub: ${hub}`,
-    // CrossTalk isn't only WebSockets: say up front which links can reach the conversation.
-    'Ways to connect: WebSocket or HTTP to the hub, an MCP connector, or, for hardware, serial/UART, Bluetooth serial or radio through crosstalk-bridge.',
-    '',
-    `If you already have CrossTalk (crosstalk_* tools or the crosstalk command): join ${address} on ${hub}, say hello, and keep listening with crosstalk_wait.`,
-    '',
-    'First time? Pick the one that matches how you can connect:',
-    `- Run shell commands: npm install -g ${INSTALL_URL}, then run as a background command: crosstalk join ${address} --url ${hub} --name <your-name>`,
-    ...firstTime,
-    // The bridge runs on a computer that can reach the hub, so this works for local hubs too.
-    `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see ${DEVICE_GUIDE_URL}), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`,
-    '',
-    STAY_AWAKE_LINE
-  ].join('\n');
+    `New to CrossTalk? Set up and join (any agent): ${AGENT_GUIDE_URL}`
+  ];
+  if (isLocalHub(hub)) {
+    lines.push("This hub runs on the inviter's machine: only agents on that machine can reach it. Elsewhere? Ask for a remote invite (crosstalk invite <channel> --remote).");
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -63,20 +51,11 @@ export function inviteText({ address, hub }: { address: string; hub: string }): 
  */
 export function remoteInviteText({ address, publicUrl, key, expiresAt }: { address: string; publicUrl: string; key: string; expiresAt?: number }): string {
   const base = publicUrl.replace(/\/+$/, '');
-  const ws = base.replace(/^http(s?):\/\//, 'ws$1://');
   return [
-    "You're invited to a CrossTalk conversation: a shared channel where AI agents message each other and lock files before editing.",
+    'Join my CrossTalk channel.',
     `Channel: ${address}`,
     `Hub (public door): ${base}`,
     `Invite key: ${key}  (secret: it opens this one channel${expiresAt ? `, until ${new Date(expiresAt).toISOString()}` : ''})`,
-    '',
-    'Connect whichever way you can:',
-    `- MCP client (claude.ai, cloud agents): add the connector ${base}/mcp?name=<your-name>&channel=${address}&key=${key}`,
-    `- HTTP: POST ${base}/v1/sessions with header X-CrossTalk-Invite: ${key} and body {"agent":{"name":"<your-name>"}}, then send X-CrossTalk-Invite and X-CrossTalk-Session on POST /v1/rpc ({"type":"channel.join","channel":"${address}"}) and long-poll GET /v1/events?wait=50. Guide: ${AGENT_GUIDE_URL}`,
-    `- WebSocket / SDK: connect to ${ws} with header X-CrossTalk-Invite: ${key}, then join ${address}.`,
-    `- Shell: npm install -g ${INSTALL_URL}, then: crosstalk up ${address} --url ${ws} --invite ${key} --name <your-name>`,
-    '',
-    'Say hello once you are in.',
-    STAY_AWAKE_LINE
+    `New to CrossTalk? Set up and join with a key (any agent): ${AGENT_GUIDE_URL} (section "Joining with a remote invite key")`
   ].join('\n');
 }

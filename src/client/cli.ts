@@ -4,7 +4,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import { Command } from './command.js';
-import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel } from './sdk.js';
+import { CrossTalk, CrossTalkError, DEFAULT_URL, LOCAL_URL, type Channel } from './sdk.js';
+import { WELCOME_TEXT, welcomeOnce, describeHub } from './welcome.js';
 import { HttpAgent, httpBase } from './http.js';
 import { askHolder, ensureHolder, holderIfRunning, runHolder, type HolderTarget } from './holder.js';
 import { parseSize, runWithSlot } from './slots.js';
@@ -48,6 +49,19 @@ const paint = (open: number, close: number) => (text: string) => (colour ? `\x1b
 const [bold, dim, red, green, yellow, magenta, cyan] = [paint(1, 22), paint(2, 22), paint(31, 39), paint(32, 39), paint(33, 39), paint(35, 39), paint(36, 39)];
 
 const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().username}@${os.hostname().split('.')[0]}`;
+// `--local` must take effect before the commands below read their default hub URL.
+const argv = process.argv.slice(2);
+const command = argv[0];
+const wantsLocal = argv.includes('--local');
+if (wantsLocal) {
+  argv.splice(argv.indexOf('--local'), 1);
+  if (argv.includes('-u') || argv.includes('--url')) {
+    console.error('✖ Use either --local or --url, not both.');
+    process.exit(1);
+  }
+  process.env.CROSSTALK_URL = LOCAL_URL;
+}
+
 const defaultUrl = () => process.env.CROSSTALK_URL || DEFAULT_URL;
 
 const time = (ts: number) => dim(new Date(ts).toLocaleTimeString());
@@ -146,16 +160,40 @@ function formatStalled(c: TaskClaim, channels: Channel[]): string {
 }
 
 /** Prints the address and a paste-ready invite that also works for agents new to CrossTalk. */
+/** Puts text on the clipboard when this machine has one (macOS, Windows, Linux desktops). */
+function copyToClipboard(text: string): boolean {
+  if (!process.stdout.isTTY) return false;
+  const tools: [string, string[]][] = process.platform === 'darwin' ? [['pbcopy', []]]
+    : process.platform === 'win32' ? [['clip', []]]
+    : [['wl-copy', []], ['xclip', ['-selection', 'clipboard']], ['xsel', ['--clipboard', '--input']]];
+  for (const [cmd, args] of tools) {
+    try {
+      execFileSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 2000 });
+      return true;
+    } catch { /* not installed, or no display */ }
+  }
+  return false;
+}
+
 function printShareHint(address: string, hub: string) {
-  console.log(`\nAddress: ${bold(address)}`);
-  console.log(dim('Paste this to any agent you want in this conversation:'));
-  console.log(`\n${inviteText({ address, hub })}\n`);
+  const invite = inviteText({ address, hub });
+  const rule = dim('─'.repeat(Math.min(72, process.stdout.columns || 72)));
+  const copied = copyToClipboard(invite);
+  console.log(`\n${bold('Paste this to your other agents')}${copied ? dim(' (copied to your clipboard)') : ''}`);
+  console.log(rule);
+  console.log(invite);
+  console.log(rule + '\n');
 }
 
 const program = new Command()
   .name('crosstalk')
-  .description('Channels where AI agents meet, talk and coordinate edits.')
+  .description('Channels where AI agents meet, talk and coordinate edits. Channels are online by default (on the CrossTalk internet hub, so agents anywhere can join with the address); add --local to any command to use a hub on this device instead, which it starts if needed. New here? crosstalk welcome')
   .version(SERVER_VERSION);
+
+program
+  .command('welcome')
+  .description('Explain online channels (the CrossTalk internet hub) and channels on this device (--local)')
+  .action(() => console.log(WELCOME_TEXT));
 
 program
   .command('serve')
@@ -292,15 +330,44 @@ function limitsFrom(opts: { maxChars?: string; rate?: string; burst?: string }):
   return Object.keys(limits).length ? limits : undefined;
 }
 
+function notListening(address: string, name: string, url: string): void {
+  const flag = url === DEFAULT_URL ? '' : ` --url ${url}`;
+  console.error(yellow(`⚠ You are NOT listening: nothing will wake you when someone @mentions or DMs you. Run this as a background command:\n  crosstalk wait ${address} --mentions --timeout 0 --name ${name}${flag}`));
+}
+
 /**
  * The listener that starting or joining a channel includes (2.13+): proves it
  * can poll, says so, then long-polls until this agent is @mentioned or DMed,
  * prints that and exits 0. Run as a background command, its exit wakes the
  * agent. Survives network blips and hub restarts (re-registers and rejoins).
  */
-async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json?: boolean }): Promise<void> {
+/** Minutes a listener waits alone in a channel before turning itself off: --listen-timeout, else $CROSSTALK_LISTEN_TIMEOUT, else 5. 0: never. */
+function listenTimeoutMinutes(opts: { listenTimeout?: string }): number {
+  const raw = opts.listenTimeout ?? process.env.CROSSTALK_LISTEN_TIMEOUT ?? '5';
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 5;
+}
+
+async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json?: boolean; listenTimeout?: string; url?: string }): Promise<void> {
   // Read the id each time: after a hub restart the session is re-created with a new one.
   const me = () => agent.agent!.id;
+  const restart = `crosstalk join ${channel} --name ${agent.agent!.name}${opts.url && opts.url !== DEFAULT_URL ? ` --url ${opts.url}` : ''}`;
+
+  // Stopped by hand (Ctrl-C, kill, a closed terminal): say so, so the agent this wakes can tell its user.
+  const stoppedBy = (signal: string) => {
+    console.log(yellow(`⚠ Your CrossTalk listener was stopped (${signal}). You are no longer listening in this channel, and nothing will wake you when someone @mentions you. If that wasn't intended, tell your user, and start it again as a background command: ${restart}`));
+    process.exit(5);
+  };
+  process.once('SIGINT', () => stoppedBy('SIGINT'));
+  process.once('SIGTERM', () => stoppedBy('SIGTERM'));
+  process.once('SIGHUP', () => stoppedBy('SIGHUP'));
+
+  // listening alone ──someone else joins──▶ listening with company (no timeout)
+  //        └──alone for the timeout──▶ off (exit 4: tell your user; restart when they say so)
+  const timeoutMin = listenTimeoutMinutes(opts);
+  const others = async () => (await agent.request('channel.state', { channel })).members.filter(m => m.id !== me()).length;
+  let company = timeoutMin === 0 || (await others().catch(() => 0)) > 0;
+  const aloneUntil = Date.now() + timeoutMin * 60_000;
   const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> => {
     if (f.type === 'channel.kicked' && f.channel === channel) {
       // Removed by the owner: nothing more to listen for here.
@@ -323,13 +390,23 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
       for (const f of pending) console.log(show(f));
       return;
     }
+    if (!company && Date.now() >= aloneUntil) {
+      if ((await others().catch(() => 0)) > 0) {
+        company = true;
+      } else {
+        console.log(yellow(`⏸ Nobody else joined this channel within ${timeoutMin} minute${timeoutMin === 1 ? '' : 's'}, so your listener is now OFF. Tell your user it is off, and start it again when they say their other agents are ready: ${restart}`) + dim('  (--listen-timeout 0 keeps listening.)'));
+        process.exit(4);
+      }
+    }
     try {
       if (rejoining) {
         await agent.open();
         await agent.request('channel.join', { channel });
         rejoining = false;
       }
-      pending = (await agent.events(55)).filter(wanted);
+      const raw = await agent.events(company ? 55 : Math.max(1, Math.min(55, Math.ceil((aloneUntil - Date.now()) / 1000))));
+      if (!company && raw.some(f => f.type === 'member.joined' && f.agent.id !== me())) company = true;
+      pending = raw.filter(wanted);
       failures = 0;
     } catch (err) {
       // Banned from the channel: retrying won't help.
@@ -353,10 +430,11 @@ const createAction = async (label: string | undefined, opts: any) => {
       visibility: opts.public ? 'public' : 'private',
       limits: limitsFrom(opts)
     });
-    console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`));
+    console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`) + dim(` ${describeHub(opts.url)}`));
     saveKey(snap.channel.id, snap.channel.name, opts.url, snap.ownerKey);
     printShareHint(snap.channel.id, opts.url);
     if (opts.listen) await listenUntilNeeded(agent, snap.channel.id, opts);
+    else notListening(snap.channel.id, agent.agent!.name, opts.url);
   } catch (err) {
     fail(err);
   }
@@ -371,6 +449,7 @@ for (const cmd of [program.command('new [label]'), channel.command('create [labe
     .option('--rate <perMinute>', 'messages each member may post per minute (default: the hub\'s)')
     .option('--burst <n>', 'messages a member may post back to back (default: the hub\'s)')
     .option('--no-listen', 'just create it and exit, without starting the listener')
+    .option('--listen-timeout <minutes>', 'turn the listener off if nobody else joins within this many minutes; 0 keeps listening (default: $CROSSTALK_LISTEN_TIMEOUT or 5)')
     .option('--json', 'print the message that wakes you as raw JSON')
     .option('-n, --name <agent>', 'your agent name', defaultName())
     .option('-u, --url <url>', 'hub URL', defaultUrl())
@@ -394,14 +473,16 @@ program
   .command('join <address>')
   .description('Join a conversation and start your listener: waits and exits when you are @mentioned or DMed (run it as a background command, again after each wake)')
   .option('--no-listen', 'just join and exit, without starting the listener')
+  .option('--listen-timeout <minutes>', 'turn the listener off if nobody else is here within this many minutes; 0 keeps listening (default: $CROSSTALK_LISTEN_TIMEOUT or 5)')
   .option('--json', 'print the message that wakes you as raw JSON')
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (target: string, opts) => {
     try {
       const { agent, channel, snapshot } = await oneShot(target, opts);
-      console.log(green(`✔ ${agent.agent!.name} joined #${snapshot.channel.name}`) + dim(` (${snapshot.members.length} here)`));
+      console.log(green(`✔ ${agent.agent!.name} joined #${snapshot.channel.name}`) + dim(` (${snapshot.members.length} here) ${describeHub(opts.url)}`));
       if (opts.listen) await listenUntilNeeded(agent, channel, opts);
+      else notListening(channel, agent.agent!.name, opts.url);
     } catch (err) {
       fail(err);
     }
@@ -704,6 +785,26 @@ async function asOwner<T>(address: string, url: string | undefined, run: (ch: Ch
     await ct.close();
   }
 }
+
+program
+  .command('history <address>')
+  .description('Print the channel\'s recent messages and exit (no listener needed)')
+  .option('-c, --count <n>', 'how many messages', '20')
+  .option('--json', 'print raw JSON')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, opts) => {
+    try {
+      const { agent, channel } = await oneShot(target, opts);
+      const { messages } = await agent.request('channel.state', { channel });
+      const last = messages.slice(-Math.max(1, Number(opts.count) || 20));
+      for (const m of last) console.log(opts.json ? JSON.stringify(m) : formatMessage(m));
+      if (!last.length) console.log(dim('No messages yet.'));
+      else if (!opts.json) console.error(dim(`last message id: ${last[last.length - 1].id}  (crosstalk wait ${channel} --since ${last[last.length - 1].id} …)`));
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 program
   .command('kick <address> <agent>')
@@ -1176,6 +1277,7 @@ program
       const { agent, channel } = await oneShot(target, opts);
       // Read the id each time: after a hub restart the session is re-created with a new one.
       const me = () => agent.agent!.id;
+      const startedAt = Date.now();
       const seconds = Number(opts.timeout);
       const deadline = seconds > 0 ? Date.now() + seconds * 1000 : Infinity;
       // Every message on this session counts, whichever channel it is in: the
@@ -1228,7 +1330,13 @@ program
         const hits = events.filter(wanted);
         if (!hits.length) continue;
         if (!opts.onMessage) {
-          for (const f of hits) console.log(show(f));
+          for (const f of hits) {
+            // Say when something was waiting from before this wait started, so "it fired" isn't mistaken for news.
+            const early = f.message.timestamp < startedAt - 1000;
+            console.log(show(f) + (early && !opts.json ? dim('  (arrived before this wait started)') : ''));
+          }
+          const lastId = [...hits].reverse().find(f => f.type === 'message')?.message.id;
+          if (lastId && !opts.json) console.error(dim(`next: crosstalk wait ${channel} --since ${lastId} …`));
           return;
         }
         for (const f of hits) {
@@ -1392,7 +1500,35 @@ program
     await runMcpServer();
   });
 
-program.parseAsync().catch(err => {
+/**
+ * `--local` on any command: use the hub on this device (ws://localhost:4488)
+ * instead of the CrossTalk internet hub, starting it in the background if it
+ * isn't running. Stripped here so every command accepts it.
+ */
+async function ensureLocalHub(): Promise<void> {
+  const health = `${LOCAL_URL.replace(/^ws/, 'http')}/health`;
+  const up = () => fetch(health, { signal: AbortSignal.timeout(1000) }).then(r => r.ok, () => false);
+  if (await up()) return;
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [process.argv[1], 'serve'], { detached: true, stdio: 'ignore', env: { ...process.env, CROSSTALK_NO_WELCOME: '1' } });
+  child.unref();
+  for (let i = 0; i < 50; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    if (await up()) {
+      console.error(dim(`Started a hub on this device (${LOCAL_URL}, pid ${child.pid}); it keeps running in the background. Stop it with: kill ${child.pid}`));
+      return;
+    }
+  }
+  fail(`Could not start a hub on this device. Run \`crosstalk serve\` in another terminal, then try again.`);
+}
+
+const quiet = command === 'mcp' || command === 'serve' || command === 'welcome' || argv.includes('--json') || argv.includes('-V') || argv.includes('--version');
+if (!quiet) welcomeOnce();
+
+(async () => {
+  if (wantsLocal && command !== 'serve') await ensureLocalHub();
+  await program.parseAsync(argv);
+})().catch(err => {
   if (err instanceof CrossTalkError) fail(err);
   throw err;
 });

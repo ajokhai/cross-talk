@@ -887,31 +887,19 @@
   // invite:start — a plain-JS copy of inviteText() in src/client/invite.ts; test/cockpit-invite.test.ts keeps them identical.
   /** The invite to paste to any agent, even one that has never heard of CrossTalk. */
   function inviteText(address, hub) {
-    const http = hub.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '');
-    let host = '';
-    try { host = new URL(hub).hostname.replace(/^\[|\]$/g, ''); } catch { /* not a URL: treat as remote */ }
-    const local = host === 'localhost' || host === '::1' || host.startsWith('127.');
-    const firstTime = local
-      ? ["- This hub runs on someone's machine (localhost). Not on that machine (a VPS, a cloud agent)? Ask its owner for a remote invite (crosstalk invite <channel> --remote): a secure link and key for this channel."]
-      : [
-          `- Make HTTP requests only: follow https://cross-talk-roan.vercel.app/llms.txt using hub ${http} (POST /v1/sessions, then channel.join ${address} via /v1/rpc, then long-poll /v1/events).`,
-          `- MCP client (claude.ai and similar): add the connector ${http}/mcp?name=<your-name>&channel=${address}`,
-        ];
-    return [
-      "You're invited to a CrossTalk conversation: a shared channel where AI agents and devices message each other and lock files before editing.",
+    // Short on purpose: the guide explains every way to connect and how to stay reachable.
+    const lines = [
+      'Join my CrossTalk channel.',
       `Channel: ${address}`,
       `Hub: ${hub}`,
-      'Ways to connect: WebSocket or HTTP to the hub, an MCP connector, or, for hardware, serial/UART, Bluetooth serial or radio through crosstalk-bridge.',
-      '',
-      `If you already have CrossTalk (crosstalk_* tools or the crosstalk command): join ${address} on ${hub}, say hello, and keep listening with crosstalk_wait.`,
-      '',
-      'First time? Pick the one that matches how you can connect:',
-      `- Run shell commands: npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz, then run as a background command: crosstalk join ${address} --url ${hub} --name <your-name>`,
-      ...firstTime,
-      `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see https://github.com/ajokhai/cross-talk/tree/main/packages/embedded), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`,
-      '',
-      'Stay reachable: your listener starts with you. `crosstalk join` and `crosstalk new` keep running as it and exit when you are @mentioned or DMed; run them as a background command and run `crosstalk join <channel>` again after each wake. Over HTTP, run the `listen.command` the hub returns; over MCP, end every turn with crosstalk_wait. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.',
-    ].join('\n');
+      'New to CrossTalk? Set up and join (any agent): https://cross-talk-roan.vercel.app/llms.txt',
+    ];
+    let host = '';
+    try { host = new URL(hub).hostname.replace(/^\[|\]$/g, ''); } catch {}
+    if (host === 'localhost' || host === '::1' || host.startsWith('127.')) {
+      lines.push("This hub runs on the inviter's machine: only agents on that machine can reach it. Elsewhere? Ask for a remote invite (crosstalk invite <channel> --remote).");
+    }
+    return lines.join('\n');
   }
   // invite:end
 

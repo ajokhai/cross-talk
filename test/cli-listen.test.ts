@@ -115,3 +115,45 @@ test('a listener whose agent is kicked stops with exit code 3', async () => {
     await server.close();
   }
 });
+
+test('a listener alone in its channel turns itself off after --listen-timeout and says so (exit 4)', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  try {
+    const run = start(['new', 'lonely', '--name', 'solo', '--url', server.url, '--listen-timeout', '0.05'], {});
+    assert.equal(await run.done, 4);
+    assert.match(run.out(), /Nobody else joined this channel within 0\.05 minutes, so your listener is now OFF\. Tell your user/);
+    assert.match(run.out(), /crosstalk join xt_\S+ --name solo --url ws:/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('with company, or --listen-timeout 0, the listener keeps going past the timeout', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const owner = await CrossTalk.connect({ name: 'owner', url: server.url, reconnect: false });
+  try {
+    const ch = await owner.createChannel('busy');
+    const run = start(['join', ch.address, '--name', 'stays', '--url', server.url, '--listen-timeout', '0.05'], {});
+    await until(() => /Listening as stays/.test(run.out()));
+    await new Promise(r => setTimeout(r, 4500));
+    assert.equal(run.child.exitCode, null, 'the owner is here, so no timeout');
+    await ch.send('@stays ping');
+    assert.equal(await run.done, 0);
+  } finally {
+    await owner.close();
+    await server.close();
+  }
+});
+
+test('a listener stopped by hand tells the agent it is no longer listening (exit 5)', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  try {
+    const run = start(['new', 'stopme', '--name', 'oops', '--url', server.url], {});
+    await until(() => /Listening as oops/.test(run.out()));
+    run.child.kill('SIGTERM');
+    assert.equal(await run.done, 5);
+    assert.match(run.out(), /listener was stopped \(SIGTERM\)\. You are no longer listening.*tell your user/);
+  } finally {
+    await server.close();
+  }
+});

@@ -97,3 +97,60 @@ test('MCP bridge closed while it is still connecting leaves no agent behind', as
     await server.close();
   }
 });
+
+test('MCP agents are warned until something listens under their name, and the warning stops once it does', async () => {
+  const { Bridge } = await import('../src/mcp/server.js');
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const base = server.url.replace('ws://', 'http://');
+  try {
+    const bridge = new Bridge({ name: 'claude-code', url: server.url });
+    const client = await bridge.get();
+    const ch = await client.createChannel('listen-check');
+    const warning = await bridge.listenerWarning(client);
+    assert.match(warning!, /NO LISTENER/);
+    assert.match(warning!, new RegExp(`crosstalk wait ${ch.address} --mentions --timeout 0 --name claude-code --url ${server.url.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`));
+
+    // A background `crosstalk wait` is an HTTP session under the same name, long-polling.
+    const s = await (await fetch(`${base}/v1/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"name":"claude-code"}' })).json() as any;
+    await fetch(`${base}/v1/rpc`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-crosstalk-session': s.session }, body: JSON.stringify({ type: 'channel.join', channel: ch.address }) });
+    const polling = fetch(`${base}/v1/events?wait=3&only=mentions`, { headers: { 'x-crosstalk-session': s.session } });
+    await new Promise(r => setTimeout(r, 200));
+    (bridge as any).listenerChecks.clear(); // skip the once-a-minute throttle
+    assert.equal(await bridge.listenerWarning(client), undefined, 'listening now');
+    await polling;
+
+    const remote = new Bridge({ name: 'web-agent', url: server.url, remote: true });
+    const rc = await remote.get();
+    await rc.joinChannel(ch.address);
+    assert.equal(await remote.listenerWarning(rc), undefined, 'remote MCP clients cannot run background commands, so no nag');
+    await remote.close();
+    await bridge.close();
+  } finally {
+    await server.close();
+  }
+});
+
+test('MCP join with the invite\'s hub moves the agent to that hub', async () => {
+  const { Bridge } = await import('../src/mcp/server.js');
+  const hubA = await startServer({ port: 0, quiet: true, stateFile: false });
+  const hubB = await startServer({ port: 0, quiet: true, stateFile: false });
+  const owner = await CrossTalk.connect({ name: 'owner', url: hubB.url, reconnect: false });
+  try {
+    const ch = await owner.createChannel('elsewhere');
+    const bridge = new Bridge({ name: 'traveller', url: hubA.url });
+    await bridge.get();
+    await bridge.switchHub(hubB.url);
+    const client = await bridge.get();
+    assert.equal(client.url, hubB.url);
+    await client.joinChannel(ch.address);
+    assert.equal(present(hubB, 'traveller'), 1);
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(present(hubA, 'traveller'), 0, 'left the old hub');
+    await assert.rejects(bridge.switchHub('not a url'), /not a hub URL/);
+    await bridge.close();
+  } finally {
+    await owner.close();
+    await hubA.close();
+    await hubB.close();
+  }
+});

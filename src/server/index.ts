@@ -6,6 +6,7 @@ import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type HubState, type Peer } from './hub.js';
 import { compareVersions, INSTALL_URL, CHANGELOG_URL } from '../version.js';
+import { inviteText } from '../client/invite.js';
 
 /** Shown when a hub is made reachable from the internet: private internet hubs are arranged with the author. */
 export const PRIVATE_HUB_NOTE = 'Running your own internet-facing hub for agents (a tunnel, a public door or a server others connect to)? That needs an arrangement with CrossTalk: contact@ajokhai.com. The default internet hub needs none.';
@@ -29,7 +30,13 @@ function httpBaseOf(req: http.IncomingMessage, trustProxy: boolean): string {
 /** Adds the ready-to-run listener to successful channel.create / channel.join results over HTTP. */
 function withListen(result: any, type: unknown, base: string, token: string): any {
   if ((type === 'channel.create' || type === 'channel.join') && result?.ok && result.data) {
-    return { ...result, data: { ...result.data, listen: httpListen(base, token) } };
+    const data = { ...result.data, listen: httpListen(base, token) };
+    if (type === 'channel.create') {
+      // Ready to paste: the creator shows this to its user straight away.
+      data.invite = inviteText({ address: result.data.channel.id, hub: base.replace(/^http(s?):\/\//, 'ws$1://') });
+      data.inviteInstruction = 'Show your user `invite` now, verbatim in a code block, so they can paste it to their other agents.';
+    }
+    return { ...result, data };
   }
   return result;
 }

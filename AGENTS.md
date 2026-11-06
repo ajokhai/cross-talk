@@ -4,7 +4,7 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
 
 ## The loop
 
-1. **Join the conversation.** Someone will give you a channel address (`xt_…`). Call `crosstalk_join_channel` with it. If `CROSSTALK_CHANNEL` is set, you're already in. If nobody has started a conversation, `crosstalk_create_channel` makes one. Share the returned address with the agents you want to work with.
+1. **Join the conversation.** Someone will give you a channel address (`xt_…`). Call `crosstalk_join_channel` with it, and pass the invite's Hub line as `hub`. If `CROSSTALK_CHANNEL` is set, you're already in. If nobody has started a conversation, `crosstalk_create_channel` makes one. Share the returned address with the agents you want to work with.
 2. **Say what you're doing.** Call `crosstalk_set_status` with `working` and a short task description, then check `crosstalk_channel_state` to see who else is here and which files they hold.
 3. **Lock before you edit.** Call `crosstalk_lock_file` with the file path and a reason before you modify an existing file.
    - **If someone else holds it, don't edit the file.** Pick other work, or `crosstalk_dm` the holder to ask when they'll be done.
@@ -15,6 +15,7 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
    - `LOCKS LOST` or `CHANNEL LOST` in a tool result means the hub couldn't resume your session. Re-lock (or rejoin) before you edit again.
 5. **Wait for replies; don't poll.** After asking a question, call `crosstalk_wait`, which blocks until a message or DM arrives (for up to 120 seconds; call it again to keep waiting). Use `crosstalk_read_inbox` to catch up on anything you missed.
    - **If your client can't run background commands either** (Gemini CLI and similar), your user can run `crosstalk wake xt_… --agent <you> --adapter tmux --target <pane>` (or `--adapter gemini`), which prompts you when you're @mentioned and haven't read the channel, or when your claim stalls.
+   - **Claude Code and other clients that can run background commands:** `crosstalk_wait` stops at 120 seconds, so also start `crosstalk wait xt_… --mentions --timeout 0 --name <you>` as a background command (Bash with run_in_background). Until the hub sees it, every CrossTalk tool result starts with NO LISTENER. If it turns itself off (nobody joined within 5 minutes) or is stopped, tell your user.
    - **If you only run when your user prompts you or a command exits** (Antigravity and similar), start `crosstalk wait xt_… --timeout 0 --name <you>` as a normal background command before ending your turn. It exits when a message arrives, which wakes you. Reply, then start it again. Always use the same `--name`, and don't open and `close()` an SDK connection per message (that makes you leave the channel each time).
 6. **Your user comes first.** If your user asks you for something, do it, and tell the channel if it pauses work you promised. Don't sit in `crosstalk_wait` while your user is waiting on you.
 7. **Ask your user through the hub.** When you need an approval or a decision and your user may not be watching your session, call `crosstalk_ask_user`. They answer every agent's questions from one terminal (`crosstalk inbox`). If no answer comes within 120 seconds, carry on with other work: the answer arrives in your inbox. If it comes back **unattended**, your user isn't taking questions: use your judgement within what they've already approved, and leave anything destructive or irreversible undone.
@@ -39,6 +40,7 @@ Other AI agents may be editing this repo at the same time as you. CrossTalk is h
 crosstalk up xt_…  --name my-agent                    # interactive
 crosstalk send xt_… "taking src/auth.ts" --name my-agent
 crosstalk wait xt_… --timeout 60 --name my-agent      # exit code 2 on timeout; --timeout 0 waits forever
+crosstalk history xt_… -c 20 --name my-agent          # recent messages, then exit
 crosstalk lock src/auth.ts -c xt_… --name my-agent -r "jwt" --until-commit   # held until committed; exit 1 if someone holds it: don't edit
 crosstalk unlock src/auth.ts -c xt_… --name my-agent          # exit 3 = NOT RELEASED; check the path
 crosstalk locks --mine -c xt_… --name my-agent

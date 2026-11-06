@@ -1,6 +1,6 @@
 import path from 'node:path';
 import readline from 'node:readline';
-import { CrossTalk, CrossTalkError, type Channel, type ChannelLost, type LocksLost } from '../client/sdk.js';
+import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel, type ChannelLost, type LocksLost } from '../client/sdk.js';
 import { VERSION } from '../version.js';
 import { inviteText, remoteInviteText } from '../client/invite.js';
 import { httpBase } from '../client/http.js';
@@ -8,6 +8,7 @@ import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } fro
 import type { ChannelLimits, ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { STAY_AWAKE_GUIDANCE } from '../protocol.js';
 import { updateNotice } from '../version.js';
+import { describeHub } from '../client/welcome.js';
 
 /**
  * MCP bridge: gives any MCP-capable agent (Claude Code, Cursor, Gemini CLI, ...)
@@ -97,6 +98,58 @@ export class Bridge {
   constructor(readonly options: BridgeOptions) {
     // Remote MCP clients time out long HTTP calls sooner than local ones do.
     this.maxWaitSeconds = options.remote ? 55 : MAX_WAIT_SECONDS;
+  }
+
+  /** Per channel: when we last asked the hub whether this agent has a listener, and the answer. */
+  private listenerChecks = new Map<string, { at: number; listening: boolean }>();
+
+  /**
+   * A warning when this agent has nothing listening in a channel: a
+   * `crosstalk wait` / `crosstalk join` under the same name, long-polling the
+   * hub, which exits (and so wakes the agent) when it is @mentioned or DMed.
+   * MCP can't wake anyone between turns, so without one the agent misses
+   * messages once its turn ends. Re-checked every minute while missing and
+   * every 5 minutes after (background commands get stopped, e.g. after 2 hours).
+   * Remote MCP clients can't run background commands, so they aren't nagged.
+   */
+  async listenerWarning(client: CrossTalk): Promise<string | undefined> {
+    if (this.options.remote || process.env.CROSSTALK_LISTENER_CHECK === '0') return undefined;
+    const me = client.agent.name.toLowerCase();
+    const now = Date.now();
+    const missing: Channel[] = [];
+    for (const ch of client.channels.values()) {
+      const last = this.listenerChecks.get(ch.address);
+      let listening = last?.listening ?? false;
+      if (!last || now - last.at > (last.listening ? 300_000 : 60_000)) {
+        try {
+          const snap = await client.request('channel.state', { channel: ch.address });
+          listening = snap.attention.some(a => a.agent.name.toLowerCase() === me && a.listening === true);
+          this.listenerChecks.set(ch.address, { at: now, listening });
+        } catch {
+          continue;
+        }
+      }
+      if (!listening) missing.push(ch);
+    }
+    if (!missing.length) return undefined;
+    const url = client.url === DEFAULT_URL ? '' : ` --url ${client.url}`;
+    return [
+      `⚠ NO LISTENER: nothing will wake you when someone @mentions or DMs you in ${missing.map(c => `#${c.name}`).join(', ')} once this turn ends.`,
+      'Start one now as a background command (Claude Code: the Bash tool with run_in_background), then carry on:',
+      ...missing.map(c => `  crosstalk wait ${c.address} --mentions --timeout 0 --name ${client.agent.name}${url}`),
+      'When it exits, handle the message it printed and start it again. This warning stops once the hub sees it listening.'
+    ].join('\n');
+  }
+
+  /** Moves this agent to another hub: leaves the current one, and the next call connects to `url`. */
+  async switchHub(url: string): Promise<void> {
+    if (!/^wss?:\/\/[^\s]+$/.test(url)) throw new CrossTalkError('bad_request', `"${url}" is not a hub URL (wss://… or ws://…)`);
+    const was = this.state;
+    this.state = { kind: 'idle' };
+    this.options.url = url;
+    this.listenerChecks.clear();
+    if (was.kind === 'ready') await was.client.close().catch(() => {});
+    if (was.kind === 'connecting') await was.promise.then(c => c.close(), () => {});
   }
 
   /** Leaves the hub. A connect still in progress is finished and then closed, so no agent is left behind. */
@@ -487,10 +540,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'crosstalk_join_channel',
-    description: 'Join a conversation by its address (xt_...). Returns who is there, active file locks and recent messages.',
+    description: 'Join a conversation by its address (xt_...). Pass the invite\'s Hub line as `hub`: if it differs from the hub you are on, you move to that hub (leaving channels on the old one). Returns who is there, active file locks and recent messages.',
     inputSchema: {
       type: 'object',
-      properties: { channel: { type: 'string', description: 'Channel address, e.g. xt_Qm9r3vKx1pZ8aT2cL5nWdA' } },
+      properties: {
+        channel: { type: 'string', description: 'Channel address, e.g. xt_Qm9r3vKx1pZ8aT2cL5nWdA' },
+        hub: { type: 'string', description: 'The hub from the invite, e.g. wss://hub-production-a114.up.railway.app' }
+      },
       required: ['channel']
     }
   },
@@ -725,7 +781,14 @@ function filterAddress(client: CrossTalk, key: unknown): string | undefined {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
+/** Normalised comparison of two hub URLs (case, trailing slash). */
+const sameHubUrl = (a: string, b: string) => a.trim().toLowerCase().replace(/\/+$/, '') === b.trim().toLowerCase().replace(/\/+$/, '');
+
 async function callTool(bridge: Bridge, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+  // An invite names its hub: joining a channel on another hub moves this agent there.
+  if (name === 'crosstalk_join_channel' && str(args.hub) && !sameHubUrl(str(args.hub), bridge.options.url ?? DEFAULT_URL)) {
+    await bridge.switchHub(str(args.hub));
+  }
   const client = await bridge.get();
 
   switch (name) {
@@ -767,7 +830,19 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       ch.ownerKey = undefined;
       // A ready-to-paste invite, so the user can bring in agents that have never used CrossTalk.
       const invite = inviteText({ address: ch.address, hub: bridge.options.publicUrl ?? client.url });
-      return `Started #${ch.name} at ${ch.address}. To bring in another agent, give your user this invite to paste to it:\n\n${invite}${keyNote}\n\n${formatChannel(client, ch)}\n\n${STAY_AWAKE_GUIDANCE}`;
+      return [
+        'SHOW YOUR USER THIS INVITE NOW, in your very next message, exactly as below inside a code block, so they can paste it to their other agents. Don\'t discuss it first.',
+        '',
+        '```',
+        invite,
+        '```',
+        '',
+        `Started #${ch.name} (${ch.address}), ${describeHub(bridge.options.publicUrl ?? client.url)}${keyNote}`,
+        '',
+        formatChannel(client, ch),
+        '',
+        STAY_AWAKE_GUIDANCE
+      ].join('\n');
     }
     case 'crosstalk_join_channel': {
       const ch = await client.joinChannel(str(args.channel));
@@ -1091,6 +1166,9 @@ export class McpServer {
       if (name === 'crosstalk_wait') bridge.get().then(c => bridge.syncReads(c), () => {});
       let text = await callTool(bridge, name, args, signal);
       const client = await bridge.get();
+      // Until the hub sees something listening under this agent's name, say so on every result.
+      const missing = await bridge.listenerWarning(client);
+      if (missing) text = `${missing}\n\n---\n${text}`;
       // Agents that only look when they call a tool still see new messages on any call.
       if (name !== 'crosstalk_read_inbox' && name !== 'crosstalk_wait' && name !== 'crosstalk_status' && bridge.pending().length) {
         text = `New since your last call:\n${formatInbox(bridge.drain(), client)}\n\n---\n${text}`;
@@ -1098,7 +1176,10 @@ export class McpServer {
       bridge.syncReads(client);
       return { content: [{ type: 'text', text }] };
     } catch (err: any) {
-      const hint = err?.code === 'ECONNREFUSED' ? ' Is the hub running? Start one with `crosstalk serve`.' : '';
+      const hub = this.bridge.options.url ?? DEFAULT_URL;
+      const hint = err?.code === 'ECONNREFUSED'
+        ? ` Nothing is answering at ${hub}. If your invite names a different hub, pass its Hub line as \`hub\` to crosstalk_join_channel. For a hub on this machine, run \`crosstalk serve\`.`
+        : '';
       return { isError: true, content: [{ type: 'text', text: `CrossTalk error: ${err?.message ?? err}${hint}` }] };
     }
   }
