@@ -173,9 +173,20 @@ export async function runHolder(target: HolderTarget): Promise<void> {
   let ch: Channel = await ct.joinChannel(target.channel);
   const held = new Map<string, Entry>();
   let lastRequest = Date.now();
-  let stopping = false;
-  let disconnectedAt: number | undefined;
-  ct.on('disconnected', () => (disconnectedAt ??= Date.now()));
+  /**
+   * starting ──socket listening──▶ serving ◀──reconnected── disconnected(since)
+   *                                   │  ▲                        ▲
+   *                                   │  └── re-taken ── recovering (after locks.lost)
+   *                                   └── idle, signal, lost channel, cut off ──▶ stopping (final)
+   * Only `serving` renews and releases locks; only `disconnected` counts toward giving up.
+   */
+  let phase: { kind: 'starting' } | { kind: 'serving' } | { kind: 'disconnected'; since: number } | { kind: 'recovering' } | { kind: 'stopping' } = { kind: 'starting' };
+  /** True once this process owns the socket file, so only it ever removes it. */
+  let ownsSocket = false;
+  let ticker: NodeJS.Timeout | undefined;
+  ct.on('disconnected', () => {
+    if (phase.kind === 'serving' || phase.kind === 'recovering') phase = { kind: 'disconnected', since: Date.now() };
+  });
 
   const lease = (e: Entry) => Math.max(5, Math.min(MAX_LEASE_S, Math.ceil((e.deadline - Date.now()) / 1000) + 60));
 
@@ -191,19 +202,22 @@ export async function runHolder(target: HolderTarget): Promise<void> {
   };
 
   const stop = async (why: string) => {
-    if (stopping) return;
-    stopping = true;
+    if (phase.kind === 'stopping') return;
+    phase = { kind: 'stopping' };
     log(`stopping: ${why}`);
     clearInterval(ticker);
     server.close();
     // A deliberate close: the hub releases every lock straight away.
     await ct.close().catch(() => {});
-    if (process.platform !== 'win32') fs.rmSync(socketPath, { force: true });
+    if (ownsSocket && process.platform !== 'win32') fs.rmSync(socketPath, { force: true });
     process.exit(0);
   };
 
   ct.on('locks.lost', async () => {
     // The hub forgot us (restarted without saved state, or we were away too long). Take back what we can.
+    // While recovering, the ticker leaves `held` alone (the hub's snapshot doesn't have our locks yet).
+    if (phase.kind === 'stopping') return;
+    phase = { kind: 'recovering' };
     for (const e of [...held.values()]) {
       try {
         const lock = await ch.lock(e.file, e.reason, lease(e));
@@ -214,20 +228,23 @@ export async function runHolder(target: HolderTarget): Promise<void> {
         log(`lost ${e.file}: ${(err as Error).message}`);
       }
     }
+    if (phase.kind === 'recovering') phase = { kind: 'serving' };
   });
   ct.on('channel.lost', () => void stop('the hub no longer has this channel'));
   ct.on('reconnected', () => {
-    disconnectedAt = undefined;
     const again = ct.channels.get(target.channel);
     if (again) ch = again;
+    // locks.lost (emitted just before) may have us recovering; it moves on to serving itself.
+    if (phase.kind === 'disconnected') phase = { kind: 'serving' };
   });
 
   const tick = async () => {
     const now = Date.now();
-    if (disconnectedAt !== undefined) {
-      if (now - disconnectedAt > GONE_EXIT_MS) await stop('cut off from the hub');
+    if (phase.kind === 'disconnected') {
+      if (now - phase.since > GONE_EXIT_MS) await stop('cut off from the hub');
       return;
     }
+    if (phase.kind !== 'serving') return;
     for (const e of [...held.values()]) {
       const live = ch.locks.get(e.file);
       if (!live || live.holder.id !== ct.agent.id) {
@@ -261,7 +278,6 @@ export async function runHolder(target: HolderTarget): Promise<void> {
     }
     if (!held.size && Date.now() - lastRequest > IDLE_EXIT_MS) await stop('holding nothing');
   };
-  const ticker = setInterval(() => void tick().catch(err => log(`tick failed: ${(err as Error).message}`)), TICK_MS);
 
   const handle = async (req: HolderRequest): Promise<HolderResponse> => {
     lastRequest = Date.now();
@@ -344,6 +360,8 @@ export async function runHolder(target: HolderTarget): Promise<void> {
   // A socket file left by a holder that died: remove it if nothing answers there.
   if (process.platform !== 'win32' && fs.existsSync(socketPath)) {
     if (await holderIfRunning(target, { op: 'ping' }).catch(() => undefined)) {
+      // Never started serving: no ticker, and the socket belongs to the other holder.
+      phase = { kind: 'stopping' };
       await ct.close();
       log('another holder is already running');
       return;
@@ -355,7 +373,10 @@ export async function runHolder(target: HolderTarget): Promise<void> {
     server.once('error', reject);
     server.listen(socketPath, () => resolve());
   });
+  ownsSocket = true;
   if (process.platform !== 'win32') fs.chmodSync(socketPath, 0o600);
+  phase = { kind: 'serving' };
+  ticker = setInterval(() => void tick().catch(err => log(`tick failed: ${(err as Error).message}`)), TICK_MS);
   log(`holding locks for ${target.name} (pid ${process.pid})`);
 
   process.once('SIGTERM', () => void stop('SIGTERM'));

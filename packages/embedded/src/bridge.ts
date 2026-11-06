@@ -134,7 +134,13 @@ export class DeviceBridge extends EventEmitter {
   private readonly ownsClient: boolean;
   private readonly maxPayload: number;
   private readonly detach: Array<() => void> = [];
-  private stopped = false;
+  /**
+   * idle ──start()──▶ registering ──▶ connecting ──joined──▶ live
+   *   any of them ──stop() / device closes──▶ stopped (final)
+   * start() re-checks after every await, so a device that goes away while the
+   * bridge is still registering or connecting leaves no agent behind.
+   */
+  private phase: 'idle' | 'registering' | 'connecting' | 'live' | 'stopped' = 'idle';
 
   constructor(private readonly options: DeviceBridgeOptions) {
     super();
@@ -192,6 +198,12 @@ export class DeviceBridge extends EventEmitter {
       t.off?.('error', onDeviceError);
     });
 
+    const bail = async (): Promise<never> => {
+      // stop() ran meanwhile: it couldn't close a client we hadn't made yet.
+      if (this.ownsClient) await this.client?.close().catch(() => {});
+      throw new Error('Device bridge stopped before it was ready');
+    };
+    this.phase = 'registering';
     if (!this.client) {
       const name = await new Promise<string>(resolve => {
         const timer = setTimeout(() => resolve(this.options.name), this.options.registerWindowMs ?? 2000);
@@ -201,15 +213,20 @@ export class DeviceBridge extends EventEmitter {
         };
       });
       registered = undefined;
+      if (this.isStopped()) return bail();
+      this.phase = 'connecting';
       this.client = await CrossTalk.connect({
         ...this.options.hub,
         name,
         role: this.options.role ?? 'device',
         environment: 'bot'
       });
+      if (this.isStopped()) return bail();
     }
+    this.phase = 'connecting';
     const client = this.client;
     const channel = client.channel(this.options.channel) ?? (await client.joinChannel(this.options.channel));
+    if (this.isStopped()) return bail();
     this.channel = channel;
 
     // A device handles frames as they arrive, so handing one over is reading it.
@@ -236,14 +253,20 @@ export class DeviceBridge extends EventEmitter {
     });
 
     live = true;
+    this.phase = 'live';
     for (const frame of pending.splice(0)) enqueue(frame);
     this.emit('ready', channel);
     return channel;
   }
 
+  /** Read fresh: stop() can run while start() is awaiting. */
+  private isStopped(): boolean {
+    return this.phase === 'stopped';
+  }
+
   async stop(): Promise<void> {
-    if (this.stopped) return;
-    this.stopped = true;
+    if (this.phase === 'stopped') return;
+    this.phase = 'stopped';
     for (const undo of this.detach.splice(0)) undo();
     if (this.ownsClient) await this.client?.close().catch(() => {});
     this.options.transport.close();
@@ -266,7 +289,7 @@ export class DeviceBridge extends EventEmitter {
       const wait = err instanceof CrossTalkError && err.code === 'rate_limited'
         ? Number((err.details as { retryAfterMs?: number } | undefined)?.retryAfterMs ?? 1000)
         : NaN;
-      if (!(wait >= 0 && wait <= MAX_RETRY_WAIT_MS) || this.stopped) throw err;
+      if (!(wait >= 0 && wait <= MAX_RETRY_WAIT_MS) || this.isStopped()) throw err;
       await new Promise(resolve => setTimeout(resolve, wait + 50));
       return send();
     }
@@ -433,7 +456,7 @@ export class DeviceBridge extends EventEmitter {
 
   /** Returns whether the frame went out. */
   private toDevice(opcode: BinaryOpcode, payload: Buffer, flags: BinaryFrame['flags'] = {}): boolean {
-    if (this.stopped || !this.options.transport.isConnected) return false;
+    if (this.isStopped() || !this.options.transport.isConnected) return false;
     if (payload.length > this.maxPayload) {
       // Callers size payloads to fit; this only guards against a bug turning into a malformed frame.
       this.report(new Error(`Refused to send a ${payload.length}-byte payload (device limit ${this.maxPayload})`));

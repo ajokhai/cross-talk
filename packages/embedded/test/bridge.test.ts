@@ -276,3 +276,25 @@ test("a burst from a device is paced to the channel's rate limit, and long text 
     await hub.close();
   }
 });
+
+test('a device that closes while the bridge is still registering leaves no agent on the hub', async () => {
+  const hub = await startServer({ port: 0, quiet: true, stateFile: false });
+  const owner = await CrossTalk.connect({ name: 'owner', url: hub.url, reconnect: false });
+  try {
+    const ch = await owner.createChannel('unplug');
+    const link = new FakeLink();
+    const bridge = new DeviceBridge({ transport: link, channel: ch.address, name: 'flaky', hub: { url: hub.url, reconnect: false }, registerWindowMs: 200 });
+    let ready = false;
+    bridge.on('ready', () => (ready = true));
+    const starting = bridge.start();
+    link.emit('close'); // unplugged inside the register window
+    await assert.rejects(starting, /stopped before it was ready/);
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(ready, false, 'no ready after closed');
+    const names = [...(hub.hub as any).agents.values()].filter((c: any) => c.agent && c.phase !== 'closed').map((c: any) => c.agent.name);
+    assert.deepEqual(names, ['owner'], 'no orphaned device agent');
+  } finally {
+    await owner.close();
+    await hub.close();
+  }
+});

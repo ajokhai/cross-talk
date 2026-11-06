@@ -82,7 +82,13 @@ type Trigger = { at: number; text: string };
 export class WakeSupervisor {
   private pending: Trigger[] = [];
   private timer?: NodeJS.Timeout;
-  private running = false;
+  /**
+   * idle ──check()──▶ checking ──agent needs it──▶ waking ──adapter done──▶ idle
+   *                      └──── nothing unseen / check failed ────────────────┘
+   * Set before the first await, so a trigger that arrives meanwhile is
+   * rescheduled instead of starting a second check (and a second wake).
+   */
+  private busy: 'idle' | 'checking' | 'waking' = 'idle';
   private lastWake = 0;
   private stopped = false;
   readonly opts: Required<Omit<WakeOptions, 'log'>> & Pick<WakeOptions, 'log'>;
@@ -149,15 +155,27 @@ export class WakeSupervisor {
   /** @internal Decides whether the agent needs waking for what's pending, and wakes it. */
   async check(): Promise<boolean> {
     if (this.stopped || !this.pending.length) return false;
-    if (this.running) {
+    if (this.busy !== 'idle') {
       this.schedule(this.opts.cooldownMs);
       return false;
     }
-    const a = await this.attention();
+    this.busy = 'checking';
+    let a: MemberAttention | undefined;
+    try {
+      a = await this.attention();
+    } catch (err) {
+      // Couldn't see the channel (a blip): keep what's pending and look again later.
+      this.busy = 'idle';
+      this.schedule(this.opts.graceMs);
+      throw err;
+    }
     // It read everything that came in for it: it is attending, nothing to do.
     const unseen = this.pending.filter(t => !a || t.at === 0 || a.lastReadAt < t.at);
     this.pending = [];
-    if (!unseen.length) return false;
+    if (!unseen.length) {
+      this.busy = 'idle';
+      return false;
+    }
 
     const prompt = [
       `CrossTalk: you have messages in #${this.channel.name} (${this.channel.address}) that need you.`,
@@ -171,12 +189,17 @@ export class WakeSupervisor {
     if (this.opts.announce) {
       await this.channel.send(`Waking ${this.opts.agent} (${why}).`, { wake: { agent: this.opts.agent } }).catch(() => {});
     }
-    this.running = true;
+    this.busy = 'waking';
     this.lastWake = Date.now();
     try {
       await this.opts.adapter(prompt);
+    } catch (err) {
+      // The wake didn't happen: keep its triggers for the next try.
+      this.pending.unshift(...unseen);
+      this.schedule(this.opts.cooldownMs);
+      throw err;
     } finally {
-      this.running = false;
+      this.busy = 'idle';
     }
     return true;
   }
