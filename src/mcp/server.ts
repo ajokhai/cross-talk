@@ -78,8 +78,16 @@ const envOptions = (): BridgeOptions => ({
 });
 
 export class Bridge {
-  private client?: CrossTalk;
-  private connecting?: Promise<CrossTalk>;
+  /**
+   * idle ──get()──▶ connecting ──joined──▶ ready ──close()──▶ closed (final)
+   *   └────────────── close() ─────────────┴─────────────────▲
+   * A failed connect goes back to idle so the next tool call retries.
+   */
+  private state:
+    | { kind: 'idle' }
+    | { kind: 'connecting'; promise: Promise<CrossTalk> }
+    | { kind: 'ready'; client: CrossTalk }
+    | { kind: 'closed' } = { kind: 'idle' };
   private inbox: InboxItem[] = [];
   private wakers = new Set<() => void>();
   /** Per channel: the last message the model has seen, and when we last told the hub. */
@@ -91,14 +99,31 @@ export class Bridge {
     this.maxWaitSeconds = options.remote ? 55 : MAX_WAIT_SECONDS;
   }
 
+  /** Leaves the hub. A connect still in progress is finished and then closed, so no agent is left behind. */
   async close(): Promise<void> {
-    await this.client?.close();
+    const was = this.state;
+    this.state = { kind: 'closed' };
+    if (was.kind === 'ready') await was.client.close();
+    if (was.kind === 'connecting') await was.promise.then(c => c.close(), () => {});
   }
 
   async get(): Promise<CrossTalk> {
-    if (this.client) return this.client;
-    this.connecting ??= this.start().finally(() => (this.connecting = undefined));
-    return this.connecting;
+    const s = this.state;
+    if (s.kind === 'ready') return s.client;
+    if (s.kind === 'connecting') return s.promise;
+    if (s.kind === 'closed') throw new CrossTalkError('disconnected', 'This CrossTalk session has ended');
+    const promise = this.start().then(
+      client => {
+        if (this.state.kind === 'connecting' && this.state.promise === promise) this.state = { kind: 'ready', client };
+        return client;
+      },
+      err => {
+        if (this.state.kind === 'connecting' && this.state.promise === promise) this.state = { kind: 'idle' };
+        throw err;
+      }
+    );
+    this.state = { kind: 'connecting', promise };
+    return promise;
   }
 
   private async start(): Promise<CrossTalk> {
@@ -162,7 +187,6 @@ export class Bridge {
         console.error(`[crosstalk-mcp] could not join ${target}: ${err.message}`);
       }
     }
-    this.client = client;
     return client;
   }
 
