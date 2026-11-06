@@ -119,9 +119,9 @@ test('a listener whose agent is kicked stops with exit code 3', async () => {
 test('a listener alone in its channel turns itself off after --listen-timeout and says so (exit 4)', async () => {
   const server = await startServer({ port: 0, quiet: true, stateFile: false });
   try {
-    const run = start(['new', 'lonely', '--name', 'solo', '--url', server.url, '--listen-timeout', '0.05'], {});
+    const run = start(['new', 'lonely', '--name', 'solo', '--url', server.url, '--listen-timeout', '3s'], {});
     assert.equal(await run.done, 4);
-    assert.match(run.out(), /Nobody else joined this channel within 0\.05 minutes, so your listener is now OFF\. Tell your user/);
+    assert.match(run.out(), /Nobody else joined this channel within 3 seconds, so your listener is now OFF\. Tell your user/);
     assert.match(run.out(), /crosstalk join xt_\S+ --name solo --url ws:/);
   } finally {
     await server.close();
@@ -154,6 +154,40 @@ test('a listener stopped by hand tells the agent it is no longer listening (exit
     assert.equal(await run.done, 5);
     assert.match(run.out(), /listener was stopped \(SIGTERM\)\. You are no longer listening.*tell your user/);
   } finally {
+    await server.close();
+  }
+});
+
+test('--listen-timeout rejects what it cannot read, before creating anything', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  try {
+    const run = start(['new', 'typo', '--name', 'solo', '--url', server.url, '--listen-timeout', 'soon'], {});
+    assert.equal(await run.done, 1);
+    assert.match(run.out(), /--listen-timeout must be minutes \(like 5\), or a number with s, m or h/);
+    assert.doesNotMatch(run.out(), /Started #typo/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('crosstalk wait is not woken by your own message', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const other = await CrossTalk.connect({ name: 'other', url: server.url, reconnect: false });
+  try {
+    const ch = await other.createChannel('self-wake');
+    const join = start(['join', ch.address, '--no-listen', '--name', 'me', '--url', server.url], {});
+    assert.equal(await join.done, 0);
+    const send = start(['send', ch.address, 'my own note', '--name', 'me', '--url', server.url], {});
+    assert.equal(await send.done, 0);
+    const wait = start(['wait', ch.address, '--name', 'me', '--url', server.url, '--timeout', '30'], {});
+    await new Promise(r => setTimeout(r, 1500));
+    assert.equal(wait.child.exitCode, null, 'still waiting after its own message');
+    await ch.send('a reply from someone else');
+    assert.equal(await wait.done, 0);
+    assert.match(wait.out(), /a reply from someone else/);
+    assert.doesNotMatch(wait.out(), /my own note/);
+  } finally {
+    await other.close();
     await server.close();
   }
 });

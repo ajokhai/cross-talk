@@ -108,7 +108,7 @@ export class Bridge {
    * `crosstalk wait` / `crosstalk join` under the same name, long-polling the
    * hub, which exits (and so wakes the agent) when it is @mentioned or DMed.
    * MCP can't wake anyone between turns, so without one the agent misses
-   * messages once its turn ends. Re-checked every minute while missing and
+   * messages once its turn ends. Re-checked every few seconds while missing and
    * every 5 minutes after (background commands get stopped, e.g. after 2 hours).
    * Remote MCP clients can't run background commands, so they aren't nagged.
    */
@@ -120,7 +120,7 @@ export class Bridge {
     for (const ch of client.channels.values()) {
       const last = this.listenerChecks.get(ch.address);
       let listening = last?.listening ?? false;
-      if (!last || now - last.at > (last.listening ? 300_000 : 60_000)) {
+      if (!last || now - last.at > (last.listening ? 300_000 : 5_000)) {
         try {
           const snap = await client.request('channel.state', { channel: ch.address });
           listening = snap.attention.some(a => a.agent.name.toLowerCase() === me && a.listening === true);
@@ -137,7 +137,7 @@ export class Bridge {
       `⚠ NO LISTENER: nothing will wake you when someone @mentions or DMs you in ${missing.map(c => `#${c.name}`).join(', ')} once this turn ends.`,
       'Start one now as a background command (Claude Code: the Bash tool with run_in_background), then carry on:',
       ...missing.map(c => `  crosstalk wait ${c.address} --mentions --timeout 0 --name ${client.agent.name}${url}`),
-      'When it exits, handle the message it printed and start it again. This warning stops once the hub sees it listening.'
+      'When it exits, handle the message it printed and start it again. This warning stops once the hub sees it listening (a few seconds after it starts); if you just started one, do not start another.'
     ].join('\n');
   }
 
@@ -494,10 +494,19 @@ function formatChannel(client: CrossTalk, ch: Channel, recent = 15): string {
   const msgs = ch.messages.slice(-recent);
   if (msgs.length) {
     lines.push('Recent messages:', '  ' + UNTRUSTED);
-    for (const m of msgs) lines.push('  ' + formatItem({ kind: 'message', at: m.timestamp, message: m }, client));
+    // Long messages (file parts, logs) are cut here so the state stays readable and under tool output limits.
+    for (const m of msgs) {
+      const cut = m.content.length > STATE_MESSAGE_CHARS
+        ? { ...m, content: `${m.content.slice(0, STATE_MESSAGE_CHARS)}… [${m.content.length - STATE_MESSAGE_CHARS} more characters cut from this summary]` }
+        : m;
+      lines.push('  ' + formatItem({ kind: 'message', at: m.timestamp, message: cut }, client));
+    }
   }
   return lines.join('\n');
 }
+
+/** Longest message text crosstalk_channel_state shows in its recent messages. */
+const STATE_MESSAGE_CHARS = 500;
 
 const channelArg = {
   type: 'string',
@@ -783,6 +792,17 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 /** Normalised comparison of two hub URLs (case, trailing slash). */
 const sameHubUrl = (a: string, b: string) => a.trim().toLowerCase().replace(/\/+$/, '') === b.trim().toLowerCase().replace(/\/+$/, '');
+
+/** Why a call's arguments are wrong when it names one the tool doesn't take, else undefined. */
+export function unknownArgs(name: string, args: Record<string, unknown>): string | undefined {
+  const tool = TOOLS.find(t => t.name === name);
+  const props = (tool?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  if (!props) return undefined;
+  const bad = Object.keys(args).filter(k => !(k in props));
+  if (!bad.length) return undefined;
+  const known = Object.keys(props);
+  return `${name} has no argument${bad.length === 1 ? '' : 's'} ${bad.map(b => `"${b}"`).join(', ')}. ${known.length ? `It takes: ${known.join(', ')}.` : 'It takes no arguments.'} Nothing was done; call it again with those names.`;
+}
 
 async function callTool(bridge: Bridge, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
   // An invite names its hub: joining a channel on another hub moves this agent there.
@@ -1163,12 +1183,16 @@ export class McpServer {
   private async call(name: string, args: Record<string, unknown>, signal: AbortSignal) {
     const bridge = this.bridge;
     try {
+      // A misspelt argument would otherwise be dropped silently (a channel named #untitled, a filter that isn't applied).
+      const unknown = unknownArgs(name, args);
+      if (unknown) return { isError: true, content: [{ type: 'text', text: `CrossTalk error: ${unknown}` }] };
       if (name === 'crosstalk_wait') bridge.get().then(c => bridge.syncReads(c), () => {});
       let text = await callTool(bridge, name, args, signal);
       const client = await bridge.get();
       // Until the hub sees something listening under this agent's name, say so on every result.
       const missing = await bridge.listenerWarning(client);
-      if (missing) text = `${missing}\n\n---\n${text}`;
+      // Create and join lead with the invite / channel, so the warning follows them there.
+      if (missing) text = name === 'crosstalk_create_channel' || name === 'crosstalk_join_channel' ? `${text}\n\n---\n${missing}` : `${missing}\n\n---\n${text}`;
       // Agents that only look when they call a tool still see new messages on any call.
       if (name !== 'crosstalk_read_inbox' && name !== 'crosstalk_wait' && name !== 'crosstalk_status' && bridge.pending().length) {
         text = `New since your last call:\n${formatInbox(bridge.drain(), client)}\n\n---\n${text}`;
