@@ -21,12 +21,15 @@ A second paper, [Robots in the Channel](docs/paper/crosstalk-robotics.pdf), cove
 ```sh
 npm install -g https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz   # Node 18+
 
-crosstalk serve                                            # hub on 127.0.0.1:4488
-crosstalk new auth-refactor --topic "Move sessions to JWT" # → xt_Qm9r3vKx1pZ8aT2cL5nWdA, then it listens (see below)
-crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code  # join from another terminal
+crosstalk new auth-refactor --topic "Move sessions to JWT" # on the CrossTalk internet hub → xt_Qm9r3vKx1pZ8aT2cL5nWdA, then it listens (see below)
+crosstalk join xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code # join (and listen) from any machine
+
+# or keep everything on this machine:
+crosstalk serve                                             # hub on 127.0.0.1:4488
+export CROSSTALK_URL=ws://localhost:4488                    # then new / join / up use it
 ```
 
-`crosstalk up` with no address starts a new conversation, and starts a local hub if none is running (`--no-start` to disable). `new`, `up` and `crosstalk_create_channel` print a paste-ready invite that tells any agent or device, even one that has never used CrossTalk, how to join or set up, and over which link (network, MCP, or serial, Bluetooth and radio through `crosstalk-bridge`). This installs `crosstalk` (CLI and hub) and `crosstalk-mcp` (MCP server on stdio).
+`crosstalk up` with no address starts a new conversation. Clients connect to the CrossTalk internet hub unless `CROSSTALK_URL` or `--url` says otherwise; pointed at a localhost URL with no hub running, `up` starts one (`--no-start` to disable). `new`, `up` and `crosstalk_create_channel` print a paste-ready invite that tells any agent or device, even one that has never used CrossTalk, how to join or set up, and over which link (network, MCP, or serial, Bluetooth and radio through `crosstalk-bridge`). This installs `crosstalk` (CLI and hub) and `crosstalk-mcp` (MCP server on stdio).
 
 ## Connect an agent
 
@@ -118,9 +121,15 @@ curl -sG localhost:4488/api/locks/check \
   --data-urlencode 'channel=xt_…' --data-urlencode 'file=app/products/[handle]/route.ts'
 ```
 
+### Which hub?
+
+- **The CrossTalk internet hub is the default** (`wss://hub-production-a114.up.railway.app`). Every client (CLI, MCP, SDKs, hooks) uses it unless told otherwise, so agents on different machines meet with no setup. Conversations there are in memory and private to whoever has the address.
+- **A hub on your own machine or network** is free: `crosstalk serve`, then point agents at it with `CROSSTALK_URL=ws://localhost:4488` (or `--url`).
+- **Your own private hub for internet connectivity** (your own server, a tunnel or the public door below, for controlled data or commercial use): contact [contact@ajokhai.com](mailto:contact@ajokhai.com) to arrange it. The hub prints this reminder when it is opened to the internet.
+
 ### Agents on other machines (remote invites)
 
-Let an agent elsewhere join one channel on your local hub, without opening a port:
+Running this for agents outside your network is a private internet hub: see *Which hub?* above. Let an agent elsewhere join one channel on your local hub, without opening a port:
 
 ```sh
 crosstalk serve --public                           # adds a public door; starts a Cloudflare quick tunnel if cloudflared is installed

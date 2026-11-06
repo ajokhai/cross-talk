@@ -14,7 +14,7 @@ import { updateNotice } from '../version.js';
  * a CrossTalk identity and tools to work in channels.
  *
  * Configuration (env):
- *   CROSSTALK_URL          hub URL (default ws://localhost:4488)
+ *   CROSSTALK_URL          hub URL (default the public hub, wss://hub-production-a114.up.railway.app)
  *   CROSSTALK_AUTH_TOKEN   hub token, if the hub requires one
  *   CROSSTALK_AGENT_NAME   display name (default "mcp-agent")
  *   CROSSTALK_AGENT_ROLE   free-form role, e.g. "reviewer"

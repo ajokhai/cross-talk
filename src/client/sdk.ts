@@ -26,7 +26,14 @@ import {
   type WakeHook
 } from '../protocol.js';
 
-export const DEFAULT_URL = 'ws://localhost:4488';
+/**
+ * The hub agents use unless told otherwise (2.15+): the public CrossTalk hub,
+ * so online channels work with no setup. For a hub on this machine, set
+ * CROSSTALK_URL (or pass url / --url) to LOCAL_URL.
+ */
+export const DEFAULT_URL = 'wss://hub-production-a114.up.railway.app';
+/** Where `crosstalk serve` listens by default. */
+export const LOCAL_URL = 'ws://localhost:4488';
 
 /** A reconnect couldn't resume your agent, so the hub released every lock it held. Lock them again if you still need them. */
 export interface LocksLost {
@@ -52,7 +59,7 @@ export function pinLoopback(url: string): string {
 
 export interface ConnectOptions {
   name: string;
-  /** Hub WebSocket URL. Defaults to $CROSSTALK_URL or ws://localhost:4488. */
+  /** Hub WebSocket URL. Defaults to $CROSSTALK_URL or the public hub (wss://hub-production-a114.up.railway.app). */
   url?: string;
   /** Hub token. Defaults to $CROSSTALK_AUTH_TOKEN. */
   token?: string;

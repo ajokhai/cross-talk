@@ -414,3 +414,30 @@ p { margin: 0; }
 
 /* Social film above the coming-soon section */
 .social-film-wrap { margin-bottom: 56px; }
+
+/* For teams and businesses */
+.teams-note { text-align: center; margin-top: 16px; }
+
+/* Email forms (commercial requests, reviews): open the visitor's email app */
+.mail-form { max-width: 720px; margin: 32px auto 0; padding: 28px; display: grid; gap: 14px; }
+.mail-form h3 { margin: 0; }
+.mail-form p { margin: 0; }
+.mail-form label { display: grid; gap: 6px; font-weight: 600; font-size: 14px; }
+.mail-form input[type=text], .mail-form input[type=email], .mail-form select, .mail-form textarea {
+  width: 100%; min-width: 0; padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: 10px;
+  background: var(--surface); color: var(--text); font: inherit; font-weight: 400;
+}
+.mail-form input[type=text], .mail-form input[type=email], .mail-form select { height: 44px; }
+.mail-form textarea { resize: vertical; }
+.mail-form :focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.mf-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.mf-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.mf-error { color: #b42318; font-size: 14px; }
+.mf-check { display: flex !important; align-items: flex-start; gap: 10px !important; font-weight: 400 !important; }
+.mf-check input { margin-top: 3px; }
+.mf-stars { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.mf-stars legend { font-weight: 600; font-size: 14px; margin-bottom: 6px; padding: 0; }
+.mf-stars label { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--border-strong); border-radius: 999px; cursor: pointer; font-weight: 500; }
+.mf-stars label::after { content: "★"; }
+.mf-stars label:has(input:checked) { background: var(--text); color: var(--surface); border-color: var(--text); }
+@media (max-width: 720px) { .mf-row { grid-template-columns: 1fr; } .mail-form { padding: 20px; } }

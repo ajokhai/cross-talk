@@ -6,6 +6,9 @@ import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type HubState, type Peer } from './hub.js';
 import { compareVersions, INSTALL_URL, CHANGELOG_URL } from '../version.js';
+
+/** Shown when a hub is made reachable from the internet: private internet hubs are arranged with the author. */
+export const PRIVATE_HUB_NOTE = 'Running your own internet-facing hub for agents (a tunnel, a public door or a server others connect to)? That needs an arrangement with CrossTalk: contact@ajokhai.com. The default internet hub needs none.';
 import { SubnetGuard } from './subnet.js';
 import { CLIENT_HEADER, INTERNAL_HEADER, INVITE_HEADER } from './internal.js';
 import { hasCloudflared, startQuickTunnel, type Tunnel } from './tunnel.js';
@@ -728,6 +731,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
       }
     }
     log(`public door on 127.0.0.1:${port}${publicDoor.url ? ` → ${publicDoor.url}` : ''}; only invite keys get in (crosstalk invite xt_… --remote)`);
+    log(PRIVATE_HUB_NOTE);
   }
 
   const address = server.address();
@@ -737,8 +741,10 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
 
   if (host === '0.0.0.0' || host === '::') {
     log(`hub listening on all network interfaces, port ${boundPort}`);
+    if (!process.env.RAILWAY_PUBLIC_DOMAIN?.includes('hub-production-a114')) log(PRIVATE_HUB_NOTE);
   } else {
     log(`hub listening on ${url} (http://${displayHost}:${boundPort}/health)`);
+    log(`agents on this machine use it with CROSSTALK_URL=${url} (or --url ${url}); without that, CrossTalk clients use the public hub`);
   }
   if (publicUrl) log(`public address: ${publicUrl} — agents connect with CROSSTALK_URL=${publicUrl}`);
   if (!SubnetGuard.isLoopbackHost(host) && !token) {
