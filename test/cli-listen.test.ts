@@ -78,3 +78,24 @@ test('crosstalk new fails (non-zero) when it cannot start the listener', async (
   assert.notEqual(code, 0);
   assert.doesNotMatch(run.out(), /Listening as/);
 });
+
+test('the listener survives its session ending: it re-registers, rejoins, and still wakes on @mention', async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const owner = await CrossTalk.connect({ name: 'owner', url: server.url, reconnect: false });
+  try {
+    const ch = await owner.createChannel('survive');
+    const run = start(['join', ch.address, '--name', 'phoenix', '--url', server.url], {});
+    await until(() => /Listening as phoenix/.test(run.out()));
+    const hub: any = server.hub;
+    const first = [...hub.agents.values()].find((c: any) => c.agent?.name === 'phoenix');
+    const firstId = first.agent.id;
+    hub.endRemote(first, 'test: session ended'); // like an expiry: the next poll gets 401
+    await until(() => [...hub.agents.values()].some((c: any) => c.agent?.name === 'phoenix' && c.agent.id !== firstId && c.channels.has(ch.address)), 30_000);
+    await ch.send('@phoenix still there?');
+    assert.equal(await run.done, 0);
+    assert.match(run.out(), /still there\?/);
+  } finally {
+    await owner.close();
+    await server.close();
+  }
+});

@@ -2101,6 +2101,10 @@ export class MeshHub {
     }
     for (const channel of this.channels.values()) {
       for (const [id] of channel.reads) if (!channel.members.has(id)) channel.reads.delete(id);
+      // Agents that didn't come back (no live channel, dead invite) never leave
+      // through removeMember, so close what they left open the same way it would.
+      for (const q of [...channel.questions.values()]) if (!channel.members.has(q.from.id)) this.closeQuestion(channel, q, 'cancelled');
+      for (const claim of [...channel.claims.values()]) if (!channel.members.has(claim.owner.id)) this.closeClaim(channel, claim, 'dropped');
       if (!channel.members.size) channel.emptySince ??= now;
     }
     const locks = this.locks.restore(state.locks.filter(l => this.channels.get(l.channel)?.members.has(l.holder.id)));

@@ -299,29 +299,36 @@ function limitsFrom(opts: { maxChars?: string; rate?: string; burst?: string }):
  * agent. Survives network blips and hub restarts (re-registers and rejoins).
  */
 async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json?: boolean }): Promise<void> {
-  const me = agent.agent!.id;
+  // Read the id each time: after a hub restart the session is re-created with a new one.
+  const me = () => agent.agent!.id;
   const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
-    f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me && !!f.message.mentions?.some(m => m.id === me));
+    f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me() && !!f.message.mentions?.some(m => m.id === me()));
   const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
     opts.json ? JSON.stringify(f.message) : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
   // A first, instant poll: if this fails, the listener (and so the start) failed.
   let pending = (await agent.events(0)).filter(wanted);
   console.log(green(`✔ Listening as ${agent.agent!.name}`) + dim(' — this command now waits and exits when you are @mentioned or DMed. Run it as a background command; start it again after each wake.'));
   let failures = 0;
+  // listening ──session expired──▶ rejoining ──back in the channel──▶ listening
+  // Any failure backs off and retries; more than 8 in a row ends the listener.
+  let rejoining = false;
   for (;;) {
     if (pending.length) {
       for (const f of pending) console.log(show(f));
       return;
     }
     try {
+      if (rejoining) {
+        await agent.open();
+        await agent.request('channel.join', { channel });
+        rejoining = false;
+      }
       pending = (await agent.events(55)).filter(wanted);
       failures = 0;
     } catch (err) {
       if (++failures > 8) throw err;
+      if (err instanceof CrossTalkError && err.code === 'not_registered') rejoining = true;
       await new Promise(r => setTimeout(r, Math.min(500 * 2 ** failures, 15_000)));
-      if (err instanceof CrossTalkError && err.code === 'not_registered') {
-        await agent.open().then(() => agent.request('channel.join', { channel })).catch(() => {});
-      }
       pending = [];
     }
   }
@@ -1094,13 +1101,14 @@ program
   .action(async (target: string, opts) => {
     try {
       const { agent, channel } = await oneShot(target, opts);
-      const me = agent.agent!.id;
+      // Read the id each time: after a hub restart the session is re-created with a new one.
+      const me = () => agent.agent!.id;
       const seconds = Number(opts.timeout);
       const deadline = seconds > 0 ? Date.now() + seconds * 1000 : Infinity;
       // Every message on this session counts, whichever channel it is in: the
       // hub hands each event out once, so skipping one here would lose it.
       const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
-        f.type === 'dm' || (f.type === 'message' && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me)));
+        f.type === 'dm' || (f.type === 'message' && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me())));
       const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
         opts.json ? JSON.stringify(f.message)
           : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
@@ -1110,27 +1118,32 @@ program
         const { messages } = await agent.request('channel.state', { channel });
         const at = messages.findIndex(m => m.id === opts.since);
         const missed = (at < 0 ? [] : messages.slice(at + 1))
-          .filter(m => m.from.id !== me && (!opts.mentions || !!m.mentions?.some(x => x.id === me)));
+          .filter(m => m.from.id !== me() && (!opts.mentions || !!m.mentions?.some(x => x.id === me())));
         if (missed.length) {
           for (const m of missed) console.log(opts.json ? JSON.stringify(m) : formatMessage(m));
           return;
         }
       }
       let failures = 0;
+      // listening ──session expired──▶ rejoining ──back in the channel──▶ listening
+      let rejoining = false;
       while (Date.now() < deadline) {
         const remaining = Math.ceil((deadline - Date.now()) / 1000);
         let events: ServerFrame[];
         try {
+          if (rejoining) {
+            await agent.open();
+            await agent.request('channel.join', { channel });
+            rejoining = false;
+          }
           events = await agent.events(Math.min(remaining, 55));
           failures = 0;
         } catch (err) {
           // A long wait outlives network blips and hub restarts: retry, and
-          // re-register if the hub forgot the session.
+          // re-register and rejoin if the hub forgot the session.
           if (++failures > 8) throw err;
+          if (err instanceof CrossTalkError && err.code === 'not_registered') rejoining = true;
           await new Promise(r => setTimeout(r, Math.min(500 * 2 ** failures, 15_000)));
-          if (err instanceof CrossTalkError && err.code === 'not_registered') {
-            await agent.open().then(() => agent.request('channel.join', { channel })).catch(() => {});
-          }
           continue;
         }
         const hits = events.filter(wanted);

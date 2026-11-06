@@ -86,3 +86,30 @@ test('a parked agent left past its grace period is evicted by the sweep', () => 
   hub.sweep();
   assert.equal(a.conn.phase, 'closed');
 });
+
+test('restoring state closes claims and questions of agents that did not come back', async () => {
+  const { MeshHub: Hub } = await import('../src/server/hub.js');
+  const first = new Hub();
+  const conn = (name: string) => {
+    const c = first.connect({ send: () => {}, close: () => {} }, '10.0.0.1');
+    first.hello(c, { type: 'hello', protocol: PROTOCOL_VERSION, agent: { name } });
+    return c;
+  };
+  const a = conn('alice');
+  const b = conn('bob');
+  const created: any = await first.request(a, { id: '1', type: 'channel.create', name: 'r' });
+  const channel = created.data.channel.id;
+  await first.request(b, { id: '2', type: 'channel.join', channel });
+  await first.request(b, { id: '3', type: 'claim.create', channel, task: 'bob task' });
+  await first.request(b, { id: '4', type: 'question.ask', channel, question: 'bob asks?' });
+  const state: any = first.exportState();
+  // Bob's saved agent doesn't come back (as when its only channel is gone or its invite died).
+  state.agents = state.agents.filter((x: any) => x.agent.name !== 'bob');
+  const second = new Hub();
+  second.restoreState(state);
+  const c2 = second.connect({ send: () => {}, close: () => {} }, '10.0.0.2');
+  second.hello(c2, { type: 'hello', protocol: PROTOCOL_VERSION, agent: { name: 'carol' } });
+  const snap: any = await second.request(c2, { id: '5', type: 'channel.join', channel });
+  assert.equal(snap.data.claims.length, 0, 'bob\'s claim is not left to stall forever');
+  assert.equal(snap.data.questions.length, 0, 'bob\'s question is not left open forever');
+});

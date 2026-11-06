@@ -81,3 +81,19 @@ test('a throwing "reconnected" listener does not start a second connection', asy
     await server.close();
   }
 });
+
+test('MCP bridge closed while it is still connecting leaves no agent behind', async () => {
+  const { Bridge } = await import('../src/mcp/server.js');
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  try {
+    const bridge = new Bridge({ name: 'remote-agent', url: server.url });
+    const connecting = bridge.get();
+    await bridge.close(); // e.g. the remote MCP session is ended at once
+    await connecting.catch(() => {});
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(present(server, 'remote-agent'), 0);
+    await assert.rejects(bridge.get(), /ended/);
+  } finally {
+    await server.close();
+  }
+});
