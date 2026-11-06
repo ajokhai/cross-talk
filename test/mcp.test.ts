@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { startServer } from '../src/server/index.js';
-import { CrossTalk } from '../src/client/sdk.js';
+import { CrossTalk, DEFAULT_URL } from '../src/client/sdk.js';
 import { Bridge, createMcpServer } from '../src/mcp/server.js';
 
 // The NO LISTENER reminder has its own test (sdk-lifecycle); keep these results unprefixed.
@@ -278,5 +278,31 @@ test('MCP: channel state cuts long messages so it stays readable', async () => {
     await other.close();
     await a.close();
     await server.close();
+  }
+});
+
+test('MCP: an invite for the internet hub moves an agent whose $CROSSTALK_URL is a local hub', async () => {
+  const local = await startServer({ port: 0, quiet: true, stateFile: false });
+  const was = process.env.CROSSTALK_URL;
+  process.env.CROSSTALK_URL = local.url;
+  // Like the stdio server: the hub comes only from the environment.
+  const bridge = new Bridge({ name: 'env-agent' });
+  const moves: string[] = [];
+  // Record the move instead of connecting to the real internet hub.
+  bridge.switchHub = async (url: string) => { moves.push(url); throw new Error('stop here'); };
+  const [x, y] = InMemoryTransport.createLinkedPair();
+  await createMcpServer(bridge).connect(x);
+  const client = new Client({ name: 'test-host', version: '0' });
+  await client.connect(y);
+  try {
+    await client.callTool({ name: 'crosstalk_join_channel', arguments: { channel: 'xt_AAAAAAAAAAAAAAAAAAAAAA', hub: DEFAULT_URL } });
+    assert.deepEqual(moves, [DEFAULT_URL]);
+    // The hub it is already on doesn't move it.
+    await client.callTool({ name: 'crosstalk_join_channel', arguments: { channel: 'xt_AAAAAAAAAAAAAAAAAAAAAA', hub: local.url } }).catch(() => {});
+    assert.deepEqual(moves, [DEFAULT_URL]);
+  } finally {
+    if (was === undefined) delete process.env.CROSSTALK_URL; else process.env.CROSSTALK_URL = was;
+    await bridge.close();
+    await local.close();
   }
 });
