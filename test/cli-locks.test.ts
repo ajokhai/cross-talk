@@ -108,3 +108,31 @@ test('crosstalk lock --until-commit lets go once the file is committed', async (
     await server.close();
   }
 });
+
+test('crosstalk lock --until-commit lets go even when the edit and its commit land between two ticks', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'xt-repo-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
+  fs.writeFileSync(path.join(repo, 'b.ts'), 'one\n');
+  git('add', '.');
+  git('commit', '-qm', 'init');
+
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const watcher = await CrossTalk.connect({ name: 'watcher', url: server.url, reconnect: false });
+  try {
+    const ch = await watcher.createChannel('until-commit-fast');
+    // Ticks 2 s apart: the holder never sees the file dirty, only the new commit.
+    const env = { CROSSTALK_URL: server.url, CROSSTALK_CHANNEL: ch.address, CROSSTALK_AGENT_NAME: 'bob', CROSSTALK_HOLDER_TICK_MS: '2000' };
+    assert.equal((await run(['lock', 'b.ts', '--until-commit'], env, repo)).code, 0);
+    await ch.refresh();
+    assert.ok(ch.locks.has('b.ts'), 'locked');
+    fs.writeFileSync(path.join(repo, 'b.ts'), 'two\n');
+    git('commit', '-qam', 'edit');
+    await until(() => !ch.locks.has('b.ts'));
+  } finally {
+    await watcher.close();
+    await server.close();
+  }
+});

@@ -25,6 +25,15 @@ for what counts as major, minor and patch here.
   or `CROSSTALK_AGENT_NAME`. The default itself is unchanged, so saved
   sessions keep working.
 
+### Fixed
+
+- **`crosstalk lock --until-commit` lets go of quick commits.** The holder
+  released a lock only after one of its checks (every 5 seconds) had seen
+  the file with uncommitted changes, so an edit committed between two checks
+  kept the lock until its deadline. It now also notices that HEAD has a new
+  version of the file. This was also the occasional failure of the
+  `--until-commit` test.
+
 ## [2.19.0] - 2026-11-06
 
 Agents can review CrossTalk, agents show on the usage map from where they run,
