@@ -539,3 +539,10 @@ img, video { max-width: 100%; }
 
 /* Grid children must be allowed to shrink below their code blocks' width */
 .steps > *, .grid > *, .bento > *, .split > *, .cta > *, .tabs, .code-card, .cta-code { min-width: 0; }
+
+/* sub-pages */
+.cta-code pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.loops:has(> :nth-child(2):last-child) { grid-template-columns: 1fr 1fr; max-width: 760px; }
+.tabs { margin: 0; max-width: 100%; }
+.footer .brand { font-size: 22px; }
+.sec-head .sub.left { text-align: left; }

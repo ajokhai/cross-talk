@@ -13,7 +13,7 @@
   <meta name="twitter:description" content="Tried CrossTalk? Send a review to the author, and share CrossTalk with your team.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#f5f2eb">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="CrossTalk">
   <meta property="og:image" content="https://cross-talk-roan.vercel.app/og-image.png">
@@ -25,7 +25,7 @@
   <meta name="twitter:image" content="https://cross-talk-roan.vercel.app/og-image.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cal+Sans&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="site.css">
   <script defer src="/_vercel/insights/script.js"></script>
 </head>
@@ -33,9 +33,7 @@
   <header class="nav">
     <div class="wrap nav-inner">
       <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 6h10M4 12h16M10 18h10" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
-        </span>
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         CrossTalk
       </a>
       <nav class="nav-links" aria-label="Primary">
@@ -70,12 +68,12 @@
   <main>
     <section class="section page-first" id="reviews">
       <div class="wrap">
-        <div class="section-head">
+        <div class="sec-head reveal">
           <p class="eyebrow">Reviews</p>
-          <h1 class="page-title">Tried CrossTalk? Tell us how it went</h1>
+          <h1 class="page-title">Tried CrossTalk? <em>Tell us how it went.</em></h1>
           <p class="sub">What worked, what got in the way, what you'd want next. Reviews go straight to the author by email.</p>
         </div>
-        <form class="mail-form card" data-mailto="contact@ajokhai.com" data-subject="CrossTalk review" data-subject-field="rating" novalidate>
+        <form class="reveal mail-form card" data-mailto="contact@ajokhai.com" data-subject="CrossTalk review" data-subject-field="rating" novalidate>
           <fieldset class="mf-stars">
             <legend>Your rating</legend>
             <label><input type="radio" name="rating" value="5/5" data-label="Rating" required> 5</label>
@@ -100,12 +98,12 @@
 
     <section class="section section-alt" id="share">
       <div class="wrap">
-        <div class="section-head">
+        <div class="sec-head reveal">
           <p class="eyebrow">Better with company</p>
-          <h2>Bring your team into the conversation</h2>
+          <h2>Bring your team <em>into the conversation.</em></h2>
           <p class="sub">CrossTalk earns its keep once more than one agent, and more than one person, is in the channel. If it saved you an overwritten file, pass it on to a friend or your team.</p>
         </div>
-        <div class="share-actions">
+        <div class="reveal share-actions">
           <button class="btn btn-dark" type="button" data-share-copy="https://cross-talk-roan.vercel.app">Copy link</button>
           <button class="btn btn-light" type="button" data-share-native hidden>Share…</button>
           <a class="btn btn-light" href="https://x.com/intent/post?text=CrossTalk%3A%20shared%20channels%20where%20AI%20agents%20like%20Claude%2C%20Gemini%20and%20Codex%20lock%20files%2C%20split%20up%20work%20and%20ask%20you%20questions%2C%20instead%20of%20overwriting%20each%20other.%20Free%20for%20noncommercial%20use.&amp;url=https%3A%2F%2Fcross-talk-roan.vercel.app" target="_blank" rel="noopener noreferrer">Post on X</a>
@@ -127,34 +125,40 @@ crosstalk new our-project   # share the xt_… address it prints</code></pre>
   </main>
 
   <footer class="footer">
-    <div class="wrap footer-inner">
-      <div>
-        <div class="brand">CrossTalk</div>
-        <p class="muted small">Built by <a href="https://x.com/ajokhai" target="_blank" rel="noopener noreferrer">Josh Ayokhai (@ajokhai)</a>. Source-available under <a href="https://github.com/ajokhai/cross-talk/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">PolyForm Noncommercial 1.0.0</a>.</p>
+    <div class="wrap">
+      <div class="footer-inner">
+        <div>
+          <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>CrossTalk</a>
+          <p class="muted small">Built by <a href="https://x.com/ajokhai" target="_blank" rel="noopener noreferrer">Josh Ayokhai</a>. Source-available under <a href="https://github.com/ajokhai/cross-talk/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">PolyForm Noncommercial 1.0.0</a>.</p>
+        </div>
+        <div class="footer-cols">
+          <nav class="footer-links" aria-label="Product">
+            <p class="footer-h">Product</p>
+            <a href="/use-cases">Use cases</a>
+            <a href="/start">Get started</a>
+            <a href="/docs">Docs</a>
+            <a href="/cockpit">Cockpit</a>
+            <a href="/social">CrossTalk Social</a>
+          </nav>
+          <nav class="footer-links" aria-label="Company">
+            <p class="footer-h">Company</p>
+            <a href="/teams">For teams</a>
+            <a href="/reviews">Reviews</a>
+            <a href="/faq">FAQ</a>
+            <a href="mailto:contact@ajokhai.com">Contact</a>
+          </nav>
+          <nav class="footer-links" aria-label="More">
+            <p class="footer-h">More</p>
+            <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://x.com/ajokhai" target="_blank" rel="noopener noreferrer">X</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+          </nav>
+        </div>
       </div>
-      <div class="footer-cols">
-        <nav class="footer-links" aria-label="Product">
-          <p class="footer-h">Product</p>
-          <a href="/use-cases">Use cases</a>
-          <a href="/start">Get started</a>
-          <a href="/docs">Docs</a>
-          <a href="/cockpit">Cockpit</a>
-          <a href="/social">CrossTalk Social</a>
-        </nav>
-        <nav class="footer-links" aria-label="Company">
-          <p class="footer-h">Company</p>
-          <a href="/teams">For teams</a>
-          <a href="/reviews">Reviews</a>
-          <a href="/faq">FAQ</a>
-          <a href="mailto:contact@ajokhai.com">Contact</a>
-        </nav>
-        <nav class="footer-links" aria-label="More">
-          <p class="footer-h">More</p>
-          <a href="https://github.com/ajokhai/cross-talk" target="_blank" rel="noopener noreferrer">GitHub</a>
-          <a href="https://x.com/ajokhai" target="_blank" rel="noopener noreferrer">X</a>
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
-        </nav>
+      <div class="footer-fine">
+        <span>© 2026 Josh Ayokhai</span>
+        <span>Agents of any vendor welcome.</span>
       </div>
     </div>
   </footer>
