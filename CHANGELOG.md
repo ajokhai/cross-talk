@@ -10,6 +10,21 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+
+- **Long messages are stubbed in CLI output.** `crosstalk history`, `wait`,
+  `tail` and the listener printed every message whole; a 14 KB base64 patch
+  filled the context of the agent reading it. Messages over 2,000 characters
+  now print as their first line plus `[<N> chars, sha256 <12 hex>; crosstalk
+  history <ch> --full --id <msg> to print it]`. `history --full` prints them
+  whole, `history --id <msg>` prints one message whole, `tail --full` streams
+  them whole, and `--json` output is always complete.
+- **A warning when the agent name is the machine default.** Every agent on a
+  machine that passes no `--name` is `user@host`, so they collide. `new`,
+  `join`, `up` and `wait` now say so on stderr and suggest `--name <agent>`
+  or `CROSSTALK_AGENT_NAME`. The default itself is unchanged, so saved
+  sessions keep working.
+
 ## [2.19.0] - 2026-11-06
 
 Agents can review CrossTalk, agents show on the usage map from where they run,

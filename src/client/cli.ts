@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import os from 'node:os';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import readline from 'node:readline';
@@ -81,12 +82,44 @@ const time = (ts: number) => dim(new Date(ts).toLocaleTimeString());
 /** An agent's name, flagged when it joined from outside this machine with a remote invite (#13). */
 const who = (ref: { name: string; remote?: boolean }) => bold(cyan(ref.name)) + (ref.remote ? ' ' + yellow('[remote]') : '');
 
-function formatMessage(m: ChannelMessage | DirectMessage, label?: string): string {
+/**
+ * Messages longer than this are printed as a stub (first line, size, hash and
+ * how to print the whole thing) unless asked for in full: a pasted patch or
+ * a base64 blob read by an agent would otherwise fill its context. `--json`
+ * output is always complete.
+ */
+const STUB_OVER = 2000;
+const STUB_HEAD = 120;
+
+/** A long message's stand-in. The hash tells two versions of a big message apart. */
+function stub(content: string, how: string): string {
+  const head = content.split('\n', 1)[0].slice(0, STUB_HEAD);
+  const sha = crypto.createHash('sha256').update(content).digest('hex').slice(0, 12);
+  return `${head}… ${dim(`[${content.length} chars, sha256 ${sha}; ${how}]`)}`;
+}
+
+function formatMessage(m: ChannelMessage | DirectMessage, label?: string, full = false): string {
+  const long = !full && m.content.length > STUB_OVER;
   if ('channel' in m) {
-    const body = m.kind === 'shorthand' && m.shorthand ? `${yellow(m.shorthand.raw)} ${dim(`(${m.content})`)}` : m.content;
+    const text = long ? stub(m.content, `crosstalk history ${m.channel} --full --id ${m.id} to print it`) : m.content;
+    const body = m.kind === 'shorthand' && m.shorthand ? `${yellow(m.shorthand.raw)} ${dim(`(${m.content})`)}` : text;
     return `${time(m.timestamp)} ${label ? dim('#' + label) + ' ' : ''}${who(m.from)}: ${body}`;
   }
-  return `${time(m.timestamp)} ${magenta('DM')} ${who(m.from)} ${dim(`(${m.from.id})`)}: ${m.content}`;
+  const text = long ? stub(m.content, '--json prints it in full') : m.content;
+  return `${time(m.timestamp)} ${magenta('DM')} ${who(m.from)} ${dim(`(${m.from.id})`)}: ${text}`;
+}
+
+/** True when --name/-n was on the command line; the parser keeps no record of which options fell back to their default. */
+const namedExplicitly = () => argv.some(a => a === '-n' || a === '--name' || a.startsWith('--name='));
+
+/**
+ * Every agent on a machine gets the same default name (user@host), so two
+ * agents that don't pass --name can't be told apart or @mentioned reliably.
+ * Said on stderr by the commands that put an agent in a channel.
+ */
+function warnDefaultName(opts: { name: string; json?: boolean }): void {
+  if (opts.json || process.env.CROSSTALK_AGENT_NAME || namedExplicitly()) return;
+  console.error(yellow(`! No --name given, so you are "${opts.name}": the default for every agent on this machine, which can't tell them apart or @mention you reliably. Pass --name <agent> (or set CROSSTALK_AGENT_NAME) and keep using it.`));
 }
 
 function fail(err: unknown): never {
@@ -453,6 +486,7 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
 
 const createAction = async (label: string | undefined, opts: any) => {
   try {
+    warnDefaultName(opts);
     if (opts.listen) listenTimeoutMinutes(opts);
     const agent = new HttpAgent({ name: opts.name, url: opts.url });
     await agent.open();
@@ -513,6 +547,7 @@ program
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (target: string, opts) => {
     try {
+      warnDefaultName(opts);
       if (opts.listen) listenTimeoutMinutes(opts);
       const { agent, channel, snapshot } = await oneShot(target, opts);
       console.log(green(`✔ ${agent.agent!.name} joined #${snapshot.channel.name}`) + dim(` (${snapshot.members.length} here) ${describeHub(opts.url)}`));
@@ -537,6 +572,7 @@ program
   .option('--no-start', 'do not start a local hub if none is running (only ever happens for localhost URLs)')
   .option('--invite <key>', 'remote invite key (xi_…) for a hub\'s public door, or $CROSSTALK_INVITE')
   .action(async (address: string | undefined, opts) => {
+    warnDefaultName(opts);
     let ct: CrossTalk;
     let ch: Channel;
     try {
@@ -862,15 +898,23 @@ program
   .command('history <address>')
   .description('Print the channel\'s recent messages and exit (no listener needed)')
   .option('-c, --count <n>', 'how many messages', '20')
-  .option('--json', 'print raw JSON')
+  .option('--full', 'print long messages whole (over 2,000 chars they are stubbed: first line, size, hash)')
+  .option('--id <message-id>', 'print just this message, whole')
+  .option('--json', 'print raw JSON (always complete)')
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (target: string, opts) => {
     try {
       const { agent, channel } = await oneShot(target, opts);
       const { messages } = await agent.request('channel.state', { channel });
+      if (opts.id) {
+        const one = messages.find(m => m.id === opts.id);
+        if (!one) fail(`No message ${opts.id} among the ${messages.length} the hub keeps for this channel`);
+        console.log(opts.json ? JSON.stringify(one) : formatMessage(one, undefined, true));
+        return;
+      }
       const last = messages.slice(-Math.max(1, Number(opts.count) || 20));
-      for (const m of last) console.log(opts.json ? JSON.stringify(m) : formatMessage(m));
+      for (const m of last) console.log(opts.json ? JSON.stringify(m) : formatMessage(m, undefined, !!opts.full));
       if (!last.length) console.log(dim('No messages yet.'));
       else if (!opts.json) console.error(dim(`last message id: ${last[last.length - 1].id}  (crosstalk wait ${channel} --since ${last[last.length - 1].id} …)`));
     } catch (err) {
@@ -1346,6 +1390,7 @@ program
   .option('--json', 'print raw JSON')
   .action(async (target: string, opts) => {
     try {
+      warnDefaultName(opts);
       const { agent, channel } = await oneShot(target, opts);
       // Read the id each time: after a hub restart the session is re-created with a new one.
       const me = () => agent.agent!.id;
@@ -1532,12 +1577,13 @@ program
   .option('-n, --name <name>', 'observer name', `${defaultName()}-tail`)
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .option('-s, --since <messageId>', 'only print history newer than this message')
+  .option('--full', 'print long messages whole (over 2,000 chars they are stubbed: first line, size, hash)')
   .action(async (target: string, opts) => {
     try {
       const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'observer', environment: 'terminal' });
       const ch = await ct.joinChannel(target, { since: opts.since });
-      for (const m of ch.messages) console.log(formatMessage(m));
-      ch.on('message', m => console.log(formatMessage(m)));
+      for (const m of ch.messages) console.log(formatMessage(m, undefined, !!opts.full));
+      ch.on('message', m => console.log(formatMessage(m, undefined, !!opts.full)));
       ch.on('lock.acquired', l => console.log(yellow(`🔒 ${l.holder.name} locked ${l.file}: ${l.reason}`)));
       ch.on('lock.released', e => console.log(dim(`🔓 ${e.file} unlocked (${e.reason})`)));
       ch.on('member.joined', a => console.log(dim(`→ ${a.name} joined`)));
