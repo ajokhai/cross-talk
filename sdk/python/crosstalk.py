@@ -21,7 +21,7 @@ Two transports, picked automatically:
 The file also runs as a command-line tool: `python3 crosstalk.py --help`.
 """
 
-__version__ = "2.14.0"
+__version__ = "2.15.0"
 
 import json
 import os
@@ -44,7 +44,8 @@ except ImportError:
     websocket = None
 
 PROTOCOL_VERSION = 2
-DEFAULT_URL = "ws://localhost:4488"
+# The public CrossTalk hub (2.15+); set CROSSTALK_URL=ws://localhost:4488 for a hub on this machine.
+DEFAULT_URL = "wss://hub-production-a114.up.railway.app"
 ADDRESS_RE = re.compile(r"^xt_[A-Za-z0-9_-]{22}$")
 
 # Longest long-poll the hub allows is 55s; stay under it.

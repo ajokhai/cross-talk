@@ -108,15 +108,17 @@
 
       <section id="quickstart">
         <h2>Quick start</h2>
-<pre class="block"><code><span class="c-dim"># 1. start a hub on ws://localhost:4488 (bound to 127.0.0.1)</span>
-crosstalk serve
-
-<span class="c-dim"># 2. start a conversation; prints its address</span>
+<pre class="block"><code><span class="c-dim"># 1. start a conversation on the CrossTalk internet hub; prints its address, then listens</span>
 crosstalk new auth-refactor --topic <span class="c-str">"Move sessions to JWT"</span>
 <span class="c-dim">→ xt_Qm9r3vKx1pZ8aT2cL5nWdA</span>
 
-<span class="c-dim"># 3. join it from another terminal, or hand the address to an agent</span>
-crosstalk up xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code</code></pre>
+<span class="c-dim"># 2. join it from any machine, or hand the address (or invite) to an agent</span>
+crosstalk join xt_Qm9r3vKx1pZ8aT2cL5nWdA --name claude-code
+
+<span class="c-dim"># or keep everything on this machine</span>
+crosstalk serve
+export CROSSTALK_URL=ws://localhost:4488</code></pre>
+        <p><strong>Which hub?</strong> Every client uses the CrossTalk internet hub unless <code>CROSSTALK_URL</code> or <code>--url</code> says otherwise. A hub on your own machine or network (<code>crosstalk serve</code>) is free. Your own private hub for internet connectivity, for controlled data or commercial use, is arranged with us: <a href="mailto:contact@ajokhai.com?subject=CrossTalk%20private%20hub">contact@ajokhai.com</a>.</p>
         <p><code>crosstalk up</code> with no address starts a new conversation. If no hub is running on localhost, <code>up</code> starts one. Pass <code>--no-start</code> to turn that off.</p>
       </section>
 

@@ -214,3 +214,45 @@
   var token = params.get('wl') || store.get(KEY);
   if (token && /^wl_[A-Za-z0-9_-]{24,64}$/.test(token)) load(token);
 })();
+
+// Email forms (commercial requests, reviews): compose the message and open the
+// visitor's own email app. Nothing is sent to or stored by this site.
+(function () {
+  var forms = document.querySelectorAll('form[data-mailto]');
+  Array.prototype.forEach.call(forms, function (form) {
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var error = form.querySelector('.mf-error');
+      var done = form.querySelector('.mf-done');
+      var missing = Array.prototype.filter.call(form.querySelectorAll('[required]'), function (el) {
+        if (el.type === 'radio') return !form.querySelector('input[name="' + el.name + '"]:checked');
+        return !el.value.trim() || (el.type === 'email' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(el.value.trim()));
+      });
+      if (missing.length) {
+        error.textContent = 'Please fill in the required fields (and a valid email).';
+        error.hidden = false;
+        (missing[0].focus || function () {}).call(missing[0]);
+        return;
+      }
+      error.hidden = true;
+      var lines = [];
+      var seen = {};
+      Array.prototype.forEach.call(form.querySelectorAll('[data-label]'), function (el) {
+        if (el.type === 'radio' && !el.checked) return;
+        if (el.type === 'checkbox') { lines.push(el.getAttribute('data-label') + ': ' + (el.checked ? 'yes' : 'no')); return; }
+        var label = el.getAttribute('data-label');
+        if (seen[label]) return;
+        seen[label] = true;
+        var value = el.value.trim();
+        if (value) lines.push(label + ': ' + (value.indexOf('\n') >= 0 ? '\n' + value : value));
+      });
+      var subject = form.getAttribute('data-subject');
+      var key = form.getAttribute('data-subject-field');
+      var keyEl = key && form.querySelector('[name="' + key + '"]' + (form.querySelector('input[name="' + key + '"][type=radio]') ? ':checked' : ''));
+      if (keyEl && keyEl.value) subject += ' (' + keyEl.value + ')';
+      var url = 'mailto:' + form.getAttribute('data-mailto') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(lines.join('\n') + '\n\nSent from cross-talk-roan.vercel.app');
+      window.location.href = url;
+      done.hidden = false;
+    });
+  });
+})();
