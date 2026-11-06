@@ -1,4 +1,7 @@
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 /** Injected by scripts/bundle.mjs so the standalone bundle needs no package.json beside it. */
 declare const __CROSSTALK_VERSION__: string | undefined;
@@ -33,3 +36,73 @@ export function updateNotice(serverVersion: string | undefined, mine = VERSION):
   if (!serverVersion || compareVersions(serverVersion, mine) <= 0) return undefined;
   return `CrossTalk ${serverVersion} is available (you have ${mine}). Update with \`crosstalk update\` (or: npm install -g ${INSTALL_URL}), then restart your listener and MCP server. What's new: ${CHANGELOG_URL}`;
 }
+
+// ---------------------------------------------------------------------------
+// Checking GitHub (weekly) for a newer release, so agents hear about updates even on a
+// hub that doesn't run the latest version (their own, a company's, a local one).
+
+export const RELEASES_URL = 'https://github.com/ajokhai/cross-talk/releases/latest';
+/**
+ * How often to ask GitHub, at most: once a week. The check runs when CrossTalk
+ * starts and the last one is older than this, so a machine that has been off
+ * for a while checks as soon as it's back.
+ */
+export const UPDATE_CHECK_MS = 7 * 24 * 3600_000;
+
+const CI_VARS = ['GITHUB_ACTIONS', 'GITLAB_CI', 'CIRCLECI', 'TRAVIS', 'BUILDKITE', 'JENKINS_URL', 'TF_BUILD', 'BITBUCKET_BUILD_NUMBER', 'DRONE', 'APPVEYOR', 'TEAMCITY_VERSION', 'CODEBUILD_BUILD_ID', 'SEMAPHORE', 'WOODPECKER'];
+
+/** Off with CROSSTALK_UPDATE_CHECK=0, and on CI. */
+export function updateCheckEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (['0', 'false', 'off', 'no'].includes((env.CROSSTALK_UPDATE_CHECK ?? '').trim().toLowerCase())) return false;
+  return !CI_VARS.some(v => { const x = (env[v] ?? '').trim().toLowerCase(); return x !== '' && x !== '0' && x !== 'false'; });
+}
+
+const cacheFile = (home = os.homedir()) => path.join(home, '.crosstalk', 'update-check.json');
+
+/** The latest release version last seen on GitHub (from the cache), or undefined. Never touches the network. */
+export function cachedLatest(home?: string): string | undefined {
+  try {
+    const c = JSON.parse(fs.readFileSync(cacheFile(home), 'utf8'));
+    return typeof c.latest === 'string' ? c.latest : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Asks GitHub which release is latest, at most once a week (UPDATE_CHECK_MS) per
+ * machine (cached in ~/.crosstalk/update-check.json), and returns it. Reads the
+ * redirect of the public releases/latest page: no API token, nothing sent but
+ * the request itself. Never throws; undefined when off, offline or unknown.
+ */
+export async function latestRelease(options: { home?: string; now?: number; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; force?: boolean } = {}): Promise<string | undefined> {
+  const env = options.env ?? process.env;
+  if (!updateCheckEnabled(env)) return undefined;
+  const now = options.now ?? Date.now();
+  const file = cacheFile(options.home);
+  try {
+    const c = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!options.force && typeof c.checkedAt === 'number' && now - c.checkedAt < UPDATE_CHECK_MS) return c.latest ?? undefined;
+  } catch {
+    // Never checked on this machine.
+  }
+  let latest: string | undefined;
+  try {
+    const res = await (options.fetchImpl ?? fetch)(RELEASES_URL, { method: 'HEAD', redirect: 'manual', headers: { 'User-Agent': `crosstalk/${VERSION}` }, signal: AbortSignal.timeout(4000) });
+    const where = res.headers.get('location') ?? '';
+    latest = /\/tag\/v?(\d+\.\d+\.\d+[^/?#]*)/.exec(where)?.[1];
+  } catch {
+    latest = undefined;
+  }
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, JSON.stringify({ checkedAt: now, latest: latest ?? cachedLatest(options.home) ?? null }) + '\n', { mode: 0o600 });
+  } catch {
+    // Unwritable home: we'll just ask again next time.
+  }
+  return latest ?? cachedLatest(options.home);
+}
+
+/** The newer of the hub's version and the latest release, for updateNotice(). */
+export const newest = (...versions: (string | undefined)[]): string | undefined =>
+  versions.filter((v): v is string => !!v).sort((a, b) => compareVersions(b, a))[0];
