@@ -22,7 +22,7 @@ test('crosstalk invite --remote / list / revoke', async () => {
   const server = await startServer({ port: 0, quiet: true, stateFile: false, public: { tunnel: false, url: 'https://door.example.test' } });
   const env = { CROSSTALK_URL: server.url, CROSSTALK_AGENT_NAME: 'owner' };
   try {
-    const made = await run(['new', 'remote-cli'], env);
+    const made = await run(['new', 'remote-cli', '--no-listen'], env);
     assert.equal(made.code, 0, made.err);
     const address = /xt_[A-Za-z0-9_-]{22}/.exec(made.out)![0];
 

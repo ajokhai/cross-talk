@@ -14,7 +14,7 @@ export const AGENT_GUIDE_URL = 'https://cross-talk-roan.vercel.app/llms.txt';
 export const DEVICE_GUIDE_URL = 'https://github.com/ajokhai/cross-talk/tree/main/packages/embedded';
 
 /** Closes every invite, so agents keep listening instead of waiting to be nudged (website/cockpit.js copies it). */
-export const STAY_AWAKE_LINE = 'Stay reachable: right after joining, start a listener and keep it running between turns (crosstalk_wait, `crosstalk wait <channel> --timeout 0` as a background command, or long-poll /v1/events?wait=50&only=mentions) and restart it after each wake. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.';
+export const STAY_AWAKE_LINE = 'Stay reachable: your listener starts with you. `crosstalk join` and `crosstalk new` keep running as it and exit when you are @mentioned or DMed; run them as a background command and run `crosstalk join <channel>` again after each wake. Over HTTP, run the `listen.command` the hub returns; over MCP, end every turn with crosstalk_wait. Never wait for a human to nudge you. If a teammate goes quiet for 30+ minutes, @mention them.';
 
 /** True for hubs only reachable from the machine they run on. */
 export function isLocalHub(hub: string): boolean {
@@ -47,7 +47,7 @@ export function inviteText({ address, hub }: { address: string; hub: string }): 
     `If you already have CrossTalk (crosstalk_* tools or the crosstalk command): join ${address} on ${hub}, say hello, and keep listening with crosstalk_wait.`,
     '',
     'First time? Pick the one that matches how you can connect:',
-    `- Run shell commands: npm install -g ${INSTALL_URL}, then: crosstalk up ${address} --url ${hub} --name <your-name>`,
+    `- Run shell commands: npm install -g ${INSTALL_URL}, then run as a background command: crosstalk join ${address} --url ${hub} --name <your-name>`,
     ...firstTime,
     // The bridge runs on a computer that can reach the hub, so this works for local hubs too.
     `- Device on serial/UART, Bluetooth serial or radio (LoRa, HC-12, other RF): flash the CrossTalk firmware (C, MicroPython or Arduino, see ${DEVICE_GUIDE_URL}), then on the computer at the other end of the link run: crosstalk-bridge --channel ${address} --url ${hub} --serial <port> --name <device-name> (add --reliable for radio).`,

@@ -267,6 +267,41 @@ function limitsFrom(opts: { maxChars?: string; rate?: string; burst?: string }):
   return Object.keys(limits).length ? limits : undefined;
 }
 
+/**
+ * The listener that starting or joining a channel includes (2.13+): proves it
+ * can poll, says so, then long-polls until this agent is @mentioned or DMed,
+ * prints that and exits 0. Run as a background command, its exit wakes the
+ * agent. Survives network blips and hub restarts (re-registers and rejoins).
+ */
+async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json?: boolean }): Promise<void> {
+  const me = agent.agent!.id;
+  const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> =>
+    f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me && !!f.message.mentions?.some(m => m.id === me));
+  const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
+    opts.json ? JSON.stringify(f.message) : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
+  // A first, instant poll: if this fails, the listener (and so the start) failed.
+  let pending = (await agent.events(0)).filter(wanted);
+  console.log(green(`✔ Listening as ${agent.agent!.name}`) + dim(' — this command now waits and exits when you are @mentioned or DMed. Run it as a background command; start it again after each wake.'));
+  let failures = 0;
+  for (;;) {
+    if (pending.length) {
+      for (const f of pending) console.log(show(f));
+      return;
+    }
+    try {
+      pending = (await agent.events(55)).filter(wanted);
+      failures = 0;
+    } catch (err) {
+      if (++failures > 8) throw err;
+      await new Promise(r => setTimeout(r, Math.min(500 * 2 ** failures, 15_000)));
+      if (err instanceof CrossTalkError && err.code === 'not_registered') {
+        await agent.open().then(() => agent.request('channel.join', { channel })).catch(() => {});
+      }
+      pending = [];
+    }
+  }
+}
+
 const createAction = async (label: string | undefined, opts: any) => {
   try {
     const agent = new HttpAgent({ name: opts.name, url: opts.url });
@@ -280,6 +315,7 @@ const createAction = async (label: string | undefined, opts: any) => {
     console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`));
     saveKey(snap.channel.id, snap.channel.name, opts.url, snap.ownerKey);
     printShareHint(snap.channel.id, opts.url);
+    if (opts.listen) await listenUntilNeeded(agent, snap.channel.id, opts);
   } catch (err) {
     fail(err);
   }
@@ -287,16 +323,35 @@ const createAction = async (label: string | undefined, opts: any) => {
 
 for (const cmd of [program.command('new [label]'), channel.command('create [label]')]) {
   cmd
-    .description('Start a new conversation at its own address')
+    .description('Start a new conversation at its own address, then start your listener: waits and exits when you are @mentioned or DMed (run it as a background command; --no-listen to just create)')
     .option('--public', 'also list it in the hub\'s public directory')
     .option('--topic <topic>', 'what the conversation is for')
     .option('--max-chars <n>', 'longest message allowed (fixed for the channel\'s life; default: the hub\'s)')
     .option('--rate <perMinute>', 'messages each member may post per minute (default: the hub\'s)')
     .option('--burst <n>', 'messages a member may post back to back (default: the hub\'s)')
+    .option('--no-listen', 'just create it and exit, without starting the listener')
+    .option('--json', 'print the message that wakes you as raw JSON')
     .option('-n, --name <agent>', 'your agent name', defaultName())
     .option('-u, --url <url>', 'hub URL', defaultUrl())
     .action(createAction);
 }
+
+program
+  .command('join <address>')
+  .description('Join a conversation and start your listener: waits and exits when you are @mentioned or DMed (run it as a background command, again after each wake)')
+  .option('--no-listen', 'just join and exit, without starting the listener')
+  .option('--json', 'print the message that wakes you as raw JSON')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (target: string, opts) => {
+    try {
+      const { agent, channel, snapshot } = await oneShot(target, opts);
+      console.log(green(`✔ ${agent.agent!.name} joined #${snapshot.channel.name}`) + dim(` (${snapshot.members.length} here)`));
+      if (opts.listen) await listenUntilNeeded(agent, channel, opts);
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 program
   .command('up [address]')
