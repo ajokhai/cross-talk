@@ -18,6 +18,8 @@ import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
+import { sendReview } from './review.js';
+import { answerReviewPrompt, cliReviewPrompt, countUseAndCheck } from './review-prompt.js';
 import { INSTALL_URL as RELEASE_URL, VERSION, compareVersions, updateNotice } from '../version.js';
 
 /**
@@ -453,6 +455,7 @@ const createAction = async (label: string | undefined, opts: any) => {
     console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`) + dim(` ${describeHub(opts.url)}`));
     saveKey(snap.channel.id, snap.channel.name, opts.url, snap.ownerKey);
     printShareHint(snap.channel.id, opts.url);
+    if (!opts.json && countUseAndCheck()) console.error(dim(cliReviewPrompt()));
     if (opts.listen) await listenUntilNeeded(agent, snap.channel.id, opts);
     else notListening(snap.channel.id, agent.agent!.name, opts.url);
   } catch (err) {
@@ -502,6 +505,7 @@ program
       if (opts.listen) listenTimeoutMinutes(opts);
       const { agent, channel, snapshot } = await oneShot(target, opts);
       console.log(green(`✔ ${agent.agent!.name} joined #${snapshot.channel.name}`) + dim(` (${snapshot.members.length} here) ${describeHub(opts.url)}`));
+      if (!opts.json && countUseAndCheck()) console.error(dim(cliReviewPrompt()));
       if (opts.listen) await listenUntilNeeded(agent, channel, opts);
       else notListening(channel, agent.agent!.name, opts.url);
     } catch (err) {
@@ -806,6 +810,42 @@ async function asOwner<T>(address: string, url: string | undefined, run: (ch: Ch
     await ct.close();
   }
 }
+
+program
+  .command('review [rating] [text...]')
+  .description('Send the author a review of CrossTalk (agents welcome): rating 1-5, then what you used it for and how it went. --later / --never answer the occasional reminder')
+  .option('--later', "don't send a review; remind me in two weeks")
+  .option('--never', "don't send a review, and never remind me again")
+  .option('-n, --name <name>', 'who is reviewing (your agent name, or yours)', defaultName())
+  .option('--model <model>', 'the model you run on, e.g. "Claude Opus 5.5" or "Gemini 3 Pro"')
+  .option('--client <client>', 'what you run in, e.g. "Claude Code", "Gemini CLI"')
+  .option('--role <what>', 'what you used CrossTalk for, e.g. "building a Shopify store with Gemini"')
+  .option('--person', 'this review is from a person, not an agent')
+  .option('--quote', 'allow quoting it on the CrossTalk site, with the name')
+  .action(async (rating: string | undefined, text: string[], opts) => {
+    try {
+      if (opts.later || opts.never) {
+        answerReviewPrompt(opts.never ? 'never' : 'later');
+        console.log(green(opts.never ? "✔ Won't ask again." : '✔ Will ask again in two weeks.'));
+        return;
+      }
+      if (!rating || !text.length) throw new Error('Usage: crosstalk review <1-5> "what you used it for and how it went" [--quote]');
+      const message = await sendReview({
+        rating: Number(rating),
+        review: text.join(' '),
+        name: opts.name,
+        kind: opts.person ? 'person' : 'agent',
+        model: opts.model,
+        client: opts.client ?? 'crosstalk cli',
+        role: opts.role,
+        quote: !!opts.quote
+      });
+      answerReviewPrompt('reviewed');
+      console.log(green(`✔ ${message}`));
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 program
   .command('history <address>')

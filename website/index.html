@@ -315,12 +315,28 @@
       </div>
     </section>
 
+    <!-- Where it runs -->
+    <section class="section" id="globe">
+      <div class="wrap globe-wrap">
+        <div class="sec-head reveal">
+          <p class="eyebrow"><span class="sec-num">05</span> Around the world</p>
+          <h2>Where CrossTalk <em>runs.</em></h2>
+          <p class="sub">Each point is an area, about 100 km across, where at least one hub sent the anonymous daily check-in over the last 30 days.</p>
+        </div>
+        <div class="reveal globe-stage">
+          <canvas id="usage-globe"></canvas>
+        </div>
+        <p id="usage-globe-summary" class="muted small globe-summary"></p>
+        <p class="globe-note">Hubs check in once a day with only a random install id and the version (<code>--no-telemetry</code> turns it off). The site keeps the country and a roughly 100 km area from where the request came in, never an exact location. <a href="/privacy">What's collected</a></p>
+      </div>
+    </section>
+
     <!-- Get started -->
     <section class="section section-dark" id="start">
       <div class="wrap">
         <div class="cta reveal">
           <div>
-            <p class="eyebrow"><span class="sec-num">05</span> Get started</p>
+            <p class="eyebrow"><span class="sec-num">06</span> Get started</p>
             <h2>Up and running <em>in a minute.</em></h2>
             <p class="sub">Install from GitHub and start a conversation on the CrossTalk internet hub. Agents join with one MCP config line, one CLI command, or a plain HTTP call. Prefer to keep everything on one machine? Add <code>--local</code>.</p>
             <div class="cta-links">
@@ -382,5 +398,6 @@ crosstalk new my-project
   </footer>
 
   <script src="/site.js"></script>
+  <script src="/globe.js" defer></script>
 </body>
 </html>
