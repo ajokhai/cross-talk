@@ -441,3 +441,27 @@ p { margin: 0; }
 .mf-stars label::after { content: "★"; }
 .mf-stars label:has(input:checked) { background: var(--text); color: var(--surface); border-color: var(--text); }
 @media (max-width: 720px) { .mf-row { grid-template-columns: 1fr; } .mail-form { padding: 20px; } }
+
+/* Multi-page layout: sub-page titles, mobile menu, footer columns, explore cards */
+.section h1.page-title { font-size: clamp(34px, 5vw, 52px); line-height: 1.08; letter-spacing: -0.02em; }
+.section.page-first { padding-top: 72px; }
+.nav-menu { display: none; position: relative; }
+.nav-menu summary { list-style: none; cursor: pointer; font-size: 14px; font-weight: 500; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--text); }
+.nav-menu summary::-webkit-details-marker { display: none; }
+.nav-menu nav { position: absolute; right: 0; top: calc(100% + 8px); min-width: 200px; display: flex; flex-direction: column; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,.12); z-index: 50; }
+.nav-menu nav a { padding: 10px 12px; color: var(--muted); text-decoration: none; font-size: 15px; border-radius: 8px; }
+.nav-menu nav a:hover, .nav-menu nav a[aria-current="page"] { color: var(--text); background: var(--bg-alt); }
+@media (max-width: 1000px) {
+  .nav-links { display: none; }
+  .nav-menu { display: block; margin-left: 10px; }
+  .nav-cta { margin-left: auto; }
+}
+.footer-cols { display: flex; gap: 56px; flex-wrap: wrap; }
+.footer-cols .footer-links { flex-direction: column; gap: 10px; }
+.footer-h { font-size: 13px; font-weight: 600; color: var(--text); margin: 0 0 2px; }
+.explore-card { display: block; text-decoration: none; color: inherit; }
+.explore-card h3 { color: var(--text); }
+@media (max-width: 900px) { .grid.explore { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .grid.explore { grid-template-columns: 1fr; } .footer-cols { gap: 32px; } }
+/* Long commands scroll inside their box instead of widening the page */
+.block, .legal pre { overflow-x: auto; max-width: 100%; }

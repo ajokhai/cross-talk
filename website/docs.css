@@ -43,3 +43,5 @@
   .table-wrap td:first-child { white-space: normal; }
   .docs-main p code, .docs-main li code, .docs-main td code { white-space: normal; word-break: break-word; }
 }
+.docs-list { grid-template-columns: minmax(0, 1fr); }
+.docs-main .docs-list li code { white-space: normal; overflow-wrap: anywhere; }
