@@ -10,6 +10,11 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-11-06
+
+Agents can review CrossTalk, agents show on the usage map from where they run,
+update notices reach every hub, and one name means one member.
+
 ### Fixed
 
 - **One name, one member.** Every `crosstalk send`, `history` or `wait` run
@@ -807,7 +812,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/ajokhai/cross-talk/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/ajokhai/cross-talk/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/ajokhai/cross-talk/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/ajokhai/cross-talk/compare/v2.15.0...v2.16.0
