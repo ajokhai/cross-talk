@@ -175,3 +175,71 @@ test('over HTTP: the retired run gets 401 on its next call, so the CLI registers
     await server.close();
   }
 });
+
+/**
+ * A WebSocket client whose connection dropped (or whose hub restarted) is held
+ * present for a grace period so it can resume. When the same client comes back
+ * as a new agent instead (a new process, a reloaded page), the held session is
+ * a leftover: it would show as a disconnected duplicate until the grace ends.
+ */
+test('a dropped WebSocket session is retired when its name joins again from the same address', async () => {
+  const { hub, agent, members } = setup();
+  const old = agent('claude-code');
+  const bob = agent('bob');
+  const channel = (await old.ok<ChannelSnapshot>({ type: 'channel.create', name: 'x' })).channel.id;
+  await bob.ok({ type: 'channel.join', channel });
+  hub.drop(old.conn);
+  assert.equal(old.conn.phase, 'parked');
+
+  const fresh = agent('claude-code');
+  await fresh.ok({ type: 'channel.join', channel });
+
+  assert.deepEqual(await members(fresh, channel), [bob.id, fresh.id].sort(), 'one claude-code, the live one');
+  assert.equal(old.conn.phase, 'closed');
+  const left = bob.inbox.filter(f => f.type === 'member.left') as any[];
+  assert.deepEqual(left.map(f => [f.agent.id, f.reason]), [[old.id, 'disconnected']]);
+});
+
+test('kept while dropped: holding a lock, a different address, or a different name', async () => {
+  const { hub, agent, members } = setup();
+  const creator = agent('carol');
+  const channel = (await creator.ok<ChannelSnapshot>({ type: 'channel.create', name: 'x' })).channel.id;
+  const locking = agent('alice');
+  await locking.ok({ type: 'channel.join', channel });
+  await locking.ok({ type: 'lock.acquire', channel, file: 'src/a.ts', reason: 'editing' });
+  const elsewhere = agent('alice', { address: '10.0.0.2' });
+  await elsewhere.ok({ type: 'channel.join', channel });
+  const other = agent('alicia');
+  await other.ok({ type: 'channel.join', channel });
+  for (const a of [locking, elsewhere, other]) hub.drop(a.conn);
+
+  const fresh = agent('alice');
+  await fresh.ok({ type: 'channel.join', channel });
+
+  assert.deepEqual(await members(fresh, channel), [creator.id, locking.id, elsewhere.id, other.id, fresh.id].sort());
+});
+
+test('after a hub restart, a restored session that did not resume is retired by its fresh twin', async () => {
+  const first = setup();
+  const old = first.agent('cross-talk-02');
+  const bob = first.agent('bob', { address: '10.0.0.9' });
+  const channel = (await old.ok<ChannelSnapshot>({ type: 'channel.create', name: 'x' })).channel.id;
+  await bob.ok({ type: 'channel.join', channel });
+  const state = first.hub.exportState();
+  assert.equal(state.agents.find(a => a.agent.id === old.id)?.address, '10.0.0.1', 'the address is saved');
+
+  const second = setup();
+  second.hub.restoreState(state);
+  const fresh = second.agent('cross-talk-02');
+  await fresh.ok({ type: 'channel.join', channel });
+  assert.deepEqual(await second.members(fresh, channel), [bob.id, fresh.id].sort(), 'the restored twin is gone; bob, still held, stays');
+
+  // State saved before addresses were kept: the twin can't be matched, so it waits out its grace.
+  const legacy = structuredClone(state);
+  for (const a of legacy.agents) delete a.address;
+  const third = setup();
+  third.hub.restoreState(legacy);
+  const again = third.agent('cross-talk-02');
+  await again.ok({ type: 'channel.join', channel });
+  assert.deepEqual(await third.members(again, channel), [old.id, bob.id, again.id].sort());
+});

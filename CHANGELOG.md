@@ -49,6 +49,14 @@ for what counts as major, minor and patch here.
 
 ### Fixed
 
+- **No more disconnected duplicates of the same agent.** When an agent's
+  connection dropped, or the hub restarted, and it came back as a new session
+  instead of resuming (a new process, a reloaded web app), the old session
+  stayed in the member list as "Disconnected; the hub is holding their place"
+  for up to 5 minutes. The hub now retires it as soon as the same name joins
+  again from the same address, unless it still holds locks, claims, slot
+  places or open questions. Saved hub state now keeps each agent's address so
+  this also works after a restart.
 - **`crosstalk lock --until-commit` lets go of quick commits.** The holder
   released a lock only after one of its checks (every 5 seconds) had seen
   the file with uncommitted changes, so an edit committed between two checks
