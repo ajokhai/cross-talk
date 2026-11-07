@@ -2319,7 +2319,7 @@ export class MeshHub {
       queueMicrotask(() => this.endRemote(conn, 'invite revoked or expired'));
       fail('unauthorized', 'Your invite was revoked or has expired');
     }
-    const ownerOnly = ['channel.create', 'channel.close', 'channel.configure', 'question.answer', 'invite.create', 'invite.list', 'invite.revoke', 'member.admit', 'member.knocks'];
+    const ownerOnly = ['channel.create', 'channel.close', 'channel.configure', 'question.answer', 'invite.create', 'invite.list', 'invite.revoke', 'member.admit', 'member.knocks', 'owner.grant'];
     if (ownerOnly.includes(f.type)) fail('forbidden', 'Agents joined by invite cannot do that');
     if (f.type === 'channel.join' && (f as { channel?: unknown }).channel !== invite.channel) {
       fail('forbidden', 'Your invite is for one channel only');

@@ -62,3 +62,23 @@ test('a session the hub closes is gone: its poll returns, later calls get 401 no
     await server.close();
   }
 });
+
+test('an HTTP listener waiting for mentions only still receives the owner key it is given', async () => {
+  const { server, post, poll } = await rig();
+  try {
+    const a = (await post('/v1/sessions', { name: 'agent' })).session;
+    const b = (await post('/v1/sessions', { name: 'josh' })).session;
+    const created = (await post('/v1/rpc', { type: 'channel.create', name: 'x' }, a)).data;
+    await post('/v1/rpc', { type: 'channel.join', channel: created.channel.id }, b);
+    await poll(b, 'wait=0');
+    const waiting = poll(b, 'wait=5&only=mentions');
+    await new Promise(r => setTimeout(r, 50));
+    const r = await post('/v1/rpc', { type: 'owner.grant', channel: created.channel.id, ownerKey: created.ownerKey, agent: 'josh' }, a);
+    assert.equal(r.ok, true, JSON.stringify(r));
+    const got = (await waiting).body.events.find((e: any) => e.type === 'channel.owner');
+    assert.ok(got, 'the key reached a mentions-only listener');
+    assert.equal(got.ownerKey, created.ownerKey);
+  } finally {
+    await server.close();
+  }
+});

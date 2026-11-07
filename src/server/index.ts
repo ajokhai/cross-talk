@@ -221,7 +221,7 @@ class HttpSession {
   }
 
   private needsMe(frame: ServerFrame): boolean {
-    if (frame.type === 'dm' || frame.type === 'channel.kicked' || frame.type.endsWith('.granted')) return true;
+    if (frame.type === 'dm' || frame.type === 'channel.kicked' || frame.type === 'channel.owner' || frame.type.endsWith('.granted')) return true;
     // Approval (2.20+): being let in or turned away, and someone knocking (an owner's listener should wake for it).
     if (frame.type === 'channel.admitted' || frame.type === 'channel.refused' || (frame.type === 'channel.knock' && frame.knock.status === 'waiting')) return true;
     if (frame.type !== 'message') return false;
