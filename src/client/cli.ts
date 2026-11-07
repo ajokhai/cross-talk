@@ -1080,21 +1080,6 @@ secret
   });
 
 program
-  .command('run [command...]')
-  .description('Run a command with saved keys in its environment, blanked out of what it prints: crosstalk run --secret GITHUB_TOKEN -- gh repo list. Agents use keys this way without ever seeing them')
-  .option('-s, --secret <name>', 'a saved key to pass as an environment variable of the same name (repeatable)', (v: string, all: string[] = []) => [...all, v])
-  .option('-n, --name <agent>', 'the agent running it (for keys limited with --for)', process.env.CROSSTALK_NAME)
-  .action(async (command: string[], opts) => {
-    try {
-      if (!command?.length) fail('Say what to run after --, e.g. crosstalk run --secret GITHUB_TOKEN -- gh repo list');
-      if (!opts.secret?.length) fail('Name at least one key with --secret NAME (see crosstalk secret list)');
-      process.exitCode = await runWithSecrets(opts.secret, command[0], command.slice(1), { agent: opts.name });
-    } catch (err) {
-      fail(err);
-    }
-  });
-
-program
   .command('admit <address> [agent]')
   .description('In a channel that approves new members: list who is waiting, or let one in (by name or agent id). --deny turns them away; --all lets everyone waiting in')
   .option('--deny', 'turn them away instead')
@@ -1569,20 +1554,34 @@ program
     }
   });
 
+// One `run` for both jobs (a second `run` command would never be reached):
+//   --secret NAME   the command gets saved keys in its environment, blanked out of what it prints;
+//   --slot NAME     it runs only while holding one of a slot's places (heavy work, capped channel-wide).
+// Both together: the keyed command runs inside the slot.
 program
   .command('run <command...>')
-  .description('Run a heavy command (a build, a full test suite) only while holding one of a slot\'s places, so at most --max run at once across every agent in the channel. Queues when the slot is full; exits with the command\'s code. Put the command after --')
+  .description('Run a command after --. With --secret NAME it gets saved keys in its environment, blanked out of what it prints (crosstalk run --secret GITHUB_TOKEN -- gh repo list): agents use keys without seeing them. With --slot NAME it runs only while holding one of a slot\'s places, so at most --max run at once across the channel (heavy builds, full test suites); it queues when the slot is full. Exits with the command\'s code')
+  .option('--secret <name>', 'a saved key to pass as an environment variable of the same name (repeatable; see crosstalk secret list)', (v: string, all: string[] = []) => [...all, v])
   .option('-s, --slot <name>', 'slot name, e.g. heavy or test-server')
   .option('--max <n>', 'places in the slot (the first holder fixes it)', '2')
   .option('--min-free-disk <size>', 'refuse to start (exit 1) below this much free disk, e.g. 5G')
   .option('--ttl <seconds>', 'lease, renewed every third of it while the command runs', '300')
   .option('-c, --channel <address>', 'channel address (or $CROSSTALK_CHANNEL)')
-  .option('-n, --name <name>', 'your agent name (or $CROSSTALK_AGENT_NAME)', defaultName())
+  .option('-n, --name <name>', 'your agent name (or $CROSSTALK_AGENT_NAME); keys limited with --for check it', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (command: string[], opts) => {
     try {
+      if (!command?.length) fail('Say what to run after --, e.g. crosstalk run --secret GITHUB_TOKEN -- gh repo list');
+      if (!opts.slot && !opts.secret?.length) fail('Pass --secret NAME (a saved key; see crosstalk secret list) and/or --slot NAME (e.g. --slot heavy).');
+      if (!opts.slot) {
+        process.exitCode = await runWithSecrets(opts.secret, command[0], command.slice(1), { agent: opts.name });
+        return;
+      }
+      // With keys too: the slot runs this same CLI again with --secret, so the keys are only ever read by that child.
+      if (opts.secret?.length) {
+        command = [process.execPath, ...process.execArgv, process.argv[1], 'run', ...opts.secret.flatMap((s: string) => ['--secret', s]), '--name', opts.name, '--', ...command];
+      }
       const target = lockTarget(opts);
-      if (!opts.slot) fail('Which slot? Pass --slot <name>, e.g. --slot heavy.');
       const max = Number(opts.max);
       if (!Number.isInteger(max) || max < 1 || max > 64) fail('--max must be a whole number from 1 to 64');
       const ttl = Number(opts.ttl);
