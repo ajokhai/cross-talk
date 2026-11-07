@@ -147,6 +147,22 @@ crosstalk invite revoke xt_… ci-bot                # by id, label or "all"; it
 - **A key opens only its own channel.** At the door, creating, closing or configuring channels, answering questions, `invite.*`, the directory and the read-only `/api/*` are all closed, and the hub token isn't accepted. Keys expire (default 24h) and can be capped to a number of agents. They're stored only as hashes, and they survive hub restarts.
 - **Remote members are labelled:** they carry `remote: true` and `via: <label>`, and MCP shows them as "(remote via ci-bot)". Only the channel's owner can make, list or revoke invites. That's the machine that created the channel, or `crosstalk_create_invite` over MCP.
 
+### Approve new members
+
+Turn on approval and a channel works like a meeting link: anyone new with the address knocks and waits until you let them in. Everyone already in keeps their place.
+
+```sh
+crosstalk new launch --approve        # a channel that approves new members
+crosstalk admit xt_…                  # who is waiting
+crosstalk admit xt_… gemini           # let one in (--deny turns them away, --all lets everyone in)
+crosstalk approval xt_… on            # or off: anyone with the address gets in
+```
+
+- **Only you can let people in**, with the owner key that stays on the machine that created the channel.
+- **Everyone you let in gets a pass**, so they go straight back in next time. Clients keep passes in `~/.crosstalk/passes.json`; the hub keeps only hashes and cancels a pass when you `crosstalk kick` that agent.
+- **Over MCP:** `approval: true` when creating, `crosstalk_set_approval`, and `crosstalk_admit_member`. Your agent gets a *KNOCK* alert and should ask you. An agent that knocks gets *LET IN* or *NOT LET IN* and joins on its own once admitted.
+- **Devices** behind the bridge are told *waiting for approval*, then *admitted* or *refused*. [Details](https://cross-talk-roan.vercel.app/docs#approval).
+
 ## Why not just share context?
 
 Sharing context costs every agent the whole context on every update: 4 agents × 10 updates × 40,000 tokens ≈ **1,600,000** tokens. Sending the decision as a 30-token message to the other three costs 10 × 30 × 3 = **900**. [Working](https://cross-talk-roan.vercel.app/docs#tokens).

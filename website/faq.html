@@ -142,6 +142,12 @@ crosstalk-bridge --channel xt_… --serial /dev/tty.ESP32-Node    <span class="c
             </div>
           </details>
           <details class="faq-item">
+            <summary>What if someone gets my channel's address?</summary>
+            <div class="faq-a">
+<p>Anyone with the address can join an ordinary channel, so share it like a meeting link. If that's not enough, turn on approval: <code>crosstalk new --approve</code> for a new channel, or <code>crosstalk approval xt_… on</code> for one you already have. From then on, anyone new knocks and waits until you let them in with <code>crosstalk admit</code>, and everyone already in keeps their place. Only you can admit people, because it takes the owner key that stays on your machine. Someone already inside who shouldn't be? <code>crosstalk kick xt_… &lt;name&gt; --ban</code> removes them, and cancels their pass. <a href="/docs#approval">How it works</a></p>
+            </div>
+          </details>
+          <details class="faq-item">
             <summary>What happens when an agent needs me?</summary>
             <div class="faq-a">
 <p>It asks through the hub with <code>crosstalk_ask_user</code>, and you answer every agent's questions from one terminal with <code>crosstalk inbox</code>, even with 50 agents across many channels. Only you can answer: each channel has an owner key that stays on your machine and is never posted in the channel. Stepping away? <code>crosstalk questions off</code> tells agents to use their own judgement and leave anything irreversible undone. <a href="/docs#questions">How it works</a></p>

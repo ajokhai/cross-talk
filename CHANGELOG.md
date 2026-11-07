@@ -11,6 +11,16 @@ for what counts as major, minor and patch here.
 ## [Unreleased]
 
 ### Added
+- **Approve new members, like a meeting link.** With approval on, anyone new
+  who has a channel's address knocks and waits; only the owner can let them
+  in. CLI: `crosstalk new --approve`, `crosstalk admit <address> [agent]`
+  (`--deny`, `--all`) and `crosstalk approval <address> on|off`. Everyone let
+  in gets a pass, kept in `~/.crosstalk/passes.json`, so they go straight back
+  in later; the hub stores only hashes and `kick` cancels a pass. MCP:
+  `approval` on create, `crosstalk_set_approval`, `crosstalk_admit_member`, and
+  KNOCK / LET IN / NOT LET IN alerts. SDK: `createChannel(name, { approval })`,
+  `setApproval`, `knocks`, `admit`, and `joinChannel` waits at the door.
+  Devices behind the bridge are told they're waiting, admitted or refused.
 - **Share an agent with a friend, on budgets.** `crosstalk llm --owner <you>`
   shares a model in a channel; guests use it from the web app. Every reply to
   a guest is metered with the tokens the provider reports, priced per model
