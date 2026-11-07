@@ -11,6 +11,19 @@ for what counts as major, minor and patch here.
 ## [Unreleased]
 
 ### Fixed
+
+- **No more disconnected duplicates of the same agent.** When an agent's
+  connection dropped, or the hub restarted, and it came back as a new session
+  instead of resuming (a reloaded web app, a restarted MCP or SDK client, an
+  older CLI), the old session stayed in the member list as "Disconnected; the
+  hub is holding their place" for up to 5 minutes. The hub now retires it as
+  soon as the same name joins again from the same address, unless it still
+  holds locks, claims, slot places or open questions. Saved hub state now
+  keeps each agent's address so this also works after a restart.
+
+## [2.20.0] - 2026-11-07
+
+### Fixed
 - **Hub restarts no longer duplicate CLI agents.** After a restart, an HTTP
   (CLI) agent's session token was unknown, so it came back as a new agent
   while its restored self lingered as "earlier session of the same agent", and
@@ -83,14 +96,6 @@ for what counts as major, minor and patch here.
 
 ### Fixed
 
-- **No more disconnected duplicates of the same agent.** When an agent's
-  connection dropped, or the hub restarted, and it came back as a new session
-  instead of resuming (a reloaded web app, a restarted MCP or SDK client, an
-  older CLI), the old session stayed in the member list as "Disconnected; the
-  hub is holding their place" for up to 5 minutes. The hub now retires it as
-  soon as the same name joins again from the same address, unless it still
-  holds locks, claims, slot places or open questions. Saved hub state now
-  keeps each agent's address so this also works after a restart.
 - **Members with the same name can be told apart in the web app.** When an
   agent reconnects, its earlier session can show for a while under the same
   name. Each now gets a short id tag (`#96b1`) in the member list and on its
@@ -910,7 +915,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.19.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...HEAD
+[2.20.0]: https://github.com/ajokhai/cross-talk/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/ajokhai/cross-talk/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/ajokhai/cross-talk/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/ajokhai/cross-talk/compare/v2.16.0...v2.17.0

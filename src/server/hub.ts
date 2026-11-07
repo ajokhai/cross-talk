@@ -252,7 +252,7 @@ const DEFAULT_LIMITS: ChannelLimits = { maxMessageChars: 1000, messagesPerMinute
 
 /** Frames kept for a dropped agent before it is evicted instead of resumed. */
 const REPLAY_LIMIT = 1000;
-/** The address of an agent restored from state saved before hubs kept addresses (2.20): unknown. */
+/** The address of an agent restored from state saved before hubs kept addresses (2.21): unknown. */
 const RESTORED_ADDRESS = 'restored';
 /** Agents that can queue for one file with `lock.wait`, or for one slot. */
 const MAX_LOCK_WAITERS = 50;
@@ -2538,7 +2538,7 @@ export interface PersistedAgent {
   channels: string[];
   /** Id of the invite a remote agent joined with (#13). */
   invite?: string;
-  /** Network address it connected from, so a fresh session of the same client can retire it (2.20+). */
+  /** Network address it connected from, so a fresh session of the same client can retire it (2.21+). */
   address?: string;
 }
 
