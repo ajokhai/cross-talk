@@ -28,6 +28,9 @@ import {
   type Knock,
   type WakeHook
 } from '../protocol.js';
+import { channelId, isAddress as isAnyAddress, parseAddress, sameHub } from '../address.js';
+
+export { channelId, findAddress, formatAddress, parseAddress, resolveAddress, type ParsedAddress } from '../address.js';
 
 /**
  * The hub agents use unless told otherwise (2.15+): the public CrossTalk hub,
@@ -849,7 +852,11 @@ export class CrossTalk extends EventEmitter {
    * at once instead; `waitMs` gives up after that long.
    */
   async joinChannel(address: string, options: { since?: string; pass?: string; ownerKey?: string; wait?: boolean; waitMs?: number } = {}): Promise<Channel> {
-    const channel = address.trim();
+    const parsed = parseAddress(address);
+    if (parsed?.hub && !sameHub(parsed.hub, this.url)) {
+      throw new CrossTalkError('bad_request', `${address.trim()} is on the hub at ${parsed.hub}, but this client is connected to ${this.url}. Connect to that hub to join it.`);
+    }
+    const channel = parsed?.channel ?? address.trim();
     const attempt = () => this.request('channel.join', { channel, since: options.since, pass: options.pass ?? this.passes.get(channel), ownerKey: options.ownerKey });
     try {
       return this.track(await attempt());
@@ -873,13 +880,13 @@ export class CrossTalk extends EventEmitter {
   }
 
   static isAddress(value: string): boolean {
-    return /^xt_[A-Za-z0-9_-]{22}$/.test(value.trim());
+    return isAnyAddress(value);
   }
 
   /** A joined channel by address, or by label when exactly one joined channel has it. */
   channel(addressOrName: string): Channel | undefined {
     const key = addressOrName.trim();
-    const byAddress = this.channels.get(key);
+    const byAddress = this.channels.get(channelId(key) ?? key);
     if (byAddress) return byAddress;
     const byName = [...this.channels.values()].filter(c => c.name.toLowerCase() === key.toLowerCase());
     return byName.length === 1 ? byName[0] : undefined;

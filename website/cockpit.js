@@ -36,7 +36,6 @@
   const POLL_MS = 30000;
   const GROUP_MS = 5 * 60 * 1000;
   const ADDRESS = /^xt_[A-Za-z0-9_-]{16,}$/;
-  const ADDRESS_IN_TEXT = /xt_[A-Za-z0-9_-]{16,}/;
   const STORE_URL = 'crosstalk.cockpit.url';
   const STORE_TOKEN = 'crosstalk.cockpit.token';
   const STORE_NAME = 'crosstalk.cockpit.name';
@@ -1073,21 +1072,23 @@
   }
 
   /**
-   * Understands everything people paste to join: a bare address, a cockpit link
-   * ending in #xt_…, or a whole invite ("Channel: xt_… / Hub: wss://…").
+   * Understands everything people paste to join: a bare address (xt_…, xtl_…
+   * for a hub on this computer, xt_…@host for another hub), a cockpit link
+   * ending in #xt_…, or a whole invite, old style included ("Channel: xt_… /
+   * Hub: wss://…").
    */
   function parseJoin(text) {
     const value = String(text || '').trim();
-    const address = (value.match(ADDRESS_IN_TEXT) || [])[0] || '';
+    const found = findAddress(value);
     const hubLine = value.match(/^\s*Hub(?: \(public door\))?:\s*(\S+)/im);
-    const hub = hubLine ? hubLine[1].replace(/\/+$/, '') : '';
-    return { address, hub };
+    const hub = found && found.hub ? found.hub : hubLine ? hubLine[1].replace(/\/+$/, '') : '';
+    return { address: found ? found.channel : '', hub };
   }
 
   async function joinFromText(text) {
     const { address, hub } = parseJoin(text);
     if (!ADDRESS.test(address)) {
-      throw new Error('That does not look like a channel address or invite. Addresses start with "xt_".');
+      throw new Error('That does not look like a channel address or invite. Addresses start with "xt_" (or "xtl_" for a hub on this computer).');
     }
     if (/xi_[A-Za-z0-9_-]{8,}/.test(text)) {
       throw new Error('That is a remote invite key for agents outside the hub\'s machine. In a browser, connect to that hub\'s own URL instead, then join with the address.');
@@ -1501,22 +1502,71 @@
     return svg;
   }
 
-  // invite:start — a plain-JS copy of inviteText() in src/client/invite.ts; test/cockpit-invite.test.ts keeps them identical.
-  /** The invite to paste to any agent, even one that has never heard of CrossTalk. */
+  // invite:start — a plain-JS copy of inviteText() in src/client/invite.ts and the address helpers in src/address.ts; test/cockpit-invite.test.ts keeps them identical.
+  const ONLINE_HUB = 'wss://hub-production-a114.up.railway.app';
+  const LOCAL_HUB = 'ws://localhost:4488';
+  /** Hosts reached over plain ws:// when an address names no scheme: this computer and private networks. */
+  function isPrivateHost(host) {
+    const h = host.replace(/^\[|\]$/g, '').toLowerCase();
+    if (h === 'localhost' || h === '::1' || h.endsWith('.local') || h.endsWith('.lan') || h.endsWith('.internal') || !h.includes('.') && !h.includes(':')) return true;
+    if (/^127\.|^10\.|^192\.168\.|^169\.254\./.test(h)) return true;
+    const m = /^172\.(\d+)\./.exec(h);
+    if (m && +m[1] >= 16 && +m[1] <= 31) return true;
+    return /^f[cd][0-9a-f]{2}:/.test(h) || h.startsWith('fe80:');
+  }
+  function hubUrl(text) {
+    let raw = String(text).trim().replace(/[.,;:!?]+$/, '');
+    if (!raw) return undefined;
+    if (/^https?:\/\//i.test(raw)) raw = raw.replace(/^http/i, 'ws');
+    else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) return undefined;
+    if (!/^wss?:\/\//i.test(raw)) {
+      const host = raw.split('/')[0].replace(/:\d+$/, '');
+      raw = `${isPrivateHost(host) ? 'ws' : 'wss'}://${raw}`;
+    }
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== 'ws:' && url.protocol !== 'wss:' || !url.hostname || url.username || url.password || url.search || url.hash) return undefined;
+      return `${url.protocol}//${url.host}${url.pathname}`.replace(/\/+$/, '');
+    } catch {
+      return undefined;
+    }
+  }
+  function sameHubUrl(a, b) {
+    const norm = (u) => {
+      const url = hubUrl(u);
+      return url && url.toLowerCase().replace('://127.0.0.1', '://localhost').replace('://[::1]', '://localhost');
+    };
+    const x = norm(a);
+    return !!x && x === norm(b);
+  }
+  /** Reads `xt_…`, `xtl_…` (a hub on this computer) or `xt_…@hub` out of pasted text: { channel, hub? }. */
+  function findAddress(text) {
+    const m = /(?<![A-Za-z0-9_-])(xtl?)_([A-Za-z0-9_-]{22})(?:@([^\s"'<>()\[\]{},;]+))?/.exec(String(text || ''));
+    if (!m) return undefined;
+    const channel = `xt_${m[2]}`;
+    if (m[1] === 'xtl') return m[3] ? undefined : { channel, hub: LOCAL_HUB };
+    if (m[3] === undefined) return { channel };
+    const hub = hubUrl(m[3]);
+    return hub ? { channel, hub: sameHubUrl(hub, ONLINE_HUB) ? ONLINE_HUB : sameHubUrl(hub, LOCAL_HUB) ? LOCAL_HUB : hub } : undefined;
+  }
+  /** The one-line address: xt_… on the internet hub, xtl_… on this computer's hub, else xt_…@host. */
+  function formatAddress(channel, hub) {
+    const id = channel;
+    if (sameHubUrl(hub, ONLINE_HUB)) return id;
+    if (sameHubUrl(hub, LOCAL_HUB)) return id.replace(/^xt_/, 'xtl_');
+    const url = hubUrl(hub);
+    if (!url) return id;
+    const short = url.replace(/^wss?:\/\//, '');
+    const back = findAddress(`${id}@${short}`);
+    return back && back.hub === url ? `${id}@${short}` : `${id}@${url}`;
+  }
+  /** The invite to paste to any agent, even one that has never heard of CrossTalk: one line. */
   function inviteText(address, hub) {
     // Short on purpose: the guide explains every way to connect and how to stay reachable.
-    const lines = [
-      'Join my CrossTalk channel.',
-      `Channel: ${address}`,
-      `Hub: ${hub}`,
-      'New to CrossTalk? Set up and join (any agent): https://cross-talk-roan.vercel.app/llms.txt',
-    ];
     let host = '';
     try { host = new URL(hub).hostname.replace(/^\[|\]$/g, ''); } catch {}
-    if (host === 'localhost' || host === '::1' || host.startsWith('127.')) {
-      lines.push("This hub runs on the inviter's machine: only agents on that machine can reach it. Elsewhere? Ask for a remote invite (crosstalk invite <channel> --remote).");
-    }
-    return lines.join('\n');
+    const local = host === 'localhost' || host === '::1' || host.startsWith('127.') ? ' (on a hub on my computer: only agents on this computer can join; elsewhere, ask me for a remote invite)' : '';
+    return `Join my CrossTalk channel ${formatAddress(address, hub)}${local}. New to CrossTalk? Set up and join (any agent): https://cross-talk-roan.vercel.app/llms.txt`;
   }
   // invite:end
 

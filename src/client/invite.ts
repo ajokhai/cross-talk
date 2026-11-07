@@ -1,12 +1,14 @@
 /**
- * The message you paste to bring an agent into a conversation. It has to work
- * for an agent that has never heard of CrossTalk, so it says what CrossTalk is,
- * names the hub, and gives both paths: join directly (already set up) or set
- * up first (install, plain HTTP, or an MCP connector).
+ * The message you paste to bring an agent into a conversation: one line. The
+ * address says where the channel lives (`xt_…` on the CrossTalk internet hub,
+ * `xtl_…` on a hub on the inviter's computer, `xt_…@host` on any other hub;
+ * see src/address.ts), and the setup guide covers every way to connect, for
+ * an agent that has never heard of CrossTalk.
  *
  * website/cockpit.js has a plain-JS copy of this text for its Copy button;
  * keep the two in step (test/invite.test.ts pins the wording).
  */
+import { formatAddress } from '../address.js';
 
 export const INSTALL_URL = 'https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz';
 export const AGENT_GUIDE_URL = 'https://cross-talk-roan.vercel.app/llms.txt';
@@ -31,17 +33,9 @@ const toHttp = (hub: string) => hub.replace(/^ws(s?):\/\//, 'http$1://').replace
 
 export function inviteText({ address, hub }: { address: string; hub: string }): string {
   // Short on purpose: the guide explains every way to connect (MCP, shell, HTTP,
-  // devices) and how to stay reachable, so the invite only carries what's unique.
-  const lines = [
-    'Join my CrossTalk channel.',
-    `Channel: ${address}`,
-    `Hub: ${hub}`,
-    `New to CrossTalk? Set up and join (any agent): ${AGENT_GUIDE_URL}`
-  ];
-  if (isLocalHub(hub)) {
-    lines.push("This hub runs on the inviter's machine: only agents on that machine can reach it. Elsewhere? Ask for a remote invite (crosstalk invite <channel> --remote).");
-  }
-  return lines.join('\n');
+  // devices) and how to stay reachable, so the invite only carries the address.
+  const local = isLocalHub(hub) ? ' (on a hub on my computer: only agents on this computer can join; elsewhere, ask me for a remote invite)' : '';
+  return `Join my CrossTalk channel ${formatAddress(address, hub)}${local}. New to CrossTalk? Set up and join (any agent): ${AGENT_GUIDE_URL}`;
 }
 
 /**
@@ -51,11 +45,6 @@ export function inviteText({ address, hub }: { address: string; hub: string }): 
  */
 export function remoteInviteText({ address, publicUrl, key, expiresAt }: { address: string; publicUrl: string; key: string; expiresAt?: number }): string {
   const base = publicUrl.replace(/\/+$/, '');
-  return [
-    'Join my CrossTalk channel.',
-    `Channel: ${address}`,
-    `Hub (public door): ${base}`,
-    `Invite key: ${key}  (secret: it opens this one channel${expiresAt ? `, until ${new Date(expiresAt).toISOString()}` : ''})`,
-    `New to CrossTalk? Set up and join with a key (any agent): ${AGENT_GUIDE_URL} (section "Joining with a remote invite key")`
-  ].join('\n');
+  const where = /^(wss?|https?):\/\//i.test(base) ? formatAddress(address, base) : `${address} at ${base}`;
+  return `Join my CrossTalk channel ${where} with invite key ${key} (secret: it opens this one channel${expiresAt ? `, until ${new Date(expiresAt).toISOString()}` : ''}). New to CrossTalk? Set up and join with a key (any agent): ${AGENT_GUIDE_URL} (section "Joining with a remote invite key")`;
 }
