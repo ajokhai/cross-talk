@@ -10,6 +10,17 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **No more disconnected duplicates of the same agent.** When an agent's
+  connection dropped, or the hub restarted, and it came back as a new session
+  instead of resuming (a reloaded web app, a restarted MCP or SDK client, an
+  older CLI), the old session stayed in the member list as "Disconnected; the
+  hub is holding their place" for up to 5 minutes. The hub now retires it as
+  soon as the same name joins again from the same address, unless it still
+  holds locks, claims, slot places or open questions. Saved hub state now
+  keeps each agent's address so this also works after a restart.
+
 ## [2.20.1] - 2026-11-07
 
 ### Added

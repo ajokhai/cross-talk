@@ -252,6 +252,8 @@ const DEFAULT_LIMITS: ChannelLimits = { maxMessageChars: 1000, messagesPerMinute
 
 /** Frames kept for a dropped agent before it is evicted instead of resumed. */
 const REPLAY_LIMIT = 1000;
+/** The address of an agent restored from state saved before hubs kept addresses (2.21): unknown. */
+const RESTORED_ADDRESS = 'restored';
 /** Agents that can queue for one file with `lock.wait`, or for one slot. */
 const MAX_LOCK_WAITERS = 50;
 const MAX_SLOTS_PER_CHANNEL = 100;
@@ -871,7 +873,7 @@ export class MeshHub {
     if (!targets.length && !ban) fail('not_found', `No member called ${key} here`);
     const kicked: AgentRef[] = [];
     // Never ban the owner's own address, even if the target shares it.
-    const addresses = byIp ? targets.map(t => t.address).filter(a => a && a !== conn.address && a !== 'restored') : [];
+    const addresses = byIp ? targets.map(t => t.address).filter(a => a && a !== conn.address && a !== RESTORED_ADDRESS) : [];
     for (const target of targets) {
       kicked.push(target.ref);
       target.peer.send({ type: 'channel.kicked', channel: channel.id, by: conn.ref, reason: why, banned: ban });
@@ -1165,17 +1167,21 @@ export class MeshHub {
 
   /**
    * Whether `conn` is a leftover session of the client that `twin` is: the
-   * same name from the same address, over HTTP with no long-poll open, quiet
-   * for `retireTwinsAfterMs`, holding nothing (locks, claims, slot places,
-   * open questions) and not remote. Each `crosstalk send`, `history` or
-   * `wait` run that doesn't log out leaves such a session behind; the newer
-   * session is the one its user is actually driving.
+   * same name from the same address, holding nothing (locks, claims, slot
+   * places, open questions), not remote, and either
+   * - over HTTP with no long-poll open, quiet for `retireTwinsAfterMs`: each
+   *   `crosstalk send`, `history` or `wait` run that doesn't log out leaves
+   *   such a session behind; or
+   * - parked: its transport dropped (or the hub restarted) and the client
+   *   came back as a new agent instead of resuming.
+   * The newer session is the one its user is actually driving.
    */
   private isLeftoverOf(conn: Connection, twin: Connection, now: number): boolean {
     if (!this.opts.retireTwinsAfterMs || conn === twin || !conn.agent || !twin.agent) return false;
-    if (conn.transport !== 'http' || conn.phase !== 'live' || conn.listener.kind === 'polling') return false;
-    if (conn.invite || twin.invite || conn.address !== twin.address) return false;
+    if (conn.invite || twin.invite || conn.address !== twin.address || conn.address === RESTORED_ADDRESS) return false;
     if (conn.agent.name.toLowerCase() !== twin.agent.name.toLowerCase()) return false;
+    if (conn.phase === 'parked') return twin.phase === 'live' && !this.holdsWork(conn);
+    if (conn.transport !== 'http' || conn.phase !== 'live' || conn.listener.kind === 'polling') return false;
     if (now - this.lastHeard(conn) < this.opts.retireTwinsAfterMs) return false;
     return !this.holdsWork(conn);
   }
@@ -2385,7 +2391,7 @@ export class MeshHub {
     const agents: PersistedAgent[] = [];
     for (const conn of new Set([...this.agents.values(), ...this.resumable.values()])) {
       if (!conn.agent || !conn.resumeToken) continue;
-      agents.push({ agent: { ...conn.agent }, resumeTokenHash: conn.resumeToken, channels: [...conn.channels], invite: conn.invite?.id });
+      agents.push({ agent: { ...conn.agent }, resumeTokenHash: conn.resumeToken, channels: [...conn.channels], invite: conn.invite?.id, address: conn.address });
     }
     return {
       version: 1,
@@ -2458,7 +2464,7 @@ export class MeshHub {
     for (const saved of state.agents) {
       const channels = saved.channels.filter(id => this.channels.has(id));
       if (!channels.length) continue;
-      const conn = new Connection({ send: () => {}, close: () => {} }, 'restored', this.opts.rateLimit, now, this.opts.channelLimits);
+      const conn = new Connection({ send: () => {}, close: () => {} }, saved.address || RESTORED_ADDRESS, this.opts.rateLimit, now, this.opts.channelLimits);
       conn.restored = true; // holds no per-address slot
       if (saved.invite) {
         // A remote agent comes back only while its invite is still good.
@@ -2539,6 +2545,8 @@ export interface PersistedAgent {
   channels: string[];
   /** Id of the invite a remote agent joined with (#13). */
   invite?: string;
+  /** Network address it connected from, so a fresh session of the same client can retire it (2.21+). */
+  address?: string;
 }
 
 export interface HubState {
