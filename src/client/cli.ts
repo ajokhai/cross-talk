@@ -21,6 +21,7 @@ import { forgetOwnedChannels, keyFile, loadOwnedChannels, loadPass, saveOwnedCha
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 import { sendReview } from './review.js';
+import { addSecret, listSecrets, openSealed, readHidden, removeSecret, runWithSecrets, sealIdentity, sealSecret } from './secrets.js';
 import { agentCheckIn } from '../server/telemetry.js';
 import { answerReviewPrompt, cliReviewPrompt, countUseAndCheck } from './review-prompt.js';
 import { INSTALL_URL as RELEASE_URL, VERSION, cachedLatest, compareVersions, latestRelease, newest, updateNotice } from '../version.js';
@@ -1000,6 +1001,94 @@ program
       const r = await asOwner(address, opts.url, (ch, key) => ch.kick(agent, { ban: !!opts.ban || agent.startsWith('ip:'), ip: !!opts.ip, reason: opts.reason }, key));
       const who = r.kicked.length ? r.kicked.map(a => a.name).join(', ') : 'nobody currently here';
       console.log(green(`✔ Removed ${who}`) + (r.banned ? dim(' (banned from rejoining)') : ''));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const secret = program.command('secret').description('Keys your agents can use without seeing them: add one (typed hidden), list or remove them, and share one sealed to another machine. Agents use them with crosstalk run --secret NAME -- <command>');
+
+secret
+  .command('add <name>')
+  .description('Save a key on this machine, typed hidden (or piped in, e.g. from a password manager). Agents only ever see its name')
+  .option('--for <agents>', 'only these agent names may use it (comma-separated; default: any agent on this machine)')
+  .action(async (name: string, opts) => {
+    try {
+      const value = await readHidden(`Paste ${name.toUpperCase()} (hidden), then Enter: `);
+      const info = addSecret(name, value, { from: 'typed', agents: opts.for ? String(opts.for).split(',').map((a: string) => a.trim()).filter(Boolean) : undefined });
+      console.log(green(`✔ Saved ${info.name}`) + dim(` (encrypted on this machine${info.agents ? `, only for ${info.agents.join(', ')}` : ''}).`));
+      console.log(dim(`Tell your agent to use it like this, never asking for the value: crosstalk run --secret ${info.name} -- <command>`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+secret
+  .command('list')
+  .description('The keys saved on this machine, by name (values are never shown)')
+  .action(() => {
+    const all = listSecrets();
+    if (!all.length) return console.log(dim('No keys saved. Add one: crosstalk secret add GITHUB_TOKEN'));
+    for (const s of all) console.log(`${bold(s.name)} ${dim(`${s.from ?? 'saved'} ${new Date(s.at).toLocaleString()}${s.agents ? `, only for ${s.agents.join(', ')}` : ''}`)}`);
+  });
+
+secret
+  .command('remove <name>')
+  .description('Delete a key from this machine')
+  .action((name: string) => {
+    try {
+      console.log(removeSecret(name) ? green(`✔ Removed ${name.toUpperCase()}`) : dim(`No key called ${name.toUpperCase()}`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+secret
+  .command('key')
+  .description("This machine's sealing key (xs_…). Give it to whoever is sharing a key with you; only this machine can open what is sealed to it")
+  .action(() => {
+    console.log(sealIdentity().publicKey);
+  });
+
+secret
+  .command('seal <sealingKey> <name>')
+  .description('Seal a key (typed hidden) for another machine, given its sealing key from `crosstalk secret key`. The result is safe to paste in a channel: only that machine can open it')
+  .action(async (sealingKey: string, name: string) => {
+    try {
+      const value = await readHidden(`Paste ${name.toUpperCase()} (hidden), then Enter: `);
+      const sealed = sealSecret(sealingKey.trim(), name, value);
+      console.error(dim('Sealed. Send this to them; they save it with:'));
+      console.error(dim(`  crosstalk secret receive ${name.toUpperCase()} <sealed>`));
+      console.log(sealed);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+secret
+  .command('receive <name> <sealed>')
+  .description('Open a key someone sealed to this machine and save it, without showing it')
+  .option('--from <who>', 'who shared it (shown in crosstalk secret list)')
+  .option('--for <agents>', 'only these agent names may use it')
+  .action((name: string, sealed: string, opts) => {
+    try {
+      const info = addSecret(name, openSealed(sealed.trim(), name), { from: opts.from ? `shared by ${opts.from}` : 'shared', agents: opts.for ? String(opts.for).split(',').map((a: string) => a.trim()).filter(Boolean) : undefined });
+      console.log(green(`✔ Saved ${info.name}`) + dim(`. Use it with: crosstalk run --secret ${info.name} -- <command>`));
+    } catch (err) {
+      fail(err instanceof Error && /unable to authenticate|Unsupported state/i.test(err.message) ? new Error("That sealed key wasn't made for this machine, or its name doesn't match. Check crosstalk secret key and the name.") : err);
+    }
+  });
+
+program
+  .command('run [command...]')
+  .description('Run a command with saved keys in its environment, blanked out of what it prints: crosstalk run --secret GITHUB_TOKEN -- gh repo list. Agents use keys this way without ever seeing them')
+  .option('-s, --secret <name>', 'a saved key to pass as an environment variable of the same name (repeatable)', (v: string, all: string[] = []) => [...all, v])
+  .option('-n, --name <agent>', 'the agent running it (for keys limited with --for)', process.env.CROSSTALK_NAME)
+  .action(async (command: string[], opts) => {
+    try {
+      if (!command?.length) fail('Say what to run after --, e.g. crosstalk run --secret GITHUB_TOKEN -- gh repo list');
+      if (!opts.secret?.length) fail('Name at least one key with --secret NAME (see crosstalk secret list)');
+      process.exitCode = await runWithSecrets(opts.secret, command[0], command.slice(1), { agent: opts.name });
     } catch (err) {
       fail(err);
     }
