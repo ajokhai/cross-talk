@@ -939,13 +939,19 @@ export class MeshHub {
   }
 
   /** Members named as `@name` (any case, ending at a non-name character). */
-  private mentioned(channel: Channel, text: string): AgentRef[] {
+  private mentioned(channel: Channel, text: string, senderId?: string): AgentRef[] {
     if (!text.includes('@')) return [];
     const lower = text.toLowerCase();
+    // @all / @everyone / @here (a whole word) reaches every member but the sender, so every listener wakes.
+    const everyone = /(^|[^\p{L}\p{N}_.-])@(all|everyone|here)(?![\p{L}\p{N}_-])/u.test(lower);
     const out: AgentRef[] = [];
     for (const id of channel.members) {
       const agent = this.agents.get(id)?.agent;
       if (!agent || !this.visible(id)) continue;
+      if (everyone && id !== senderId) {
+        out.push({ id: agent.id, name: agent.name });
+        continue;
+      }
       const tag = '@' + agent.name.toLowerCase();
       for (let at = lower.indexOf(tag); at >= 0; at = lower.indexOf(tag, at + 1)) {
         if (!/[\p{L}\p{N}_-]/u.test(lower[at + tag.length] ?? '')) {
@@ -1362,7 +1368,7 @@ export class MeshHub {
   }
 
   private record(channel: Channel, message: ChannelMessage, sender: Connection): ChannelMessage {
-    const mentions = this.mentioned(channel, message.shorthand?.raw ?? message.content);
+    const mentions = this.mentioned(channel, message.shorthand?.raw ?? message.content, message.from.id);
     if (mentions.length) message.mentions = mentions;
     // A progress post is a heartbeat on the sender's claims here.
     this.heartbeat(channel, sender.agent!.id);
