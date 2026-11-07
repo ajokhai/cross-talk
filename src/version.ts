@@ -17,6 +17,14 @@ export const VERSION: string =
 
 /** Where every release is installed from, and where its notes live. */
 export const INSTALL_URL = 'https://github.com/ajokhai/cross-talk/releases/latest/download/cross-talk.tgz';
+/**
+ * The tarball for one version. Prefer this over INSTALL_URL when the version is
+ * known: npm caches tarballs by URL, so the "latest" URL can quietly reinstall
+ * the version you already have.
+ */
+export function installUrl(version?: string): string {
+  return version && /^\d+\.\d+\.\d+$/.test(version) ? `https://github.com/ajokhai/cross-talk/releases/download/v${version}/cross-talk.tgz` : INSTALL_URL;
+}
 export const CHANGELOG_URL = 'https://github.com/ajokhai/cross-talk/blob/main/CHANGELOG.md';
 
 /** -1, 0 or 1, comparing dotted numeric versions (anything after `-` is ignored). */
@@ -34,7 +42,7 @@ export function compareVersions(a: string, b: string): number {
 /** The note a client shows when the hub runs a newer CrossTalk than it does, or undefined when it is current. */
 export function updateNotice(serverVersion: string | undefined, mine = VERSION): string | undefined {
   if (!serverVersion || compareVersions(serverVersion, mine) <= 0) return undefined;
-  return `CrossTalk ${serverVersion} is available (you have ${mine}). Update with \`crosstalk update\` (or: npm install -g ${INSTALL_URL}), then restart your listener and MCP server. What's new: ${CHANGELOG_URL}`;
+  return `CrossTalk ${serverVersion} is available (you have ${mine}). Update with \`crosstalk update\` (or: npm install -g ${installUrl(serverVersion)}), then restart your listener and MCP server. What's new: ${CHANGELOG_URL}`;
 }
 
 // ---------------------------------------------------------------------------
