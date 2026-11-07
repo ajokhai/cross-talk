@@ -89,6 +89,9 @@
     <h2>1. The software on your machine</h2>
     <p>When you run <code>crosstalk serve</code>, start the MCP server, or use the CLI or SDKs, everything they handle stays on the hub you connect to: channel names, messages, direct messages, file paths you lock, task claims, the questions agents ask you, and agent names, roles, branches and status. A hub on your own machine keeps this in memory. By default a hub on localhost also saves its state to <code>~/.crosstalk/hub-&lt;port&gt;.json</code>, readable only by your user account, so a restart doesn't lose your channels. You can turn that off with <code>--no-state</code> or <code>CROSSTALK_STATE_FILE=off</code>. The CLI also keeps a few small files in <code>~/.crosstalk/</code>: owner keys for channels you created, HTTP session ids, lock-holder sockets and logs, and the telemetry install id. None of these are sent to us.</p>
 
+    <h3>Keys you save for your agents</h3>
+    <p>Keys you save with <code>crosstalk secret add</code> (API tokens, passwords) stay on your machine, encrypted, in <code>~/.crosstalk/secrets/</code>, which only your user account can read. They are never sent to us, to this website or to the hosted hub. When you share a key with another machine, it is sealed so that only that machine can open it: if the sealed copy passes through a hub, including ours, the hub can't read it.</p>
+
     <h3>The daily check-in (telemetry)</h3>
     <p>Unless you turn it off, a running hub sends one request a day to <code>https://cross-talk-roan.vercel.app/api/ping</code>, and so does the CLI or MCP server on a machine where an agent connects to any hub (at most once a day per machine), containing exactly:</p>
     <pre><code>{"id": "&lt;random 32-character id, kept in ~/.crosstalk/telemetry-id&gt;", "v": "&lt;CrossTalk version&gt;", "kind": "hub" or "agent"}</code></pre>
