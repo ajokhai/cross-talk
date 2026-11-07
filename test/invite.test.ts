@@ -5,19 +5,17 @@ import { inviteText, isLocalHub } from '../src/client/invite.js';
 const address = 'xt_G0f-mX9b0ntbMNUA5az41g';
 
 // Pins the exact wording: website/cockpit.js copies this text for its Copy button.
-test('the invite is short: channel, hub and the setup guide (which covers every way to connect)', () => {
-  assert.equal(inviteText({ address, hub: 'wss://hub.example.com' }), [
-    'Join my CrossTalk channel.',
-    `Channel: ${address}`,
-    'Hub: wss://hub.example.com',
-    'New to CrossTalk? Set up and join (any agent): https://cross-talk-roan.vercel.app/llms.txt'
-  ].join('\n'));
+test('the invite is one line: an address that says where the channel lives, and the setup guide', () => {
+  const guide = 'New to CrossTalk? Set up and join (any agent): https://cross-talk-roan.vercel.app/llms.txt';
+  assert.equal(inviteText({ address, hub: 'wss://hub-production-a114.up.railway.app' }), `Join my CrossTalk channel ${address}. ${guide}`);
+  assert.equal(inviteText({ address, hub: 'wss://hub.example.com' }), `Join my CrossTalk channel ${address}@hub.example.com. ${guide}`);
+  assert.equal(inviteText({ address, hub: 'ws://192.168.1.5:4488' }), `Join my CrossTalk channel ${address}@192.168.1.5:4488. ${guide}`);
+  for (const hub of ['wss://hub.example.com', 'ws://localhost:4488']) assert.ok(!inviteText({ address, hub }).includes('\n'), hub);
 });
 
-test('an invite to a localhost hub says only agents on that machine can reach it', () => {
+test('an invite to a hub on this computer uses xtl_ and says only agents on it can join', () => {
   const text = inviteText({ address, hub: 'ws://localhost:4488' });
-  assert.match(text, /\nHub: ws:\/\/localhost:4488\n/);
-  assert.match(text, /only agents on that machine can reach it.*--remote/);
+  assert.match(text, /^Join my CrossTalk channel xtl_G0f-mX9b0ntbMNUA5az41g \(on a hub on my computer: only agents on this computer can join; elsewhere, ask me for a remote invite\)\. /);
 });
 
 test('isLocalHub', () => {
@@ -38,7 +36,7 @@ test('remote MCP invites name the hub as the client reached it, not its loopback
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp?name=claude-web`), { requestInit: { headers } }));
     const created: any = await client.callTool({ name: 'crosstalk_create_channel', arguments: { name: 'remote' } });
     const text: string = created.content[0].text;
-    assert.match(text, /\nHub: wss:\/\/hub\.example\.com\n/);
+    assert.match(text, /Join my CrossTalk channel xt_[A-Za-z0-9_-]{22}@hub\.example\.com\. /);
     assert.match(text, /^SHOW YOUR USER THIS INVITE NOW/);
     assert.doesNotMatch(text, /127\.0\.0\.1/);
   } finally {
