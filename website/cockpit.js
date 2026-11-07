@@ -2258,6 +2258,15 @@
     shareKeyTarget = member;
     $('share-key-title').textContent = `Share a key with ${member.name}`;
     $('share-key-agent').textContent = member.name;
+    // Names aren't verified: say exactly which agent this is, and warn when it could be someone else.
+    const ch = state.selected && state.joined.get(state.selected);
+    const twins = ch ? [...ch.members.values()].filter((o) => o.id !== member.id && o.name === member.name) : [];
+    $('share-key-who').textContent = [`Agent id ${member.id}`, member.environment, `computer key ${member.sealKey.slice(0, 11)}…`].filter(Boolean).join(' · ');
+    const warn = twins.length
+      ? `Careful: ${twins.length === 1 ? 'another member is' : `${twins.length} other members are`} also called ${member.name}. Only share if the id above is your agent's (it shows next to its messages).`
+      : ch && !ch.info.approval ? 'Anyone with this channel\'s address can join under any name. Only share if you know this is your agent, or turn on Approve new members.' : '';
+    $('share-key-check').textContent = warn;
+    $('share-key-check').hidden = !warn;
     $('share-key-name').value = '';
     $('share-key-value').value = '';
     $('share-key-error').hidden = true;

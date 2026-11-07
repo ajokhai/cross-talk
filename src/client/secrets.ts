@@ -261,6 +261,11 @@ export function receiveSealedDm(text: string, from: string, dir?: string): { ok:
   const m = SEALED_DM.exec(text.trim());
   if (!m) return undefined;
   const name = m[1];
+  // Never replace a key already saved here: anyone in a channel can send one, and a
+  // swapped-in token would quietly send the agent's work to someone else's account.
+  if (listSecrets(dir ?? secretsDir()).some(s => s.name === name)) {
+    return { ok: false, name, notice: `${from} sent a key named ${name}, but this machine already has one, so it was not replaced. If your user wants it replaced, they remove the old one first (crosstalk secret remove ${name}) and ask ${from} to share it again.` };
+  }
   try {
     addSecret(name, openSealed(m[2], name, dir), { from: `shared by ${from}`, dir });
     return { ok: true, name, notice: `KEY RECEIVED: ${name} from ${from}. Use it with crosstalk run --secret ${name} -- <command>` };
