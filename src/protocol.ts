@@ -96,6 +96,12 @@ export interface ChannelInfo {
   maxMembers: number;
   /** 'off' means the owner isn't taking questions: new ones come back `unattended`. */
   questions: QuestionsMode;
+  /**
+   * Approve new members (2.20+), like a meeting link: someone new with the
+   * address knocks, and the owner admits or denies them. Admitted members get
+   * a pass they show when they rejoin.
+   */
+  approval?: boolean;
   /** Fixed at creation. Rates aren't enforced on hubs started with rate limiting off. */
   limits: ChannelLimits;
 }
@@ -374,6 +380,16 @@ export interface WakePayload {
 /** `channel.create` also returns the owner key, once. Keep it private: it answers questions. */
 export interface CreatedChannel extends ChannelSnapshot {
   ownerKey: string;
+  /** With approval on: the creator's pass, for rejoining without the owner key. */
+  pass?: string;
+}
+
+/** Someone new asking to join a channel that approves new members. */
+export interface Knock {
+  agent: AgentRef;
+  environment?: string;
+  at: number;
+  status: 'waiting' | 'admitted' | 'denied' | 'left';
 }
 
 // ---------------------------------------------------------------------------
@@ -397,9 +413,15 @@ export interface HelloFrame {
 /** Requests; each gets a `result` frame with the matching `id`. */
 export type RequestFrame =
   /** `limits`: any you leave out take the hub's defaults; values above the hub's ceilings are refused. */
-  | { type: 'channel.create'; id: string; name?: string; topic?: string; visibility?: ChannelVisibility; limits?: Partial<ChannelLimits> }
+  | { type: 'channel.create'; id: string; name?: string; topic?: string; visibility?: ChannelVisibility; limits?: Partial<ChannelLimits>; approval?: boolean }
   /** `since`: a message id; the snapshot then holds only newer messages (all of them if the id has aged out). */
-  | { type: 'channel.join'; id: string; channel: string; since?: string }
+  /**
+   * In a channel that approves new members, someone new is refused with
+   * `pending_approval` and the owner is asked (`channel.knock`); once admitted
+   * they get `channel.admitted` with a pass, and join again with it. The
+   * owner key also gets in.
+   */
+  | { type: 'channel.join'; id: string; channel: string; since?: string; pass?: string; ownerKey?: string }
   | { type: 'channel.leave'; id: string; channel: string }
   | { type: 'channel.list'; id: string; scope?: 'joined' | 'public'; limit?: number; cursor?: string }
   | { type: 'channel.state'; id: string; channel: string; since?: string }
@@ -441,7 +463,7 @@ export type RequestFrame =
   | { type: 'question.ask'; id: string; channel: string; question: string; options?: string[] }
   | { type: 'question.cancel'; id: string; channel: string; question: string }
   | { type: 'question.answer'; id: string; channel: string; question: string; answer: string; ownerKey: string }
-  | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode }
+  | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode; approval?: boolean }
   /**
    * Sets (or replaces) your wake hook in a channel: the hub POSTs to `url` when
    * you are @mentioned (`on: 'mentions'`, default) or on any message from
@@ -464,6 +486,10 @@ export type RequestFrame =
   | { type: 'member.unban'; id: string; channel: string; ownerKey: string; agent: string }
   /** The channel's bans. Needs the owner key. */
   | { type: 'member.bans'; id: string; channel: string; ownerKey: string }
+  /** Admits or denies someone waiting to join (2.20+). Needs the owner key. */
+  | { type: 'member.admit'; id: string; channel: string; ownerKey: string; agent: string; allow: boolean }
+  /** Who is waiting to join. Needs the owner key. */
+  | { type: 'member.knocks'; id: string; channel: string; ownerKey: string }
   /** Removes your wake hook in a channel. */
   | { type: 'wake.clear'; id: string; channel: string }
   /** Your wake hook in a channel, with its last delivery result. */
@@ -516,6 +542,8 @@ export interface ResultData {
   'member.kick': { channel: string; kicked: AgentRef[]; banned: boolean };
   'member.unban': { channel: string; unbanned: number };
   'member.bans': { channel: string; bans: ChannelBan[] };
+  'member.admit': { channel: string; knock: Knock };
+  'member.knocks': { channel: string; knocks: Knock[] };
   'wake.set': WakeHook;
   'wake.clear': { channel: string; cleared: boolean };
   'wake.get': { hook: WakeHook | null };
@@ -541,6 +569,8 @@ export type ErrorCode =
   | 'lock_held'
   | 'quota_exceeded'
   | 'rate_limited'
+  /** The channel approves new members: you're waiting for the owner (2.20+). */
+  | 'pending_approval'
   | 'internal';
 
 export interface HubError {
@@ -559,6 +589,12 @@ export type ServerFrame =
   | { type: 'member.left'; channel: string; agent: AgentRef; reason: 'left' | 'disconnected' | 'kicked' }
   /** To the agent the owner removed (2.17+): it is no longer in the channel, and with `banned` can't rejoin. */
   | { type: 'channel.kicked'; channel: string; by: AgentRef; reason?: string; banned: boolean }
+  /** To members (2.20+): someone is waiting to join, or was admitted or denied. Only the owner can decide. */
+  | { type: 'channel.knock'; channel: string; knock: Knock }
+  /** To the one admitted: join again with this pass (keep it; it gets you back in later). */
+  | { type: 'channel.admitted'; channel: string; pass: string; by: AgentRef }
+  /** To the one denied. */
+  | { type: 'channel.refused'; channel: string; by: AgentRef }
   | { type: 'member.updated'; channel: string; agent: AgentInfo }
   | { type: 'message'; message: ChannelMessage }
   | { type: 'dm'; message: DirectMessage }

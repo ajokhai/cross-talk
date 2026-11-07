@@ -27,6 +27,7 @@ import {
   type WakeHook,
   type WakePayload,
   type ChannelBan,
+  type Knock,
   STAY_AWAKE_GUIDANCE
 } from '../protocol.js';
 import { LockManager, type LockManagerOptions } from './locks.js';
@@ -176,6 +177,19 @@ interface Channel {
   wakes: Map<string, WakeState>;
   /** Bans by lowercased name (2.17+); `ips` are kept here only, never shown. */
   bans: Map<string, BanState>;
+  /** Approve new members (2.20+): someone new knocks and the owner admits them. */
+  approval: boolean;
+  /** Passes that let admitted members back in, by SHA-256 (hex) of the pass; the pass itself is never stored. */
+  passes: Map<string, PassState>;
+  /** Who is waiting to be let in, by agent id. In memory only. */
+  knocks: Map<string, { knock: Knock; conn: Connection }>;
+}
+
+interface PassState {
+  /** The name it was issued to, and every agent id it has let in (so a kick can revoke it). */
+  name: string;
+  ids: string[];
+  at: number;
 }
 
 interface SlotState {
@@ -609,6 +623,9 @@ export class MeshHub {
     if (!conn.agent) return;
     this.changes++;
     for (const name of [...conn.channels]) this.removeMember(conn, name, 'disconnected');
+    for (const channel of this.channels.values()) {
+      if (channel.knocks.get(conn.agent.id)?.conn === conn) this.decideKnock(channel, conn.agent.id, null);
+    }
     this.agents.delete(conn.agent.id);
     conn.agent = undefined;
   }
@@ -642,8 +659,10 @@ export class MeshHub {
 
   private async dispatch(conn: Connection, f: RequestFrame): Promise<unknown> {
     switch (f.type) {
-      case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility, f.limits);
-      case 'channel.join': return this.joinChannel(conn, f.channel, f.since);
+      case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility, f.limits, f.approval);
+      case 'channel.join': return this.joinChannel(conn, f.channel, f.since, f.pass, f.ownerKey);
+      case 'member.admit': return this.admitMember(conn, f.channel, f.ownerKey, f.agent, f.allow === true);
+      case 'member.knocks': return this.listKnocks(conn, f.channel, f.ownerKey);
       case 'channel.leave': return this.leaveChannel(conn, f.channel);
       case 'channel.list': return this.listChannels(conn, conn.invite ? 'joined' : f.scope ?? 'joined', f.limit, f.cursor);
       case 'invite.create': return this.createInvite(conn, f.channel, f.ownerKey, f.label, f.expiresInSeconds, f.maxAgents);
@@ -671,7 +690,7 @@ export class MeshHub {
       case 'question.ask': return this.askQuestion(conn, f.channel, f.question, f.options);
       case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
       case 'question.answer': return this.answerQuestion(conn, f.channel, f.question, f.answer, f.ownerKey);
-      case 'channel.configure': return this.configureChannel(conn, f.channel, f.ownerKey, f.questions);
+      case 'channel.configure': return this.configureChannel(conn, f.channel, f.ownerKey, f.questions, f.approval);
       case 'member.kick': return this.kickMember(conn, f.channel, f.ownerKey, f.agent, f.ban === true, f.ip === true, f.reason);
       case 'member.unban': {
         const channel = this.memberChannel(conn, f.channel);
@@ -714,7 +733,7 @@ export class MeshHub {
   }
 
   /** Creates a conversation with a fresh, unguessable address and joins the creator to it. */
-  private createChannel(conn: Connection, rawName: unknown, topic: unknown, visibility: unknown, limits: unknown): CreatedChannel {
+  private createChannel(conn: Connection, rawName: unknown, topic: unknown, visibility: unknown, limits: unknown, approval?: unknown): CreatedChannel {
     if (visibility !== undefined && visibility !== 'public' && visibility !== 'private') {
       fail('bad_request', 'visibility must be "public" or "private"');
     }
@@ -750,14 +769,19 @@ export class MeshHub {
       wakes: new Map(),
       bans: new Map(),
       limits: fixed,
-      senders: new Map()
+      senders: new Map(),
+      approval: approval === true,
+      passes: new Map(),
+      knocks: new Map()
     };
     this.channels.set(channel.id, channel);
     this.addMember(conn, channel);
-    return { ...this.snapshot(channel), ownerKey, guidance: STAY_AWAKE_GUIDANCE };
+    // The creator holds the owner key, and gets a pass too so a plain rejoin works.
+    const pass = channel.approval ? this.issuePass(channel, conn.agent!) : undefined;
+    return { ...this.snapshot(channel), ownerKey, ...(pass ? { pass } : {}), guidance: STAY_AWAKE_GUIDANCE };
   }
 
-  private joinChannel(conn: Connection, address: unknown, since?: unknown): ChannelSnapshot {
+  private joinChannel(conn: Connection, address: unknown, since?: unknown, pass?: unknown, ownerKey?: unknown): ChannelSnapshot {
     const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
     if (!channel) return fail('not_found', 'No conversation at that address');
     if (!channel.members.has(conn.agent!.id)) {
@@ -765,6 +789,11 @@ export class MeshHub {
         fail('forbidden', "The channel's owner removed you from this conversation");
       }
       if (channel.members.size >= this.opts.maxMembersPerChannel) fail('quota_exceeded', 'Channel is full');
+      // Approval on: only the owner key or a pass gets straight in; anyone else knocks and waits.
+      if (channel.approval && !this.isOwnerKey(channel, ownerKey) && !this.usePass(channel, pass, conn.agent!)) {
+        this.knock(channel, conn);
+        fail('pending_approval', "This channel approves new members: you're waiting for the host to let you in. Stay connected; when you're admitted you'll get channel.admitted with a pass, then join again with it.");
+      }
       this.ensureRoom(conn);
       this.addMember(conn, channel);
       this.retireTwins(conn, [channel.id]);
@@ -831,6 +860,7 @@ export class MeshHub {
       kicked.push(target.ref);
       target.peer.send({ type: 'channel.kicked', channel: channel.id, by: conn.ref, reason: why, banned: ban });
       this.removeMember(target, channel.id, 'kicked');
+      this.revokePasses(channel, target.agent!);
     }
     if (ban) {
       const name = targets[0]?.agent!.name ?? key;
@@ -968,7 +998,8 @@ export class MeshHub {
       memberCount: this.visibleMembers(channel).length,
       maxMembers: this.opts.maxMembersPerChannel,
       questions: channel.questionsMode,
-      limits: channel.limits
+      limits: channel.limits,
+      approval: channel.approval
     };
   }
 
@@ -1883,6 +1914,82 @@ export class MeshHub {
   // Questions for the owner
   // -------------------------------------------------------------------------
 
+  // ---- Approval (2.20+): knocks, passes, admitting
+
+  private static hashPass(pass: string): string {
+    return crypto.createHash('sha256').update(pass).digest('hex');
+  }
+
+  private issuePass(channel: Channel, agent: AgentInfo): string {
+    const pass = `xp_${crypto.randomBytes(24).toString('base64url')}`;
+    channel.passes.set(MeshHub.hashPass(pass), { name: agent.name, ids: [agent.id], at: this.now() });
+    this.changes++;
+    return pass;
+  }
+
+  /** A valid pass lets its holder in; the new agent id is remembered so a later kick revokes it. */
+  private usePass(channel: Channel, pass: unknown, agent: AgentInfo): boolean {
+    if (typeof pass !== 'string' || pass.length > 128) return false;
+    const state = channel.passes.get(MeshHub.hashPass(pass));
+    if (!state) return false;
+    if (!state.ids.includes(agent.id)) state.ids = [...state.ids.slice(-19), agent.id];
+    this.changes++;
+    return true;
+  }
+
+  private revokePasses(channel: Channel, agent: AgentInfo): void {
+    for (const [hash, state] of [...channel.passes]) {
+      if (state.ids.includes(agent.id)) channel.passes.delete(hash);
+    }
+    this.changes++;
+  }
+
+  private isOwnerKey(channel: Channel, ownerKey: unknown): boolean {
+    return typeof ownerKey === 'string' && ownerKey.length <= 128 &&
+      crypto.timingSafeEqual(MeshHub.hashKey(ownerKey), channel.ownerKeyHash);
+  }
+
+  private knock(channel: Channel, conn: Connection): void {
+    const id = conn.agent!.id;
+    if (!channel.knocks.has(id) && channel.knocks.size >= 50) fail('quota_exceeded', 'Too many people are waiting to join this channel');
+    const knock: Knock = { agent: conn.ref, environment: conn.agent!.environment, at: this.now(), status: 'waiting' };
+    const fresh = !channel.knocks.has(id);
+    channel.knocks.set(id, { knock, conn });
+    if (fresh) this.emit(channel, { type: 'channel.knock', channel: channel.id, knock });
+  }
+
+  /** Admits (true), denies (false) or forgets (null: they left) someone waiting. */
+  private decideKnock(channel: Channel, agentId: string, allow: boolean | null, by?: AgentRef): Knock | undefined {
+    const waiting = channel.knocks.get(agentId);
+    if (!waiting) return undefined;
+    channel.knocks.delete(agentId);
+    const knock: Knock = { ...waiting.knock, status: allow === null ? 'left' : allow ? 'admitted' : 'denied' };
+    if (allow === true && waiting.conn.agent) {
+      waiting.conn.peer.send({ type: 'channel.admitted', channel: channel.id, pass: this.issuePass(channel, waiting.conn.agent), by: by! });
+    } else if (allow === false) {
+      waiting.conn.peer.send({ type: 'channel.refused', channel: channel.id, by: by! });
+    }
+    this.emit(channel, { type: 'channel.knock', channel: channel.id, knock });
+    return knock;
+  }
+
+  private admitMember(conn: Connection, address: unknown, ownerKey: unknown, agent: unknown, allow: boolean): ResultData['member.admit'] {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    const key = cleanText(agent, 128);
+    if (!key) fail('bad_request', 'agent (an id or a name) is required');
+    const match = [...channel.knocks.values()].find(k => k.knock.agent.id === key || k.knock.agent.name.toLowerCase() === key.toLowerCase());
+    if (!match) return fail('not_found', `Nobody called ${key} is waiting to join`);
+    const knock = this.decideKnock(channel, match.knock.agent.id, allow, conn.ref)!;
+    return { channel: channel.id, knock };
+  }
+
+  private listKnocks(conn: Connection, address: unknown, ownerKey: unknown): ResultData['member.knocks'] {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    return { channel: channel.id, knocks: [...channel.knocks.values()].map(k => k.knock) };
+  }
+
   static hashKey(key: string): Buffer {
     return crypto.createHash('sha256').update(key).digest();
   }
@@ -1947,9 +2054,25 @@ export class MeshHub {
     return this.closeQuestion(channel, q, 'answered', text);
   }
 
-  private configureChannel(conn: Connection, address: unknown, ownerKey: unknown, questions: unknown): ChannelInfo {
+  private configureChannel(conn: Connection, address: unknown, ownerKey: unknown, questions: unknown, approval?: unknown): ChannelInfo {
     const channel = this.memberChannel(conn, address);
     this.requireOwner(channel, ownerKey);
+    if (approval !== undefined) {
+      if (typeof approval !== 'boolean') fail('bad_request', 'approval must be true or false');
+      if (approval && !channel.approval) {
+        channel.approval = true;
+        // Everyone already here keeps their place: each gets a pass for when they reconnect.
+        for (const id of channel.members) {
+          const member = this.agents.get(id);
+          if (member?.agent) member.peer.send({ type: 'channel.admitted', channel: channel.id, pass: this.issuePass(channel, member.agent), by: conn.ref });
+        }
+      } else if (!approval && channel.approval) {
+        channel.approval = false;
+        // Nobody needs letting in any more: tell whoever is waiting to come in.
+        for (const [, waiting] of [...channel.knocks]) this.decideKnock(channel, waiting.knock.agent.id, true, conn.ref);
+      }
+      this.changes++;
+    }
     if (questions !== undefined) {
       if (questions !== 'on' && questions !== 'off') fail('bad_request', 'questions must be "on" or "off"');
       channel.questionsMode = questions as 'on' | 'off';
@@ -2130,7 +2253,7 @@ export class MeshHub {
       queueMicrotask(() => this.endRemote(conn, 'invite revoked or expired'));
       fail('unauthorized', 'Your invite was revoked or has expired');
     }
-    const ownerOnly = ['channel.create', 'channel.close', 'channel.configure', 'question.answer', 'invite.create', 'invite.list', 'invite.revoke'];
+    const ownerOnly = ['channel.create', 'channel.close', 'channel.configure', 'question.answer', 'invite.create', 'invite.list', 'invite.revoke', 'member.admit', 'member.knocks'];
     if (ownerOnly.includes(f.type)) fail('forbidden', 'Agents joined by invite cannot do that');
     if (f.type === 'channel.join' && (f as { channel?: unknown }).channel !== invite.channel) {
       fail('forbidden', 'Your invite is for one channel only');
@@ -2267,7 +2390,9 @@ export class MeshHub {
         limits: c.limits,
         slots: [...c.slots.values()].filter(slot => slot.holds.length).map(slot => ({ name: slot.name, capacity: slot.capacity, holds: slot.holds })),
         wakes: [...c.wakes.values()].map(({ pending: _pending, deferred: _deferred, ...hook }) => ({ ...hook })),
-        bans: [...c.bans.values()].map(b => ({ ...b, ids: [...b.ids], ips: [...b.ips] }))
+        bans: [...c.bans.values()].map(b => ({ ...b, ids: [...b.ids], ips: [...b.ips] })),
+        approval: c.approval || undefined,
+        passes: c.passes.size ? [...c.passes].map(([hash, p]) => ({ hash, ...p, ids: [...p.ids] })) : undefined
       })),
       agents,
       locks: this.locks.list(),
@@ -2291,6 +2416,9 @@ export class MeshHub {
         ...c,
         members: new Set(),
         ownerKeyHash: Buffer.from(c.ownerKeyHash, 'hex'),
+        approval: c.approval === true,
+        passes: new Map((c.passes ?? []).map(({ hash, ...p }) => [hash, { ...p, ids: [...p.ids] }])),
+        knocks: new Map(),
         questions: new Map(c.questions.map(q => [q.id, q])),
         reads: new Map(c.reads),
         claims: new Map(c.claims.map(k => [k.id, k])),
@@ -2376,6 +2504,10 @@ export interface PersistedChannel {
   wakes?: (WakeHook & { secret?: string })[];
   /** Bans, addresses included (the state file is readable only by the hub's user). Missing before 2.17. */
   bans?: (Omit<ChannelBan, 'ipCount'> & { ips?: string[] })[];
+  /** Approve new members (2.20+). */
+  approval?: boolean;
+  /** Pass hashes (SHA-256 hex), never the passes themselves. */
+  passes?: { hash: string; name: string; ids: string[]; at: number }[];
 }
 
 export interface PersistedAgent {
