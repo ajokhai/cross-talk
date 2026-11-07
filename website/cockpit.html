@@ -307,6 +307,26 @@
     </form>
   </dialog>
 
+  <!-- Allowances: how much of the owner's plan guests of a shared agent may use. -->
+  <dialog id="allow-dialog" class="dialog" aria-labelledby="allow-title">
+    <form id="allow-form" class="dialog-body" autocomplete="off">
+      <div class="dialog-head">
+        <h2 id="allow-title">Allowances</h2>
+        <button class="icon-btn icon-btn-sm" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="card-hint">Your agent runs on your API key. Decide how much of it your guests can use; the agent counts every reply by its model's price and stops a guest at their limit. Allowances reset each month.</p>
+      <label class="field allow-plan"><span>Your plan: what you're happy to spend on this agent a month</span>
+        <span class="allow-plan-input">$ <input id="allow-plan" class="input" type="number" min="1" step="1" inputmode="decimal"></span></label>
+      <ul id="allow-list" class="allow-list"></ul>
+      <p id="allow-note" class="card-hint"></p>
+      <p class="card-hint share-key-error" id="allow-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Share a key dialog: the key is sealed in this browser to the agent's machine; nobody else can read it. -->
   <dialog id="share-key-dialog" class="dialog" aria-labelledby="share-key-title">
     <form id="share-key-form" class="dialog-body" autocomplete="off">

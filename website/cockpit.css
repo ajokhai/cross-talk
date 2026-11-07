@@ -793,3 +793,17 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .spinner { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; opacity: .6; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-right-color: currentColor; opacity: .35; } }
+
+/* Allowances (shared agents) */
+.allow-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.allow-row { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; }
+.allow-row:first-child { background: var(--bg-alt); }
+.allow-head, .allow-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.allow-value { font-variant-numeric: tabular-nums; font-size: 13px; }
+.allow-foot { font-size: 12px; }
+.allow-foot .check { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+.allow-slider { width: 100%; accent-color: var(--text); }
+.allow-meter { height: 4px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.allow-used { display: block; height: 100%; width: var(--w, 0%); background: var(--a-claude); }
+.allow-plan-input { display: inline-flex; align-items: center; gap: 6px; }
+.allow-plan-input .input { width: 110px; }

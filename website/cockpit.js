@@ -790,6 +790,11 @@
       case 'dm': {
         // DMs belong to no conversation; show them where the person is looking.
         const m = frame.message;
+        // A shared agent's usage, asked for by the Allowances dialog: data for the sliders, not a message.
+        if (m && typeof m.content === 'string' && m.content.startsWith('{"kind":"crosstalk.usage"')) {
+          try { onUsage(m.from && m.from.id, JSON.parse(m.content)); } catch { /* not for us */ }
+          return;
+        }
         const address = state.selected || state.joined.keys().next().value;
         const ch = m && address && state.joined.get(address);
         if (!ch) return;
@@ -1506,6 +1511,7 @@
             el('span', { class: 'dot', dataset: { state: p.state }, 'aria-hidden': 'true' }),
             p.text,
             att && att.unread && !isMe ? ` · ${att.unread} unread` : '')),
+        !isMe && sharedBy(m) && sameName(sharedBy(m), state.config.name) ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `How much of your plan each guest may use on ${m.name}`, onclick: () => openAllowances(m), text: 'Allowances' }) : null,
         !isMe && m.sealKey && !m.remote ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `Send ${m.name} a key it can use but never see`, onclick: () => openShareKey(m), text: 'Share a key' }) : null,
         el('span', { class: 'badge-status', dataset: { status: m.status || 'idle' }, text: m.status || 'idle' }));
     }));
@@ -2264,6 +2270,110 @@
   }
   // seal:end
 
+  // ---------------------------------------------------------------------------
+  // Allowances: the owner of a shared agent (crosstalk llm --owner) sets how much
+  // of their plan guests may use, with sliders. The agent does the metering; this
+  // only reads its usage ("usage json") and sends "budget <guest|all> $N/month".
+  // ---------------------------------------------------------------------------
+
+  const STORE_PLAN = 'crosstalk.cockpit.plan';
+  /** The owner's name, from a shared agent's status ("shared by josh · listening"). */
+  function sharedBy(member) {
+    const m = member && member.role === 'model' && /^shared by (\S+)/i.exec(member.currentTask || '');
+    return m ? m[1] : null;
+  }
+  function sameName(a, b) { return !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase(); }
+  let allowance = null; // { agent, usage, plan, values: Map(name -> dollars|null), sent }
+  function planFor(agentId) {
+    try { const v = Number(JSON.parse(load(STORE_PLAN) || '{}')[agentId]); return v > 0 ? v : 20; } catch { return 20; }
+  }
+  function savePlan(agentId, dollars) {
+    let all = {};
+    try { all = JSON.parse(load(STORE_PLAN) || '{}') || {}; } catch { /* fresh */ }
+    all[agentId] = dollars;
+    save(STORE_PLAN, JSON.stringify(all));
+  }
+  async function openAllowances(member) {
+    allowance = { agent: member, usage: null, plan: planFor(member.id), values: new Map() };
+    $('allow-title').textContent = `Allowances for ${member.name}`;
+    $('allow-plan').value = String(allowance.plan);
+    $('allow-error').hidden = true;
+    $('allow-list').replaceChildren(el('p', { class: 'd-empty', text: 'Asking the agent for its usage…' }));
+    openDialog($('allow-dialog'));
+    try {
+      await request('dm.send', { to: member.id, content: 'usage json', replyExpected: false });
+    } catch (err) {
+      $('allow-list').replaceChildren(el('p', { class: 'd-empty', text: `Couldn't reach ${member.name}: ${err.message}` }));
+    }
+  }
+  function onUsage(fromId, usage) {
+    if (!allowance || allowance.agent.id !== fromId || !usage || usage.kind !== 'crosstalk.usage') return;
+    allowance.usage = usage;
+    allowance.values = new Map();
+    renderAllowances();
+  }
+  const money = (n) => (n >= 100 ? `$${Math.round(n)}` : `$${(+n.toFixed(2)).toString()}`);
+  function allowanceRow(label, key, entry, max, capped) {
+    const usd = entry.unit === 'usd';
+    const set = allowance.values.has(key) ? allowance.values.get(key) : (usd ? entry.limit : null);
+    const value = set === null || set === undefined ? max : Math.min(set, max);
+    const unlimited = set === null || set === undefined;
+    const out = el('span', { class: 'allow-value' });
+    const bar = el('span', { class: 'allow-used' });
+    const slider = el('input', { type: 'range', min: '0', max: String(max), step: max > 50 ? '1' : '0.5', value: String(value), class: 'allow-slider', 'aria-label': `${label}: dollars a month` });
+    const none = el('input', { type: 'checkbox' });
+    none.checked = unlimited;
+    const show = () => {
+      const v = Number(slider.value);
+      const plan = allowance.plan;
+      out.textContent = none.checked ? 'No limit' : `${money(v)} a month · ${Math.round((v / plan) * 100)}% of your plan`;
+      slider.disabled = none.checked;
+      const cap = none.checked ? plan : v;
+      const used = usd ? entry.used : 0;
+      bar.style.setProperty('--w', `${Math.min(100, cap ? (used / cap) * 100 : 100)}%`);
+      bar.title = usd ? `${money(used)} used this month` : `${entry.tokens} tokens used`;
+    };
+    slider.addEventListener('input', () => { allowance.values.set(key, Number(slider.value)); show(); });
+    none.addEventListener('change', () => { allowance.values.set(key, none.checked ? null : Number(slider.value)); show(); });
+    show();
+    return el('li', { class: 'allow-row' },
+      el('div', { class: 'allow-head' }, el('b', { text: label }), out),
+      slider,
+      el('div', { class: 'allow-meter' }, bar),
+      el('div', { class: 'allow-foot' },
+        el('span', { class: 'muted', text: usd ? `${money(entry.used)} used this month` : `Set in tokens (${entry.limit ?? 'no limit'}); moving the slider switches it to dollars` }),
+        capped ? el('span', { class: 'muted', text: `Up to ${money(max)}: the agent's own limit` }) : el('label', { class: 'check' }, none, el('span', { text: 'No limit' }))));
+  }
+  function renderAllowances() {
+    const u = allowance && allowance.usage;
+    if (!u) return;
+    const ch = state.selected && state.joined.get(state.selected);
+    const names = new Map(u.guests.map((g) => [g.name.toLowerCase(), g]));
+    // Everyone else in the channel can be given an allowance before they've used any.
+    if (ch) for (const m of ch.members.values()) {
+      if (m.id === allowance.agent.id || m.role === 'model' || sameName(m.name, u.owner) || names.has(m.name.toLowerCase())) continue;
+      names.set(m.name.toLowerCase(), { name: m.name, used: 0, limit: null, unit: 'usd', tokens: 0, fresh: true });
+    }
+    const plan = allowance.plan;
+    // The total set when the agent started (--total-budget) is a ceiling; the slider can only go lower.
+    const ceiling = u.ceiling && u.ceiling.unit === 'usd' && u.ceiling.period === 'month' ? u.ceiling.amount : null;
+    const rows = [allowanceRow('All guests together', 'all', u.total, ceiling !== null ? Math.min(plan, ceiling) : plan, ceiling !== null)];
+    for (const g of names.values()) rows.push(allowanceRow(g.name, g.name, g, plan));
+    $('allow-list').replaceChildren(...rows);
+    $('allow-note').textContent = u.guestDefault ? `Guests without their own allowance get ${u.guestDefault}.` : 'Guests without their own allowance are limited only by the total.';
+  }
+  async function saveAllowances() {
+    const a = allowance;
+    if (!a || !a.usage) return;
+    const spec = (v) => (v === null ? 'off' : `$${+Number(v).toFixed(2)}/month`);
+    for (const [key, v] of a.values) {
+      await request('dm.send', { to: a.agent.id, content: `budget ${key === 'all' ? 'all' : key} ${spec(v)}`, replyExpected: false });
+    }
+    const n = a.values.size;
+    $('allow-dialog').close();
+    showNotice(n ? `Updated ${n} allowance${n === 1 ? '' : 's'} on ${a.agent.name}. Guests see what they have left under each reply.` : 'Nothing changed.');
+  }
+
   /** Who the Share a key dialog is for. */
   let shareKeyTarget = null;
 
@@ -2434,6 +2544,18 @@
     });
     $('public-more').addEventListener('click', () => loadDirectory(false));
 
+    $('allow-plan').addEventListener('input', () => {
+      const v = Number($('allow-plan').value);
+      if (!allowance || !(v > 0)) return;
+      allowance.plan = v;
+      savePlan(allowance.agent.id, v);
+      renderAllowances();
+    });
+    $('allow-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await saveAllowances(); } catch (err) { $('allow-error').textContent = err.message || String(err); $('allow-error').hidden = false; }
+    });
+    $('allow-dialog').addEventListener('close', () => { allowance = null; });
     $('share-key-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const button = e.submitter;

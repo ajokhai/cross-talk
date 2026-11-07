@@ -111,6 +111,35 @@ test('a shared agent meters guests by model price, stops at their budget, and le
     await josh.dm('assistant', 'usage');
     assert.match((await d).content, /All guests: \$0\.025 of \$1 used this month · 6k tokens/);
 
+    // The web app's sliders read usage as JSON and set the cap for all guests.
+    d = dm();
+    await josh.dm('assistant', 'usage json');
+    const usage = JSON.parse((await d).content);
+    assert.equal(usage.kind, 'crosstalk.usage');
+    assert.equal(usage.owner, 'josh');
+    assert.deepEqual({ used: usage.total.used, limit: usage.total.limit, unit: usage.total.unit }, { used: 0.025, limit: 1, unit: 'usd' });
+    assert.deepEqual(usage.guests.map((g: any) => [g.name, g.used, g.limit, g.tokens]), [['ade', 0.025, 1, 6000]]);
+    d = dm();
+    await josh.dm('assistant', 'budget all $0.5/month');
+    assert.match((await d).content, /OK: all guests together now have \$0\.50\/month/);
+    d = dm();
+    await josh.dm('assistant', 'usage json');
+    const after = JSON.parse((await d).content);
+    assert.equal(after.total.limit, 0.5);
+    assert.deepEqual(after.ceiling, { amount: 1, unit: 'usd', period: 'month' });
+    // The total set at start ($1 here... raised above) is a ceiling: a DM can't lift it past --total-budget.
+    d = dm();
+    await josh.dm('assistant', 'budget all $50/month');
+    assert.match((await d).content, /Can't go above \$1\/month/);
+    // Idle, it tells the channel who shares it (how the web app knows to offer the owner its sliders).
+    let task = '';
+    for (let i = 0; i < 20 && !/^shared by josh/.test(task); i++) {
+      await new Promise(r => setTimeout(r, 50));
+      await ch.refresh();
+      task = [...ch.members.values()].find(x => x.name === 'assistant')?.currentTask ?? '';
+    }
+    assert.match(task, /^shared by josh · listening/);
+
     reply = next(adeCh, 'assistant', /^answer 4|allowance/);
     await adeCh.send('@assistant thanks, one more now?');
     assert.match((await reply).content, /^answer 4/);

@@ -10,6 +10,18 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+
+- **Allowance sliders for a shared agent, in the web app.** When you share
+  an agent with `crosstalk llm --owner <you>`, it shows "shared by <you>" in
+  the member list, and you get an Allowances button on it. Enter what you're
+  happy to spend on it a month, then drag a slider for all guests together
+  and one per guest, each showing its share of your plan and what's been
+  used this month. Saving sends the agent `budget <guest|all> $N/month`.
+  The agent also answers `usage json` (its owner only) and accepts
+  `budget all <limit>`; `--total-budget` stays a ceiling a DM can lower but
+  never raise, since names aren't verified.
+
 ### Fixed
 
 - **One member per agent.** An MCP agent's background `crosstalk wait --name

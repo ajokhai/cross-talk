@@ -261,6 +261,9 @@ export async function startModelAgent(options: ModelAgentOptions & { link?: Mode
 
   // ---- sharing: budgets, metering and owner commands
   const shared = options.shared;
+  // "Shared by <owner>" in the status is how the web app knows to offer its owner the allowance sliders.
+  const idleTask = shared ? `shared by ${shared.owner} · listening` : 'listening';
+  if (shared) void link.status('idle', idleTask).catch(() => {});
   const meter = shared ? new Meter(shared.meterFile ?? Meter.fileFor(options.channel || link.channelName, options.name), shared.now) : undefined;
   const toldEmpty = new Set<string>();
   const budgetOf = (guest: string): Budget | null => {
@@ -269,17 +272,42 @@ export async function startModelAgent(options: ModelAgentOptions & { link?: Mode
     const named = Object.entries(shared?.budgets ?? {}).find(([n]) => sameName(n, guest));
     return named ? named[1] : shared?.guestBudget ?? null;
   };
+  /** The cap for all guests together: the owner's runtime setting wins over --total-budget. */
+  const totalBudget = (): Budget | null => {
+    const override = meter?.budgetOverride('*');
+    return override !== undefined ? parseBudget(override) : shared?.totalBudget ?? null;
+  };
   /** 'guest' or 'total' when that budget is used up, else undefined. */
   const overBudget = (guest: string): 'guest' | 'total' | undefined => {
     if (!meter) return undefined;
-    if (meter.remaining('*', shared!.totalBudget ?? null) <= 0) return 'total';
+    if (meter.remaining('*', totalBudget()) <= 0) return 'total';
     if (meter.remaining(guest, budgetOf(guest)) <= 0) return 'guest';
     return undefined;
   };
-  /** The owner's DMs: "budget <name> <spec>", "usage [name]". */
+  /** The owner's DMs: "budget <name|all> <spec>", "usage [name]", "usage json" (for the web app's sliders). */
   const ownerCommand = (text: string): string | undefined => {
     const t = text.trim();
-    let m = /^budget\s+@?(\S+)\s+(.+)$/i.exec(t);
+    if (/^usage\s+json$/i.test(t)) {
+      const describe = (name: string, b: Budget | null) => ({ name, used: meter!.usedIn(name, b), limit: b ? b.amount : null, unit: b?.unit ?? 'usd', period: b?.period ?? 'month', tokens: (({ input, output }) => input + output)(meter!.used(name, b?.period ?? 'month')) });
+      return JSON.stringify({ kind: 'crosstalk.usage', owner: shared!.owner, total: describe('*', totalBudget()), ceiling: shared!.totalBudget ? { amount: shared!.totalBudget.amount, unit: shared!.totalBudget.unit, period: shared!.totalBudget.period } : null, guestDefault: shared!.guestBudget ? formatBudget(shared!.guestBudget) : null, guests: meter!.guests().map(g => describe(g, budgetOf(g))) });
+    }
+    let m = /^budget\s+(?:all|\*|total)\s+(.+)$/i.exec(t);
+    if (m) {
+      try {
+        const b = parseBudget(m[1]);
+        // Names aren't verified, so --total-budget is a ceiling a DM can lower but never raise.
+        const ceiling = shared!.totalBudget;
+        if (ceiling && (!b || b.unit !== ceiling.unit || b.period !== ceiling.period || b.amount > ceiling.amount)) {
+          return `Can't go above ${formatBudget(ceiling)}, the total this agent was started with (--total-budget). To raise it, restart the agent with a higher one.`;
+        }
+        meter!.setBudgetOverride('*', m[1].trim());
+        toldEmpty.clear();
+        return `OK: all guests together now have ${formatBudget(b)}. ${meter!.summary('*', b)}.`;
+      } catch (err) {
+        return (err as Error).message;
+      }
+    }
+    m = /^budget\s+@?(\S+)\s+(.+)$/i.exec(t);
     if (m) {
       try {
         const b = parseBudget(m[2]);
@@ -293,7 +321,7 @@ export async function startModelAgent(options: ModelAgentOptions & { link?: Mode
     m = /^usage(?:\s+@?(\S+))?$/i.exec(t);
     if (m) {
       if (m[1]) return `${m[1]}: ${meter!.summary(m[1], budgetOf(m[1]))}`;
-      return `All guests: ${meter!.summary('*', shared!.totalBudget ?? null)}.`;
+      return `All guests: ${meter!.summary('*', totalBudget())}.`;
     }
     return undefined;
   };
@@ -330,7 +358,7 @@ export async function startModelAgent(options: ModelAgentOptions & { link?: Mode
             if (!toldEmpty.has(key)) {
               toldEmpty.add(key);
               await deliver(blocked === 'total'
-                ? `Sorry ${guest}, this shared agent has used its whole allowance for now (${formatBudget(shared.totalBudget ?? null)}). ${shared.owner} can raise it.`
+                ? `Sorry ${guest}, this shared agent has used its whole allowance for now (${formatBudget(totalBudget())}). ${shared.owner} can raise it.`
                 : `Sorry ${guest}, you've used your allowance on this shared agent (${formatBudget(budgetOf(guest))}). Ask ${shared.owner} for more, or wait until it resets.`);
             }
             log(`not answering ${from}: ${blocked === 'total' ? 'total' : 'their'} budget is used up`);
@@ -361,7 +389,7 @@ export async function startModelAgent(options: ModelAgentOptions & { link?: Mode
       } finally {
         clearTimeout(timer);
         abort.signal.removeEventListener('abort', onStop);
-        if (!stopped) await link.status('idle', 'listening').catch(() => {});
+        if (!stopped) await link.status('idle', idleTask).catch(() => {});
       }
     });
   };

@@ -145,6 +145,15 @@ export class Meter {
     this.save();
   }
 
+  /** Every guest metered so far (not the '*' total). */
+  guests(): string[] { return Object.keys(this.data.guests).filter(g => g !== '*'); }
+
+  /** Used this period, in a budget's unit (dollars or tokens). */
+  usedIn(guest: string, budget: Budget | null, period: 'day' | 'month' = budget?.period ?? 'month'): number {
+    const t = this.used(guest, budget?.period ?? period);
+    return budget?.unit === 'tokens' ? t.input + t.output : t.usd;
+  }
+
   /** What's left of a budget for a guest: in the budget's own unit; Infinity without a budget. */
   remaining(guest: string, budget: Budget | null): number {
     if (!budget) return Infinity;
