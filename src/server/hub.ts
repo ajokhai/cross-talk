@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { channelId, isAddress as isAnyAddress } from '../address.js';
 import {
   PROTOCOL_VERSION,
   type AgentInfo,
@@ -637,6 +638,8 @@ export class MeshHub {
       if (!id) fail('bad_request', 'Requests need a string "id" (max 128 chars)');
       if (!conn.agent) fail('not_registered', 'Send "hello" first');
       if (this.opts.rateLimits && !conn.take(this.now())) fail('rate_limited', 'Too many requests; slow down');
+      // One-line addresses (xtl_…, xt_…@hub) name the hub too; this hub only needs the id.
+      if (typeof frame.channel === 'string') frame = { ...frame, channel: channelId(frame.channel) ?? frame.channel };
       if (conn.invite) this.checkRemote(conn, frame as unknown as RequestFrame);
       conn.agent!.lastSeen = this.now();
       this.changes++;
@@ -729,7 +732,13 @@ export class MeshHub {
   // -------------------------------------------------------------------------
 
   static isAddress(value: unknown): value is string {
-    return typeof value === 'string' && /^xt_[A-Za-z0-9_-]{22}$/.test(value);
+    return isAnyAddress(value);
+  }
+
+  /** The channel an address names, in any form (`xt_…`, `xtl_…`, `xt_…@hub`); see src/address.ts. */
+  private channelAt(address: unknown): Channel | undefined {
+    const id = channelId(address);
+    return id ? this.channels.get(id) : undefined;
   }
 
   /** Creates a conversation with a fresh, unguessable address and joins the creator to it. */
@@ -782,7 +791,7 @@ export class MeshHub {
   }
 
   private joinChannel(conn: Connection, address: unknown, since?: unknown, pass?: unknown, ownerKey?: unknown): ChannelSnapshot {
-    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    const channel = this.channelAt(address);
     if (!channel) return fail('not_found', 'No conversation at that address');
     if (!channel.members.has(conn.agent!.id)) {
       if (this.isBanned(channel, conn.agent!) || this.isBannedAddress(channel, conn.address)) {
@@ -796,6 +805,12 @@ export class MeshHub {
       }
       this.ensureRoom(conn);
       this.addMember(conn, channel);
+      // A knock left over from before (say, it reconnected with a pass): it's in now, so the owner stops seeing it wait.
+      const waiting = channel.knocks.get(conn.agent!.id);
+      if (waiting) {
+        channel.knocks.delete(conn.agent!.id);
+        this.emit(channel, { type: 'channel.knock', channel: channel.id, knock: { ...waiting.knock, status: 'admitted' } });
+      }
       this.retireTwins(conn, [channel.id]);
     }
     this.markRead(channel, conn.agent!.id);
@@ -979,7 +994,7 @@ export class MeshHub {
   }
 
   private memberChannel(conn: Connection, address: unknown): Channel {
-    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    const channel = this.channelAt(address);
     if (!channel || !channel.members.has(conn.agent!.id)) {
       return fail('not_member', 'You are not in that channel. Join it by its address first.');
     }
@@ -1250,7 +1265,7 @@ export class MeshHub {
 
   /** Read-only receipts for HTTP observers. Knowing the address is the capability. */
   receiptsByAddress(address: string, limit?: number): MessageReceipt[] | undefined {
-    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    const channel = this.channelAt(address);
     return channel ? this.receipts(channel, limit) : undefined;
   }
 
@@ -1294,13 +1309,13 @@ export class MeshHub {
 
   /** Read-only view for HTTP observers. Knowing the address is the capability. */
   snapshotByAddress(address: string, since?: string): ChannelSnapshot | undefined {
-    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    const channel = this.channelAt(address);
     return channel ? this.snapshot(channel, since) : undefined;
   }
 
   /** Lock lookup for editor hooks. */
   checkLock(address: string, rawFile: string): LockCheck | undefined {
-    const channel = MeshHub.isAddress(address) ? this.channels.get(address) : undefined;
+    const channel = this.channelAt(address);
     if (!channel) return undefined;
     const file = LockManager.normalizePath(rawFile);
     const lock = this.locks.get(channel.id, file);
