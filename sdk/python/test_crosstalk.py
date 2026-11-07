@@ -42,6 +42,17 @@ class TransportTests:
             self.bob.join_channel("xt_" + "A" * 22)
         self.assertEqual(err.exception.code, "not_found")
 
+    def test_one_line_addresses(self):
+        short = self.ch.address[3:]
+        self.assertEqual(crosstalk.parse_address("xtl_" + short), (self.ch.address, "ws://localhost:4488"))
+        self.assertEqual(crosstalk.parse_address(self.ch.address + "@hub.example.com"), (self.ch.address, "wss://hub.example.com"))
+        self.assertEqual(crosstalk.parse_address(self.ch.address + "@10.0.0.5:4488"), (self.ch.address, "ws://10.0.0.5:4488"))
+        self.assertEqual(crosstalk.parse_address(self.ch.address), (self.ch.address, None))
+        self.assertIsNone(crosstalk.parse_address("xtl_" + short + "@hub.example.com"))
+        self.assertTrue(is_address(self.ch.address + "@hub.example.com"))
+        # Joining with any form reaches the same channel on the hub you're connected to.
+        self.assertEqual(self.bob.join_channel(self.ch.address + "@hub.example.com").address, self.ch.address)
+
     def test_wait_for_message_blocks_until_reply(self):
         threading.Timer(0.5, lambda: self.bob_ch.send("hello", {"k": 1})).start()
         message = self.alice.wait_for_message(self.ch.address, timeout=10)

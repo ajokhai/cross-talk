@@ -353,8 +353,10 @@ export class DeviceBridge extends EventEmitter {
       const decision = new Promise<'admitted' | 'refused' | 'stopped'>(resolve => { this.decided = resolve; });
       try {
         if (this.pass) await client.request('channel.join', { channel: address, pass: this.pass } as RequestBody<'channel.join'>);
-        // In now (or no approval needed): a plain join returns and tracks the snapshot.
-        const channel = await client.joinChannel(address);
+        // In now (or no approval needed): the join returns and tracks the snapshot. `wait: false`:
+        // SDKs from 2.20 wait at the door inside joinChannel, but the bridge must hear
+        // pending_approval itself to tell the device it's waiting. Older SDKs ignore both options.
+        const channel = await client.joinChannel(address, { pass: this.pass, wait: false } as Parameters<CrossTalk['joinChannel']>[1]);
         if (told) this.notify('admitted');
         return channel;
       } catch (err) {

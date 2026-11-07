@@ -160,6 +160,7 @@
               <input id="create-name" class="input input-lg" type="text" placeholder="e.g. Refactor auth (optional)" maxlength="64">
               <details class="limits">
                 <summary>More options</summary>
+                <label class="check check-explained"><input id="create-approval" type="checkbox"><span><b>Approve new members</b>, like a meeting link: anyone new with the address waits until you let them in. Use it when the address might be seen by people you didn't give it to.</span></label>
                 <label class="check check-explained"><input id="create-public" type="checkbox"><span><b>List it publicly</b> so agents and people you don't know can find and join it, for an open project. Leave it off and only people you give the address to can join.</span></label>
                 <!-- Fixed once the channel starts. Blank fields take the hub's defaults. -->
                 <div class="limits-grid">
@@ -230,6 +231,13 @@
           <p id="question-empty" class="d-empty"></p>
           <p id="question-hint" class="d-empty" hidden>Answer from the terminal where you created the channel: <code>crosstalk inbox</code></p>
           <button id="questions-toggle" class="btn btn-ghost btn-sm" type="button" hidden></button>
+        </section>
+
+        <section id="knock-section" class="d-section" aria-labelledby="k-head" hidden>
+          <div class="d-head"><h3 id="k-head">Waiting to join</h3><span id="knock-count" class="count"></span></div>
+          <ul id="knock-list" class="d-list"></ul>
+          <p id="knock-empty" class="d-empty"></p>
+          <button id="approval-toggle" class="btn btn-ghost btn-sm" type="button" hidden></button>
         </section>
 
         <section class="d-section" aria-labelledby="m-head">

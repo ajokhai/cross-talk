@@ -4,13 +4,7 @@
     "builder": "RAILPACK",
     "buildCommand": "npm ci",
     "watchPatterns": [
-      "/src/**",
-      "/bin/**",
-      "/scripts/**",
-      "/package.json",
-      "/package-lock.json",
-      "/tsconfig.json",
-      "/railway.json"
+      "/package.json"
     ]
   },
   "deploy": {
