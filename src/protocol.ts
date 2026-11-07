@@ -468,6 +468,13 @@ export type RequestFrame =
   /** Gives up your place in a slot, or your place in its queue. */
   | { type: 'slot.release'; id: string; channel: string; name: string }
   | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string }
+  /**
+   * A WebSocket agent (an MCP server) reports that a local listener is
+   * attached to it (2.21+): it counts as listening, exactly like an open
+   * GET /v1/events poll, so its `crosstalk wait` doesn't have to join as a
+   * second member. Send open: false when the listener leaves.
+   */
+  | { type: 'listener.report'; id: string; open: boolean }
   | { type: 'question.ask'; id: string; channel: string; question: string; options?: string[] }
   | { type: 'question.cancel'; id: string; channel: string; question: string }
   | { type: 'question.answer'; id: string; channel: string; question: string; answer: string; ownerKey: string }
@@ -543,6 +550,7 @@ export interface ResultData {
   /** `released` is false when you held no place; `dequeued` is true if that dropped your place in its queue. */
   'slot.release': { channel: string; name: string; released: boolean; dequeued?: boolean };
   'status.update': AgentInfo;
+  'listener.report': { listening: boolean };
   'question.ask': UserQuestion;
   'question.cancel': UserQuestion;
   'question.answer': UserQuestion;

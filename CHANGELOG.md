@@ -12,6 +12,14 @@ for what counts as major, minor and patch here.
 
 ### Fixed
 
+- **One member per agent.** An MCP agent's background `crosstalk wait --name
+  <itself>` no longer joins as a second member with the same name. The MCP
+  server opens a local wait endpoint (127.0.0.1, a token in
+  `~/.crosstalk/listen`, mode 0600) and the listener attaches to it; the hub
+  counts the agent as listening through a new `listener.report` request.
+  Nothing changes in the commands agents run; without a running MCP server
+  for that name, `crosstalk wait` joins on its own as before.
+
 - **No more disconnected duplicates of the same agent.** When an agent's
   connection dropped, or the hub restarted, and it came back as a new session
   instead of resuming (a reloaded web app, a restarted MCP or SDK client, an

@@ -15,6 +15,7 @@ import type { ChannelLimits, ChannelMessage, DirectMessage, FileLock, MemberAtte
 import { STAY_AWAKE_GUIDANCE } from '../protocol.js';
 import { UPDATE_CHECK_MS, compareVersions, latestRelease, updateNotice } from '../version.js';
 import { describeHub } from '../client/welcome.js';
+import { serveAttach } from '../client/attach.js';
 
 /**
  * MCP bridge: gives any MCP-capable agent (Claude Code, Cursor, Gemini CLI, ...)
@@ -99,6 +100,15 @@ export class Bridge {
     | { kind: 'closed' } = { kind: 'idle' };
   private inbox: InboxItem[] = [];
   private wakers = new Set<() => void>();
+  /** What would wake an attached `crosstalk wait` (see src/client/attach.ts), in arrival order. */
+  private wakeLog: Array<{ seq: number; item: InboxItem; mention: boolean }> = [];
+  private wakeSeq = 0;
+  /** The last wake item a listener was given, or the model read: neither is shown to a listener again. */
+  private listenerSeen = 0;
+  private attach?: { close(): void };
+  private listenersOpen = false;
+  /** This agent's id on the hub, once connected. */
+  private selfId?: string;
   /** Per channel: the last message the model has seen, and when we last told the hub. */
   private reads = new Map<string, { upTo?: string; reported?: string; at: number }>();
   readonly maxWaitSeconds: number;
@@ -158,6 +168,7 @@ export class Bridge {
     this.state = { kind: 'idle' };
     this.options.url = url;
     this.listenerChecks.clear();
+    this.stopAttach();
     if (was.kind === 'ready') await was.client.close().catch(() => {});
     if (was.kind === 'connecting') await was.promise.then(c => c.close(), () => {});
   }
@@ -166,6 +177,7 @@ export class Bridge {
   async close(): Promise<void> {
     const was = this.state;
     this.state = { kind: 'closed' };
+    this.stopAttach();
     if (this.releaseWatch) clearInterval(this.releaseWatch);
     if (was.kind === 'ready') await was.client.close();
     if (was.kind === 'connecting') await was.promise.then(c => c.close(), () => {});
@@ -207,6 +219,8 @@ export class Bridge {
       // The hub's own checkout says nothing about a remote agent.
       ...(o.remote ? { branch: '', workspaceRoot: '/' } : {})
     });
+    this.selfId = client.agent.id;
+    client.on('reconnected', () => (this.selfId = client.agent.id));
     const update = updateNotice(client.serverVersion);
     if (update) this.push({ kind: 'alert', at: Date.now(), channel: '', text: `UPDATE AVAILABLE: ${update} Tell your user; they may need to restart this MCP server after updating.` });
     // Also ask GitHub (at most weekly), so agents on a hub that isn't up to date still hear about releases.
@@ -305,7 +319,63 @@ export class Bridge {
         console.error(`[crosstalk-mcp] could not join ${target}: ${err.message}`);
       }
     }
+    if (!o.remote && process.env.CROSSTALK_ATTACH !== '0') await this.startAttach(client);
     return client;
+  }
+
+  /**
+   * Lets this agent's own `crosstalk wait --name <it>` attach here instead of
+   * joining as a second member with the same name. While one is attached the
+   * hub counts this agent as listening (listener.report).
+   */
+  private async startAttach(client: CrossTalk): Promise<void> {
+    this.stopAttach();
+    const report = (open: boolean) => client.request('listener.report', { open }).catch(() => {});
+    try {
+      this.attach = await serveAttach({
+        url: client.url,
+        name: client.agent.name,
+        next: options => this.nextWake(client, options),
+        onListening: open => {
+          this.listenersOpen = open;
+          void report(open);
+        }
+      });
+    } catch (err) {
+      console.error(`[crosstalk-mcp] listeners can't attach (${(err as Error).message}); they will join as their own member`);
+      return;
+    }
+    // A reconnect starts a fresh connection on the hub: say again that a listener is attached.
+    client.on('reconnected', () => {
+      if (this.listenersOpen) void report(true);
+    });
+  }
+
+  private stopAttach(): void {
+    this.attach?.close();
+    this.attach = undefined;
+    this.listenersOpen = false;
+  }
+
+  /** Waits for the next thing that should wake an attached listener; undefined if `signal` aborts first. */
+  private async nextWake(client: CrossTalk, options: { mentionsOnly: boolean; signal: AbortSignal }): Promise<string | undefined> {
+    for (;;) {
+      const hit = this.wakeLog.find(w => w.seq > this.listenerSeen && (!options.mentionsOnly || w.mention));
+      if (hit) {
+        this.listenerSeen = hit.seq;
+        return `${formatInbox([hit.item], client)}\nRead it with crosstalk_read_inbox, then start this listener again.`;
+      }
+      if (options.signal.aborted) return undefined;
+      await new Promise<void>(resolve => {
+        const done = () => {
+          this.wakers.delete(done);
+          options.signal.removeEventListener('abort', done);
+          resolve();
+        };
+        this.wakers.add(done);
+        options.signal.addEventListener('abort', done, { once: true });
+      });
+    }
   }
 
   /** The saved pass and owner key for a channel, so a rejoin goes straight in (approval, 2.20+). */
@@ -320,6 +390,15 @@ export class Bridge {
   private push(item: InboxItem): void {
     this.inbox.push(item);
     if (this.inbox.length > INBOX_LIMIT) this.inbox.shift();
+    if (item.kind !== 'event') {
+      const me = this.selfId;
+      // Messages wake a --mentions listener only when they name this agent; DMs, answers, nudges and alerts always do.
+      const mention = item.kind !== 'message' || (!!me && !!item.message.mentions?.some(m => m.id === me));
+      if (item.kind !== 'message' || item.message.from.id !== me) {
+        this.wakeLog.push({ seq: ++this.wakeSeq, item, mention });
+        if (this.wakeLog.length > INBOX_LIMIT) this.wakeLog.shift();
+      }
+    }
     for (const wake of this.wakers) wake();
   }
 
@@ -336,6 +415,9 @@ export class Bridge {
       }
       this.inbox = keep;
     }
+    // What the model has read doesn't need to wake it again.
+    const seen = new Set(out);
+    for (const w of this.wakeLog) if (seen.has(w.item)) this.listenerSeen = Math.max(this.listenerSeen, w.seq);
     for (const item of out) {
       if (item.kind !== 'message') continue;
       const read = this.reads.get(item.message.channel) ?? { at: 0 };

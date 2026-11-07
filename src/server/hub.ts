@@ -693,6 +693,12 @@ export class MeshHub {
       case 'slot.acquire': return this.acquireSlot(conn, f.channel, f.name, f.capacity, f.ttlSeconds);
       case 'slot.release': return this.releaseSlot(conn, f.channel, f.name);
       case 'status.update': return this.updateStatus(conn, f.status, f.currentTask);
+      case 'listener.report': {
+        if (typeof f.open !== 'boolean') fail('bad_request', 'open must be true or false');
+        if (f.open) this.pollStarted(conn);
+        else this.pollEnded(conn);
+        return { listening: f.open };
+      }
       case 'question.ask': return this.askQuestion(conn, f.channel, f.question, f.options);
       case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
       case 'question.answer': return this.answerQuestion(conn, f.channel, f.question, f.answer, f.ownerKey);

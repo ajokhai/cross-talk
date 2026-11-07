@@ -17,6 +17,7 @@ import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import { joinAsMember } from './door.js';
+import { attachedWait, findAttach } from './attach.js';
 import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, loadPass, saveOwnedChannel, savePass, sameHub } from './keys.js';
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
@@ -1657,6 +1658,21 @@ program
   .action(async (target: string, opts) => {
     try {
       warnDefaultName(opts);
+      // This agent's own MCP server runs here: listen through it, so the agent stays
+      // one member instead of a second one with the same name (src/client/attach.ts).
+      if (!opts.onMessage && !opts.json) {
+        atAddress(target, opts);
+        const mcp = findAttach(opts.url, opts.name);
+        if (mcp) {
+          const got = await attachedWait(mcp, { mentionsOnly: !!opts.mentions, timeoutMs: Number(opts.timeout) * 1000 });
+          if (got === 'timeout') {
+            console.error(dim(`no messages after ${opts.timeout}s`));
+            process.exit(2);
+          }
+          if (got !== 'gone') return console.log(got);
+          // Its MCP server stopped: wait the usual way.
+        }
+      }
       const { agent, channel } = await oneShot(target, opts);
       // Read the id each time: after a hub restart the session is re-created with a new one.
       const me = () => agent.agent!.id;
