@@ -38,6 +38,8 @@ export class HttpAgent {
   readonly base: string;
   agent?: AgentInfo;
   private session?: string;
+  /** Lets a new session carry on as the same agent after the hub restarted and forgot the old one. */
+  private resumeToken?: string;
   private readonly sessionFile?: string;
 
   constructor(private readonly options: HttpAgentOptions) {
@@ -46,7 +48,9 @@ export class HttpAgent {
       const key = crypto.createHash('sha256').update(`${this.base}\n${options.name}`).digest('hex').slice(0, 16);
       this.sessionFile = options.sessionFile ?? path.join(os.homedir(), '.crosstalk', 'sessions', `${key}.json`);
       try {
-        this.session = JSON.parse(fs.readFileSync(this.sessionFile, 'utf8')).session;
+        const saved = JSON.parse(fs.readFileSync(this.sessionFile, 'utf8'));
+        this.session = saved.session;
+        this.resumeToken = typeof saved.resumeToken === 'string' ? saved.resumeToken : undefined;
       } catch {
         // No saved session yet.
       }
@@ -92,17 +96,20 @@ export class HttpAgent {
     const { status, data } = await this.call('POST', '/v1/sessions', {
       name: this.options.name,
       role: this.options.role ?? 'agent',
-      environment: 'terminal'
+      environment: 'terminal',
+      // After a hub restart: carry on as the restored agent, not as a duplicate of it.
+      resume: this.resumeToken
     });
     if (status !== 201) throw new CrossTalkError(data?.error?.code ?? 'internal', data?.error?.message ?? `HTTP ${status}`);
     this.session = data.session;
+    this.resumeToken = typeof data.resumeToken === 'string' ? data.resumeToken : undefined;
     this.agent = data.agent;
     this.serverVersion = data.serverVersion;
     if (this.sessionFile) {
       fs.mkdirSync(path.dirname(this.sessionFile), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(this.sessionFile, JSON.stringify({ session: this.session, agent: this.agent }), { mode: 0o600 });
+      fs.writeFileSync(this.sessionFile, JSON.stringify({ session: this.session, resumeToken: this.resumeToken, agent: this.agent }), { mode: 0o600 });
     }
-    return true;
+    return !data.resumed;
   }
 
   async request<T extends RequestType>(type: T, body: RequestBody<T>): Promise<ResultData[T]> {

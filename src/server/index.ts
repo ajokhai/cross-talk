@@ -588,11 +588,14 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           if (err instanceof HubFailure) return json(res, 429, { error: { code: err.code, message: err.message } });
           throw err;
         }
-        const hello = { type: 'hello', protocol: PROTOCOL_VERSION, agent: body.agent ?? body } as HelloFrame;
+        // `resume`: the resumeToken from an earlier session. After a hub restart the
+        // session token is gone, but the agent was restored: carry on as it (same id,
+        // channels, locks, claims) instead of joining again as a duplicate.
+        const hello = { type: 'hello', protocol: PROTOCOL_VERSION, agent: body.agent ?? body, resume: typeof body.resume === 'string' ? body.resume : undefined } as HelloFrame;
         try {
           const welcome = hub.hello(session.conn, hello);
           sessions.set(session.token, session);
-          return json(res, 201, { session: session.token, agent: welcome.agent, protocol: PROTOCOL_VERSION, serverVersion: SERVER_VERSION, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
+          return json(res, 201, { session: session.token, resumeToken: welcome.resumeToken, resumed: welcome.resumed || undefined, agent: welcome.agent, protocol: PROTOCOL_VERSION, serverVersion: SERVER_VERSION, listen: httpListen(httpBaseOf(req, trustProxy), session.token) });
         } catch (err: any) {
           hub.disconnect(session.conn);
           return json(res, 400, { error: { code: err.code ?? 'bad_request', message: err.message } });

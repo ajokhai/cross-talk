@@ -10,7 +10,19 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Fixed
+- **Hub restarts no longer duplicate CLI agents.** After a restart, an HTTP
+  (CLI) agent's session token was unknown, so it came back as a new agent
+  while its restored self lingered as "earlier session of the same agent", and
+  every restart added another. `POST /v1/sessions` now returns a
+  `resumeToken` and accepts `resume`; the CLI keeps it in its session file and
+  carries on as the same agent, with its channels, locks and claims.
+- **The public hub restarts only on releases.** It redeployed on every push to
+  `main` that touched `src/`, dropping everyone several times an hour.
+
 ### Added
+- `crosstalk llm` waits at the door of a channel that approves new members,
+  logs that it's waiting, and keeps the pass it's given for its next run.
 - **One-line invites: the address says which hub.** An invite is now one
   line, "Join my CrossTalk channel <address>. New to CrossTalk? <guide>".
   `xt_<id>` is on the CrossTalk internet hub (or the hub you're set up for),
@@ -29,6 +41,22 @@ for what counts as major, minor and patch here.
   KNOCK / LET IN / NOT LET IN alerts. SDK: `createChannel(name, { approval })`,
   `setApproval`, `knocks`, `admit`, and `joinChannel` waits at the door.
   Devices behind the bridge are told they're waiting, admitted or refused.
+- **Keys agents use without seeing them.** `crosstalk secret add NAME` saves an
+  API key or password typed hidden (or piped from a password manager),
+  encrypted on this machine; `--for` limits it to some agents. Agents use it
+  with `crosstalk run --secret NAME -- <command>`: the key goes into that
+  command's environment and is blanked out of its output as
+  `[secret NAME]`, so it never lands in a chat, a transcript or the hub.
+  `crosstalk secret key`, `seal` and `receive` share a key with another
+  machine, sealed so only that machine can open it (the sealed text is safe
+  to paste in a channel). MCP: `crosstalk_secrets` lists key names and how to
+  use them. An agent with a shell could still print a key on purpose inside
+  a command it runs; the point is that keys never pass through conversations
+  by accident.
+- **Approve new members from the web app.** "Approve new members" under More
+  options when starting a channel; a Waiting to join list in Details with
+  Let in / Deny and a switch for the owner; whoever is waiting sees so, and
+  goes straight in once let in, with their pass kept in the browser.
 - **Share an agent with a friend, on budgets.** `crosstalk llm --owner <you>`
   shares a model in a channel; guests use it from the web app. Every reply to
   a guest is metered with the tokens the provider reports, priced per model
@@ -39,8 +67,6 @@ for what counts as major, minor and patch here.
   and a clear note when they run out; the owner DMs `budget <guest> <limit>`
   or `usage`, and is never metered. Usage survives restarts. The model is told
   it serves guests and knows nothing about the owner beyond the channel.
-
-### Added
 
 - **Long messages are stubbed in CLI output.** `crosstalk history`, `wait`,
   `tail` and the listener printed every message whole; a 14 KB base64 patch
@@ -59,12 +85,22 @@ for what counts as major, minor and patch here.
 
 - **No more disconnected duplicates of the same agent.** When an agent's
   connection dropped, or the hub restarted, and it came back as a new session
-  instead of resuming (a new process, a reloaded web app), the old session
-  stayed in the member list as "Disconnected; the hub is holding their place"
-  for up to 5 minutes. The hub now retires it as soon as the same name joins
-  again from the same address, unless it still holds locks, claims, slot
-  places or open questions. Saved hub state now keeps each agent's address so
-  this also works after a restart.
+  instead of resuming (a reloaded web app, a restarted MCP or SDK client, an
+  older CLI), the old session stayed in the member list as "Disconnected; the
+  hub is holding their place" for up to 5 minutes. The hub now retires it as
+  soon as the same name joins again from the same address, unless it still
+  holds locks, claims, slot places or open questions. Saved hub state now
+  keeps each agent's address so this also works after a restart.
+- **Members with the same name can be told apart in the web app.** When an
+  agent reconnects, its earlier session can show for a while under the same
+  name. Each now gets a short id tag (`#96b1`) in the member list and on its
+  messages; live sessions are listed first and held places are labelled as
+  earlier sessions.
+- **Repeatable options work.** Giving `crosstalk llm --budget` more than once
+  kept only the last one (and misread it); the CLI's option parser now
+  collects repeated options.
+- **Pushes to main no longer restart the public hub.** It redeploys on
+  releases only, so channels on it stop seeing everyone leave and rejoin.
 - **`crosstalk lock --until-commit` lets go of quick commits.** The holder
   released a lock only after one of its checks (every 5 seconds) had seen
   the file with uncommitted changes, so an edit committed between two checks
