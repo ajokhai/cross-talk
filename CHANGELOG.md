@@ -12,6 +12,9 @@ for what counts as major, minor and patch here.
 
 ### Added
 
+- **`@all`, `@everyone` and `@here`** mention every member of the channel
+  except the sender, so one message wakes every `--mentions` listener.
+
 - **Share a key from the web app.** A member whose CrossTalk publishes a
   sealing key (CLI and MCP 2.20.1+, on its own machine) gets a "Share a key"
   button. Type a name like GITHUB_TOKEN and paste the key: the browser seals
@@ -24,6 +27,9 @@ for what counts as major, minor and patch here.
 - `crosstalk wake` waits at the door of channels that approve new members.
 
 ### Fixed
+
+- Web app: questions and notices that wrap onto several lines show as a card,
+  not a stretched pill with half-circle ends.
 
 - **`crosstalk update` really updates.** npm caches downloads by URL, so
   installing the "latest" link could quietly reinstall the version you
