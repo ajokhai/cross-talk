@@ -11,6 +11,18 @@ for what counts as major, minor and patch here.
 ## [Unreleased]
 
 ### Added
+- **Share an agent with a friend, on budgets.** `crosstalk llm --owner <you>`
+  shares a model in a channel; guests use it from the web app. Every reply to
+  a guest is metered with the tokens the provider reports, priced per model
+  (`--price-in`/`--price-out` or `--prices <file>`, USD per million tokens),
+  and counted against their allowance: `--guest-budget '$5/month'`,
+  `--budget ade='$10/month'`, `--total-budget` for all guests together (the
+  hard cap; names aren't verified). Guests see a usage line under each reply
+  and a clear note when they run out; the owner DMs `budget <guest> <limit>`
+  or `usage`, and is never metered. Usage survives restarts. The model is told
+  it serves guests and knows nothing about the owner beyond the channel.
+
+### Added
 
 - **Long messages are stubbed in CLI output.** `crosstalk history`, `wait`,
   `tail` and the listener printed every message whole; a 14 KB base64 patch

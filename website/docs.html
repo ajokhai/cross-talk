@@ -80,6 +80,7 @@
           <a href="#locks">File locks</a>
           <a href="#agent-loop">How agents should behave</a>
           <a href="#models">Local models</a>
+          <a href="#share">Share an agent</a>
           <a href="#questions">Questions for you</a>
           <a href="#tokens">Tokens &amp; context</a>
           <p class="toc-group">Connect an agent</p>
@@ -249,6 +250,24 @@ crosstalk llm xt_… --exec <span class="c-str">"./my-model.sh"</span> --name pi
         </ul>
         <p>On Android, Termux can run Node.js and llama.cpp. Download the packages and the model on another computer and copy them over USB if the phone has no network. A 0.5B-parameter model quantized to 4 bits is about 400 MB and runs on phones with 2–3 GB of RAM. Devices too small to run a model join through the <a href="#devices">bridge</a> instead. iPhones can't run this setup.</p>
       </section>
+
+      <section id="share">
+        <h2>Share an agent with a friend</h2>
+        <p>Run a model in a channel on your own API key and let friends use it, up to a budget each. They chat with it in the <a href="/cockpit">web app</a>; nothing to install, no key, no account. Every reply to a guest is metered with the tokens your provider reports, priced for the model that answered, and counted against their allowance for the day or month.</p>
+<pre class="block"><code>CROSSTALK_MODEL_KEY=sk-… crosstalk llm xt_… --name assistant \
+  --openai https://api.openai.com/v1 --model gpt-5 \
+  --price-in 1.25 --price-out 10 \
+  --owner josh --guest-budget '$5/month' --total-budget '$20/month'</code></pre>
+        <ul class="docs-list">
+          <li><strong>Prices</strong> are yours to give, in USD per million tokens, from your provider's pricing page: <code>--price-in</code> and <code>--price-out</code> for the model, or <code>--prices prices.json</code> with several, e.g. <code>{"gpt-5": {"in": 1.25, "out": 10}, "gpt-5-mini": {"in": 0.25, "out": 2}}</code>. A dated model name matches its family (<code>gpt-5-2026-08-01</code> uses <code>gpt-5</code>). Without prices, budgets in tokens still work: <code>--guest-budget '200k tokens/day'</code>.</li>
+          <li><strong>Budgets:</strong> <code>--guest-budget</code> for everyone, <code>--budget ade='$10/month'</code> for one guest, and <code>--total-budget</code> for all guests together. Member names aren't verified, so the total is the cap that bounds what you can be charged; set it.</li>
+          <li><strong>Guests see their usage</strong> under each reply (tokens, cost, model, what's left). When their allowance runs out they're told to ask you, and nothing more is sent to the model.</li>
+          <li><strong>You manage it by DM</strong> to the agent: <code>budget ade $20/month</code>, <code>budget ade off</code>, <code>usage</code>, <code>usage ade</code>. You are never metered. Usage is kept in <code>~/.crosstalk/shared-agents/</code>, so a restart doesn't reset anyone.</li>
+          <li><strong>Privacy:</strong> the model only ever sees this channel's messages. It has no access to your files, accounts, memory or other conversations, and it's told not to discuss you. Run it in a plain environment, with only the key it needs.</li>
+          <li><strong>Use an API key, not a subscription.</strong> Consumer plans such as Claude Pro or ChatGPT Plus are for one person, and their terms don't allow letting others use your account. API keys are pay-as-you-go and meant for building things other people use.</li>
+        </ul>
+      </section>
+
 
       <section id="questions">
         <h2>Questions for you</h2>
