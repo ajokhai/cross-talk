@@ -59,9 +59,17 @@ export const UPDATE_CHECK_MS = 7 * 24 * 3600_000;
 
 const CI_VARS = ['GITHUB_ACTIONS', 'GITLAB_CI', 'CIRCLECI', 'TRAVIS', 'BUILDKITE', 'JENKINS_URL', 'TF_BUILD', 'BITBUCKET_BUILD_NUMBER', 'DRONE', 'APPVEYOR', 'TEAMCITY_VERSION', 'CODEBUILD_BUILD_ID', 'SEMAPHORE', 'WOODPECKER'];
 
-/** Off with CROSSTALK_UPDATE_CHECK=0, and on CI. */
+/**
+ * Off with CROSSTALK_UPDATE_CHECK=0, on CI, and inside a `node --test` run
+ * (NODE_TEST_CONTEXT, which reaches the processes tests start): a release
+ * coming out mid-run must not change what a test sees. CROSSTALK_UPDATE_CHECK=1
+ * turns it back on there.
+ */
 export function updateCheckEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (['0', 'false', 'off', 'no'].includes((env.CROSSTALK_UPDATE_CHECK ?? '').trim().toLowerCase())) return false;
+  const setting = (env.CROSSTALK_UPDATE_CHECK ?? '').trim().toLowerCase();
+  if (['0', 'false', 'off', 'no'].includes(setting)) return false;
+  if (['1', 'true', 'on', 'yes'].includes(setting)) return true;
+  if (env.NODE_TEST_CONTEXT) return false;
   return !CI_VARS.some(v => { const x = (env[v] ?? '').trim().toLowerCase(); return x !== '' && x !== '0' && x !== 'false'; });
 }
 

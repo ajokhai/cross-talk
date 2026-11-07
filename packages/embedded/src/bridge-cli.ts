@@ -3,17 +3,21 @@
  * crosstalk-bridge: connect hardware to a CrossTalk conversation.
  *
  *   crosstalk-bridge --channel xt_... --serial /dev/tty.usbserial-0001 --baud 115200
+ *   crosstalk-bridge --channel xtl_... --serial /dev/ttyUSB0        # a hub on this computer (or xt_...@host)
  *   crosstalk-bridge --channel xt_... --tcp-listen 7777          # one agent per TCP device
  *   crosstalk-bridge --channel xt_... --unix /tmp/device.sock
  *   crosstalk-bridge --channel xt_... --stdio                    # pipe frames through stdin/stdout
  *   crosstalk-bridge --channel xt_... --serial /dev/ttyUSB0 --reliable   # radio or other lossy link
  *
  * Each device link becomes one agent in the channel (see DeviceBridge for the
- * frame profile). Hub: --url or $CROSSTALK_URL; token: $CROSSTALK_AUTH_TOKEN.
+ * frame profile). Hub: the one the address names (xtl_... for this computer,
+ * xt_...@host for another hub), else --url or $CROSSTALK_URL; token:
+ * $CROSSTALK_AUTH_TOKEN.
  */
 import net from 'node:net';
 import { Duplex } from 'node:stream';
 import { parseArgs } from 'node:util';
+import { resolveAddress } from 'cross-talk';
 import { DeviceBridge } from './bridge.js';
 import { ResyncingLink } from './transport/resync.js';
 import { ReliableLink } from './transport/reliable.js';
@@ -48,7 +52,7 @@ async function main() {
 
   const links = [values.serial, values['tcp-listen'], values.unix, values.stdio || undefined].filter(Boolean);
   if (values.help || !values.channel || links.length !== 1) {
-    console.error(`Usage: crosstalk-bridge --channel <xt_address> (--serial <tty> [--baud 115200] | --tcp-listen <port> | --unix <path> | --stdio)
+    console.error(`Usage: crosstalk-bridge --channel <address: xt_… | xtl_… | xt_…@host> (--serial <tty> [--baud 115200] | --tcp-listen <port> | --unix <path> | --stdio)
                        [--name device] [--role device] [--url ws://localhost:4488] [--max-frame 128]
                        [--reliable [--mtu 64] [--ack-timeout 1500] [--retries 6] [--bitrate 9600] [--duty-cycle 1]]
 Each device link joins the channel as one agent. A device may send a REGISTER frame first to pick its name.
@@ -72,12 +76,19 @@ joining with \`crosstalk llm --serial\`.`);
       dutyCycle: Number(values['duty-cycle'])
     })
     : new ResyncingLink(stream, maxFrame);
-  const hub = { url: values.url, token: values.token };
+  // The address may name its hub (xtl_… this computer, xt_…@host another hub); --url wins.
+  const where = resolveAddress(values.channel!, values.url ?? process.env.CROSSTALK_URL ?? '');
+  if (!where) {
+    console.error(`[bridge] "${values.channel}" is not a channel address (xt_…, xtl_… for a hub on this computer, or xt_…@host)`);
+    process.exit(2);
+  }
+  const channel = where.channel;
+  const hub = { url: values.url ?? (where.hub || undefined), token: values.token };
   // Logs go to stderr so --stdio keeps stdout for frames.
   const log = (...args: unknown[]) => console.error('[bridge]', ...args);
 
   const bridge = async (link: ICrossTalkTransport, name: string) => {
-    const b = new DeviceBridge({ transport: link, channel: values.channel!, name, hub, role: values.role, maxPayloadBytes: maxFrame - 10 });
+    const b = new DeviceBridge({ transport: link, channel, name, hub, role: values.role, maxPayloadBytes: maxFrame - 10 });
     b.on('error', err => log(`${name}:`, err instanceof Error ? err.message : err));
     b.on('closed', () => log(`${name} disconnected`));
     b.on('waiting', () => log(`${name} is waiting for the channel's owner to let it in`));

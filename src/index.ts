@@ -6,6 +6,7 @@ export * from './protocol.js';
 export { VERSION } from './version.js';
 export { CrossTalk, Channel, CrossTalkError, DEFAULT_URL, LOCAL_URL, pinLoopback, type ConnectOptions } from './client/sdk.js';
 export { HttpAgent, httpBase, type HttpAgentOptions } from './client/http.js';
+export { ONLINE_HUB, LOCAL_HUB, parseAddress, findAddress, formatAddress, resolveAddress, channelId, sameHub, type ParsedAddress, type AddressKind } from './address.js';
 export { startServer, type ServerOptions, type RunningServer } from './server/index.js';
 export { MeshHub, Connection, SERVER_VERSION, type HubOptions, type Peer } from './server/hub.js';
 export { LockManager, type LockManagerOptions, type AcquireResult } from './server/locks.js';

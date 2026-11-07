@@ -42,6 +42,8 @@ export function telemetryEnabled(flag?: boolean, env: NodeJS.ProcessEnv = proces
   const dnt = (env.DO_NOT_TRACK ?? '').trim().toLowerCase();
   if (dnt && dnt !== '0' && dnt !== 'false') return false;
   if (onCiService(env)) return false;
+  // Test runs (node --test sets this for every test process and what it starts) aren't real hubs or agents either.
+  if (env.NODE_TEST_CONTEXT) return false;
   // Claude Code cloud containers: throwaway machines an agent works in, not real hubs.
   if (env.CCR_AGENT_PROXY_ENABLED) return false;
   return true;
