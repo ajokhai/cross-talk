@@ -136,3 +136,39 @@ test('crosstalk lock --until-commit lets go even when the edit and its commit la
     await server.close();
   }
 });
+
+test('crosstalk lock --until-commit keeps the lock while git cannot run (a loaded machine), and lets go after the commit', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'xt-repo-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
+  fs.writeFileSync(path.join(repo, 'c.ts'), 'one\n');
+  git('add', '.');
+  git('commit', '-qm', 'init');
+  // A git that, while the flag file exists, dies before it can answer: what a refused or killed process looks like.
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'xt-bin-'));
+  const flag = path.join(bin, 'broken');
+  const realGit = execFileSync('sh', ['-c', 'command -v git']).toString().trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nif [ -f "${flag}" ]; then kill -9 $$; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  const watcher = await CrossTalk.connect({ name: 'watcher', url: server.url, reconnect: false });
+  try {
+    const ch = await watcher.createChannel('until-commit-git-down');
+    const env = { CROSSTALK_URL: server.url, CROSSTALK_CHANNEL: ch.address, CROSSTALK_AGENT_NAME: 'carol', PATH: `${bin}:${process.env.PATH}` };
+    assert.equal((await run(['lock', 'c.ts', '--until-commit'], env, repo)).code, 0);
+    fs.writeFileSync(path.join(repo, 'c.ts'), 'two\n');
+    await new Promise(r => setTimeout(r, 1200)); // the holder (300 ms ticks) has seen the edit
+    fs.writeFileSync(flag, '');
+    await new Promise(r => setTimeout(r, 1500)); // several ticks with git unable to answer
+    await ch.refresh();
+    assert.ok(ch.locks.has('c.ts'), 'not released just because git could not run');
+    fs.rmSync(flag);
+    git('commit', '-qam', 'edit');
+    await until(() => !ch.locks.has('c.ts'));
+  } finally {
+    await watcher.close();
+    await server.close();
+  }
+});

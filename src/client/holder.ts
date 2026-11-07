@@ -150,31 +150,47 @@ export async function ensureHolder(target: HolderTarget, command: string[]): Pro
 }
 
 /**
- * The blob id `file` (repo-relative) has in HEAD at `root`, or '' when HEAD
- * doesn't have it (a new file, no commits yet, not a git checkout).
+ * Runs git and returns its output, or `fallback` when git ran and said no (a
+ * non-zero exit: the path isn't in HEAD, not a git checkout). Returns
+ * undefined when git couldn't run at all (a loaded machine refusing a new
+ * process, a timeout): the caller can't tell anything this time and must not
+ * act as if the file were clean.
  */
-function committedBlob(root: string, file: string): string {
+function git(root: string, args: string[], fallback: string): string | undefined {
   try {
-    return execFileSync('git', ['rev-parse', '-q', '--verify', `HEAD:${file}`], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  } catch {
-    return '';
+    return execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000 }).toString().trim();
+  } catch (err) {
+    return typeof (err as { status?: unknown }).status === 'number' ? fallback : undefined;
   }
 }
 
-/** True when `file` (repo-relative) has uncommitted changes, staged or not, in the git checkout at `root`. */
-function hasUncommittedChanges(root: string, file: string): boolean {
-  try {
-    return execFileSync('git', ['status', '--porcelain', '--', file], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() !== '';
-  } catch {
-    return false;
-  }
+/**
+ * The blob id `file` (repo-relative) has in HEAD at `root`; '' when HEAD
+ * doesn't have it (a new file, no commits yet, not a git checkout);
+ * undefined when git couldn't run.
+ */
+function committedBlob(root: string, file: string): string | undefined {
+  return git(root, ['rev-parse', '-q', '--verify', `HEAD:${file}`], '');
+}
+
+/** Whether `file` (repo-relative) has uncommitted changes, staged or not, at `root`; undefined when git couldn't run. */
+function hasUncommittedChanges(root: string, file: string): boolean | undefined {
+  const out = git(root, ['status', '--porcelain', '--', file], '');
+  return out === undefined ? undefined : out !== '';
 }
 
 interface Entry extends HeldLock {
   root: string;
   sawChanges: boolean;
-  /** The file's blob in HEAD when it was locked ('' if not committed then). */
-  baseBlob: string;
+  /** The file's blob in HEAD when it was locked ('' if not committed then; undefined if git couldn't say). */
+  baseBlob?: string;
+}
+
+/** True when HEAD has a different version of the file than when it was locked; false when git can't say. */
+function headMoved(e: Entry): boolean {
+  if (e.baseBlob === undefined) return false;
+  const now = committedBlob(e.root, e.file);
+  return now !== undefined && now !== e.baseBlob;
 }
 
 /** Runs the holder in this process until it holds nothing for a while, or is stopped. */
@@ -267,14 +283,19 @@ export async function runHolder(target: HolderTarget): Promise<void> {
         continue;
       }
       const changed = hasUncommittedChanges(e.root, e.file);
-      if (changed) e.sawChanges = true;
-      // Committed: changes were seen and are gone, or HEAD has a new version of
-      // the file (an edit and its commit can both land between two ticks).
-      if (e.untilCommit && !changed && (e.sawChanges || committedBlob(e.root, e.file) !== e.baseBlob)) {
-        await release(e.file, 'committed');
-        continue;
+      if (changed === undefined) {
+        // git couldn't run (a loaded machine): decide nothing this tick, just keep the lease alive below.
+        log(`could not run git for ${e.file}; checking again next tick`);
+      } else {
+        if (changed) e.sawChanges = true;
+        // Committed: changes were seen and are gone, or HEAD has a new version of
+        // the file (an edit and its commit can both land between two ticks).
+        if (e.untilCommit && !changed && (e.sawChanges || headMoved(e))) {
+          await release(e.file, 'committed');
+          continue;
+        }
       }
-      if (now >= e.deadline) {
+      if (changed !== undefined && now >= e.deadline) {
         if (changed) {
           e.deadline = now + EXTEND_MS;
           e.extended++;
