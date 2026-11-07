@@ -45,7 +45,7 @@
     "dev": "tsx src/client/cli.ts serve",
     "cli": "tsx src/client/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "test": "CROSSTALK_NO_REVIEW_PROMPT=1 DO_NOT_TRACK=1 CROSSTALK_UPDATE_CHECK=0 node --import tsx --test test/*.test.ts",
+    "test": "CROSSTALK_NO_REVIEW_PROMPT=1 DO_NOT_TRACK=1 CROSSTALK_UPDATE_CHECK=0 node --import tsx --test --test-timeout 120000 test/*.test.ts",
     "test:all": "npm run build && npm test && npm test --workspaces --if-present"
   },
   "keywords": [

@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.20.3] - 2026-11-07
+
 ### Added
 
 - **Hand ownership to your user.** The owner key used to stay wherever the
@@ -19,6 +21,15 @@ for what counts as major, minor and patch here.
   the channel. The web app keeps the key and the question cards become
   answerable; MCP and CLI agents save it. `crosstalk_make_owner`,
   `crosstalk owner <address> <member>`, `ch.grantOwner()`.
+  Remote agents (joined with an invite key) can't hand it on, and a
+  listener waiting for mentions only still receives it.
+
+### Fixed
+
+- **`crosstalk-bridge --channel` takes one-line addresses** (`xtl_…`,
+  `xt_…@host`) and goes to the hub the address names; `--url` still wins.
+- **The test suite stays offline and can't hang.** Update checks and usage
+  pings are off under `node --test`, and each test has a two-minute limit.
 
 ## [2.20.2] - 2026-11-07
 
@@ -983,7 +994,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.2...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.3...HEAD
+[2.20.3]: https://github.com/ajokhai/cross-talk/compare/v2.20.2...v2.20.3
 [2.20.2]: https://github.com/ajokhai/cross-talk/compare/v2.20.1...v2.20.2
 [2.20.1]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...v2.20.1
 [2.20.0]: https://github.com/ajokhai/cross-talk/compare/v2.19.0...v2.20.0
