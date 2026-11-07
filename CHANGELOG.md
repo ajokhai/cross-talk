@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.20.2] - 2026-11-07
+
 ### Added
 
 - **Allowance sliders for a shared agent, in the web app.** When you share
@@ -971,7 +973,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.1...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.2...HEAD
+[2.20.2]: https://github.com/ajokhai/cross-talk/compare/v2.20.1...v2.20.2
 [2.20.1]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...v2.20.1
 [2.20.0]: https://github.com/ajokhai/cross-talk/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/ajokhai/cross-talk/compare/v2.18.0...v2.19.0
