@@ -16,7 +16,7 @@ import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
 import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.js';
-import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel, sameHub } from './keys.js';
+import { forgetOwnedChannels, keyFile, loadOwnedChannels, loadPass, saveOwnedChannel, savePass, sameHub } from './keys.js';
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 import { sendReview } from './review.js';
@@ -137,8 +137,54 @@ async function oneShot(address: string, opts: { name: string; url: string }) {
   const agent = new HttpAgent({ name: opts.name, url: opts.url });
   await agent.open();
   checkForUpdate(agent.serverVersion);
-  const snapshot = await agent.request('channel.join', { channel: address });
+  const snapshot = await joinWithApproval(agent, address, opts.url);
   return { agent, channel: snapshot.channel.id, snapshot };
+}
+
+/** What a rejoin shows: the saved pass and owner key, if this machine has them. */
+function joinArgs(address: string, url: string) {
+  return { channel: address, pass: loadPass(address, url), ownerKey: loadOwnedChannels().find(c => c.address === address && sameHub(c.url, url))?.key };
+}
+
+/**
+ * Joins, showing a saved pass or owner key. In a channel that approves new
+ * members (2.20+), someone new waits at the door: it says so, waits for the
+ * host, saves the pass it's given, and joins with it. Refused: exits 3.
+ */
+async function joinWithApproval(agent: HttpAgent, address: string, url: string) {
+  const ownerKey = loadOwnedChannels().find(c => c.address === address && sameHub(c.url, url))?.key;
+  const join = (pass?: string) => agent.request('channel.join', { channel: address, pass: pass ?? loadPass(address, url), ownerKey });
+  try {
+    return await join();
+  } catch (err) {
+    if (!(err instanceof CrossTalkError) || err.code !== 'pending_approval') throw err;
+  }
+  console.error(yellow(`⏳ This channel approves new members. Waiting for the host to let ${agent.agent!.name} in…`) + dim('  (Ctrl-C to stop)'));
+  for (;;) {
+    let frames: ServerFrame[];
+    try {
+      frames = await agent.events(25);
+    } catch (err) {
+      if (err instanceof CrossTalkError && err.code === 'not_registered') {
+        // The session expired while waiting: open a new one and knock again.
+        await agent.open();
+        try { return await join(); } catch (again) { if (!(again instanceof CrossTalkError) || again.code !== 'pending_approval') throw again; }
+        continue;
+      }
+      throw err;
+    }
+    for (const f of frames) {
+      if (f.type === 'channel.admitted' && f.channel === address) {
+        try { savePass(address, url, f.pass); } catch { /* no home dir: still in for this run */ }
+        console.error(green(`✔ ${f.by.name} let you in.`) + dim(' Your pass is saved, so next time you go straight in.'));
+        return join(f.pass);
+      }
+      if (f.type === 'channel.refused' && f.channel === address) {
+        console.error(red(`✖ ${f.by.name} didn't let you in.`));
+        process.exit(3);
+      }
+    }
+  }
 }
 
 /** Keeps a new channel's owner key on this machine only (see keys.ts). */
@@ -466,7 +512,7 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
     try {
       if (rejoining) {
         await agent.open();
-        await agent.request('channel.join', { channel });
+        await agent.request('channel.join', joinArgs(channel, opts.url ?? defaultUrl()));
         rejoining = false;
       }
       const raw = await agent.events(company ? 55 : Math.max(1, Math.min(55, Math.ceil((aloneUntil - Date.now()) / 1000))));
@@ -495,10 +541,15 @@ const createAction = async (label: string | undefined, opts: any) => {
       name: label,
       topic: opts.topic,
       visibility: opts.public ? 'public' : 'private',
-      limits: limitsFrom(opts)
+      limits: limitsFrom(opts),
+      ...(opts.approve ? { approval: true } : {})
     });
-    console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility})`) + dim(` ${describeHub(opts.url)}`));
+    console.log(green(`✔ Started #${snap.channel.name} (${snap.channel.visibility}${snap.pass ? ', approves new members' : ''})`) + dim(` ${describeHub(opts.url)}`));
     saveKey(snap.channel.id, snap.channel.name, opts.url, snap.ownerKey);
+    if (snap.pass) {
+      try { savePass(snap.channel.id, opts.url, snap.pass); } catch { /* the owner key still gets you in */ }
+      console.log(dim(`Anyone new with the address knocks and waits. Let them in with: crosstalk admit ${snap.channel.id}`));
+    }
     printShareHint(snap.channel.id, opts.url);
     if (!opts.json && countUseAndCheck()) console.error(dim(cliReviewPrompt()));
     if (opts.listen) await listenUntilNeeded(agent, snap.channel.id, opts);
@@ -512,6 +563,7 @@ for (const cmd of [program.command('new [label]'), channel.command('create [labe
   cmd
     .description('Start a new conversation at its own address, then start your listener: waits and exits when you are @mentioned or DMed (run it as a background command; --no-listen to just create)')
     .option('--public', 'also list it in the hub\'s public directory')
+    .option('--approve', 'approve new members, like a meeting link: anyone new with the address knocks, and you let them in with crosstalk admit')
     .option('--topic <topic>', 'what the conversation is for')
     .option('--max-chars <n>', 'longest message allowed (fixed for the channel\'s life; default: the hub\'s)')
     .option('--rate <perMinute>', 'messages each member may post per minute (default: the hub\'s)')
@@ -852,7 +904,7 @@ async function asOwner<T>(address: string, url: string | undefined, run: (ch: Ch
   if (!owned) return fail(`You don't own ${address} on this machine (no owner key in ${keyFile()}). Only the channel's creator can do this.`);
   const ct = await CrossTalk.connect({ name: `${os.userInfo().username} (owner)`, role: 'owner', url: url ?? owned.url, environment: 'terminal', reconnect: false });
   try {
-    return await run(await ct.joinChannel(owned.address), owned.key);
+    return await run(await ct.joinChannel(owned.address, { ownerKey: owned.key }), owned.key);
   } finally {
     await ct.close();
   }
@@ -934,6 +986,48 @@ program
       const r = await asOwner(address, opts.url, (ch, key) => ch.kick(agent, { ban: !!opts.ban || agent.startsWith('ip:'), ip: !!opts.ip, reason: opts.reason }, key));
       const who = r.kicked.length ? r.kicked.map(a => a.name).join(', ') : 'nobody currently here';
       console.log(green(`✔ Removed ${who}`) + (r.banned ? dim(' (banned from rejoining)') : ''));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('admit <address> [agent]')
+  .description('In a channel that approves new members: list who is waiting, or let one in (by name or agent id). --deny turns them away; --all lets everyone waiting in')
+  .option('--deny', 'turn them away instead')
+  .option('--all', 'let everyone waiting in')
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, agent: string | undefined, opts) => {
+    try {
+      await asOwner(address, opts.url, async (ch, key) => {
+        if (!agent && !opts.all) {
+          const waiting = await ch.knocks(key);
+          if (!waiting.length) return console.log(dim(!ch.info.approval ? 'This channel lets anyone with the address in (approval is off). Turn it on: crosstalk approval ' + address + ' on' : 'Nobody is waiting.'));
+          for (const k of waiting) console.log(`${bold(k.agent.name)} ${dim(`${k.agent.id}${k.environment ? `, ${k.environment}` : ''}, waiting since ${new Date(k.at).toLocaleTimeString()}`)}`);
+          return console.log(dim(`Let one in: crosstalk admit ${address} <name>   Turn away: --deny   Everyone: --all`));
+        }
+        const names = agent ? [agent] : (await ch.knocks(key)).map(k => k.agent.id);
+        if (!names.length) return console.log(dim('Nobody is waiting.'));
+        for (const name of names) {
+          const k = await ch.admit(name, !opts.deny, key);
+          console.log(opts.deny ? yellow(`✖ Turned ${k.agent.name} away`) : green(`✔ Let ${k.agent.name} in`));
+        }
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('approval <address> <onOrOff>')
+  .description('Turn approval of new members on or off in a channel you created. On: anyone new knocks and waits for crosstalk admit; everyone already here keeps their place. Off: anyone with the address gets in')
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, onOrOff: string, opts) => {
+    try {
+      const on = /^(on|true|yes|1)$/i.test(onOrOff);
+      if (!on && !/^(off|false|no|0)$/i.test(onOrOff)) fail('Say on or off');
+      await asOwner(address, opts.url, (ch, key) => ch.setApproval(on, key));
+      console.log(on ? green('✔ Approval is on: anyone new knocks and waits for you (crosstalk admit ' + address + ')') : green('✔ Approval is off: anyone with the address gets in'));
     } catch (err) {
       fail(err);
     }
@@ -1469,7 +1563,7 @@ program
         try {
           if (rejoining) {
             await agent.open();
-            await agent.request('channel.join', { channel });
+            await agent.request('channel.join', joinArgs(channel, opts.url));
             rejoining = false;
           }
           events = await agent.events(Math.min(remaining, 55));
