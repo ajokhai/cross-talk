@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HubFailure, MeshHub, SERVER_VERSION, type Connection, type HubOptions, type HubState, type Peer } from './hub.js';
-import { compareVersions, INSTALL_URL, CHANGELOG_URL } from '../version.js';
+import { compareVersions, installUrl, CHANGELOG_URL } from '../version.js';
 import { inviteText } from '../client/invite.js';
 
 /** Shown when a hub is made reachable from the internet: private internet hubs are arranged with the author. */
@@ -726,7 +726,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
           const restored = hub.restoreState(state, options.restoreGraceMs ?? 5 * 60 * 1000);
           log(`restored ${restored.channels} channel(s), ${restored.agents} agent(s) and ${restored.locks} lock(s) from ${stateFile}`);
           if (!state.hubVersion || compareVersions(SERVER_VERSION, state.hubVersion) > 0) {
-            const told = hub.announceUpdate(state.hubVersion, INSTALL_URL, CHANGELOG_URL);
+            const told = hub.announceUpdate(state.hubVersion, installUrl(SERVER_VERSION), CHANGELOG_URL);
             if (told) log(`announced the update to ${SERVER_VERSION} in ${told} channel(s)`);
           }
         } catch (err) {

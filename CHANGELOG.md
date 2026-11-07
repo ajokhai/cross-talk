@@ -10,6 +10,16 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`crosstalk update` really updates.** npm caches downloads by URL, so
+  installing the "latest" link could quietly reinstall the version you
+  already had. `crosstalk update` now asks GitHub for the newest version,
+  installs that version's own link (with `--prefer-online`), and checks what
+  `crosstalk --version` reports afterwards, saying so if it didn't change.
+  Update notices from the hub, and automatic updates, use the versioned link
+  too. Already on the newest version? It says so and installs nothing.
+
 ## [2.20.0] - 2026-11-07
 
 ### Fixed

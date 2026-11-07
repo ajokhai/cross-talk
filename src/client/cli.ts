@@ -24,7 +24,7 @@ import { sendReview } from './review.js';
 import { addSecret, listSecrets, openSealed, readHidden, removeSecret, runWithSecrets, sealIdentity, sealSecret } from './secrets.js';
 import { agentCheckIn } from '../server/telemetry.js';
 import { answerReviewPrompt, cliReviewPrompt, countUseAndCheck } from './review-prompt.js';
-import { INSTALL_URL as RELEASE_URL, VERSION, cachedLatest, compareVersions, latestRelease, newest, updateNotice } from '../version.js';
+import { installUrl, VERSION, cachedLatest, compareVersions, latestRelease, newest, updateNotice } from '../version.js';
 
 /**
  * Tells the user once per run when the hub runs a newer CrossTalk than this
@@ -49,7 +49,7 @@ function checkForUpdate(serverVersion: string | undefined): void {
   if (!note) return;
   if (process.env.CROSSTALK_AUTO_UPDATE === '1') {
     try {
-      execFileSync('npm', ['install', '-g', RELEASE_URL], { stdio: 'ignore', timeout: 120_000 });
+      execFileSync('npm', ['install', '-g', '--prefer-online', installUrl(newest(serverVersion, cachedLatest()))], { stdio: 'ignore', timeout: 120_000 });
       console.error(yellow(`↑ Updated CrossTalk to the latest release (hub runs ${serverVersion}); it takes effect from the next command.`));
       return;
     } catch {
@@ -593,14 +593,30 @@ for (const cmd of [program.command('new [label]'), channel.command('create [labe
 program
   .command('update')
   .description('Install the latest CrossTalk release (CLI, hub and MCP server), then restart your listener and MCP server. Set CROSSTALK_AUTO_UPDATE=1 to update automatically whenever the hub runs a newer version')
-  .action(() => {
-    console.log(dim(`npm install -g ${RELEASE_URL}`));
+  .action(async () => {
+    // Ask GitHub which version is newest and install that version's own URL: npm caches
+    // tarballs by URL, so the "latest" URL can quietly reinstall what you already have.
+    const latest = await latestRelease({ force: true }).catch(() => undefined);
+    if (latest && compareVersions(latest, VERSION) <= 0) {
+      console.log(green(`✔ You already have the latest CrossTalk (${VERSION}).`));
+      return;
+    }
+    const url = installUrl(latest);
+    console.log(dim(`npm install -g --prefer-online ${url}`));
     try {
-      execFileSync('npm', ['install', '-g', RELEASE_URL], { stdio: 'inherit' });
-      console.log(green('✔ CrossTalk updated. Restart your listener (crosstalk join …) and your MCP server to use it.'));
+      execFileSync('npm', ['install', '-g', '--prefer-online', url], { stdio: 'inherit' });
     } catch (err) {
       fail(err);
     }
+    // Check what the crosstalk on PATH now reports, so a stale install doesn't pass for an update.
+    let now = '';
+    try { now = execFileSync('crosstalk', ['--version'], { encoding: 'utf8', timeout: 20_000 }).trim().split(/\s+/).pop() ?? ''; } catch { /* not on PATH */ }
+    if (latest && now && compareVersions(now, latest) < 0) {
+      console.log(yellow(`! The crosstalk on your PATH still reports ${now}, not ${latest}. Another copy may come first on your PATH (check: which -a crosstalk), or npm reused an old download. Try: npm install -g ${installUrl(latest)}`));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(green(`✔ CrossTalk updated${now ? ` to ${now}` : ''}. Restart your listener (crosstalk join …) and your MCP server to use it.`));
   });
 
 program
