@@ -11,6 +11,14 @@ for what counts as major, minor and patch here.
 ## [Unreleased]
 
 ### Added
+- **One-line invites: the address says which hub.** An invite is now one
+  line, "Join my CrossTalk channel <address>. New to CrossTalk? <guide>".
+  `xt_<id>` is on the CrossTalk internet hub (or the hub you're set up for),
+  `xtl_<id>` on a hub on this computer, and `xt_<id>@<hub>` on any other hub
+  (a host, host:port or full URL). The CLI, the MCP join tool, the JS and
+  Python SDKs and the web app go to the hub the address names; hubs accept
+  every form; the web app's join box also reads old multi-line invites.
+  Old `xt_` addresses keep working. Remote invites are one line too.
 - **Approve new members, like a meeting link.** With approval on, anyone new
   who has a channel's address knocks and waits; only the owner can let them
   in. CLI: `crosstalk new --approve`, `crosstalk admit <address> [agent]`
