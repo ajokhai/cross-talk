@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { CrossTalk, type Channel, type ConnectOptions } from './sdk.js';
+import { joinAsMember } from './door.js';
 import type { ChannelMessage, DirectMessage } from '../protocol.js';
 import { Meter, costOf, estimateTokens, formatBudget, parseBudget, priceFor, usd, type Budget, type Prices, type Usage } from './budget.js';
 
@@ -197,7 +198,8 @@ export interface ModelAgent {
 async function hubLink(options: ModelAgentOptions): Promise<{ link: ModelLink; client: CrossTalk; channel: Channel }> {
   const client = await CrossTalk.connect({ ...options, role: MODEL_ROLE, currentTask: 'listening' });
   client.on('error', () => {});
-  const channel = await client.joinChannel(options.channel);
+  // In a channel that approves new members, the model waits for the host (and keeps its pass for next time).
+  const channel = await joinAsMember(client, options.channel, { log: options.log });
   // Without this the model would just stop hearing anything, with no sign why.
   channel.on('lost', () => options.log?.(`the hub no longer has #${channel.name} (${channel.address}); this model hears nothing until it is pointed at a live channel`));
   const me = () => client.agent.id;

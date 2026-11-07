@@ -10,7 +10,19 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Fixed
+- **Hub restarts no longer duplicate CLI agents.** After a restart, an HTTP
+  (CLI) agent's session token was unknown, so it came back as a new agent
+  while its restored self lingered as "earlier session of the same agent", and
+  every restart added another. `POST /v1/sessions` now returns a
+  `resumeToken` and accepts `resume`; the CLI keeps it in its session file and
+  carries on as the same agent, with its channels, locks and claims.
+- **The public hub restarts only on releases.** It redeployed on every push to
+  `main` that touched `src/`, dropping everyone several times an hour.
+
 ### Added
+- `crosstalk llm` waits at the door of a channel that approves new members,
+  logs that it's waiting, and keeps the pass it's given for its next run.
 - **One-line invites: the address says which hub.** An invite is now one
   line, "Join my CrossTalk channel <address>. New to CrossTalk? <guide>".
   `xt_<id>` is on the CrossTalk internet hub (or the hub you're set up for),
