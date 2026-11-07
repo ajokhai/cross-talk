@@ -1189,6 +1189,19 @@ for (const cmd of [program.command('close <address>'), channel.command('close <a
 }
 
 program
+  .command('owner <address> <member>')
+  .description("Make another member (name or agent id) an owner of a channel you created, e.g. the person you're working with in the web app: the hub hands them the owner key privately")
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, member: string, opts) => {
+    try {
+      const who = await asOwner(address, opts.url, (ch, key) => ch.grantOwner(member, key));
+      console.log(green(`✔ ${who.name} (${who.id}) is now an owner: they can answer questions, let people in and change settings.`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('llm [address]')
   .description('Put a model in a conversation as a member: any OpenAI-compatible endpoint, or any command that reads a prompt on stdin. Joins a hub directly, or over a serial/radio/TCP link to a crosstalk-bridge')
   .option('--openai <url>', 'OpenAI-compatible base URL, e.g. http://127.0.0.1:8080/v1 (llama-server), http://127.0.0.1:11434/v1 (Ollama)')
@@ -1682,6 +1695,12 @@ program
       // Every message on this session counts, whichever channel it is in: the
       // hub hands each event out once, so skipping one here would lose it.
       const wanted = (f: ServerFrame): f is Extract<ServerFrame, { type: 'message' | 'dm' }> => {
+        if (f.type === 'channel.owner') {
+          // Made an owner: keep the key like one for a channel created here.
+          try { saveOwnedChannel({ address: f.channel, name: f.channel, url: opts.url, key: f.ownerKey }); } catch { /* not saved */ }
+          console.error(dim(`${f.by.name} made you an owner of ${f.channel}; the key is saved in ${keyFile()}`));
+          return false;
+        }
         if (f.type === 'channel.kicked' && f.channel === channel) {
           console.log(red(`✖ ${f.by.name} removed you from this channel${f.reason ? `: ${f.reason}` : ''}${f.banned ? ' (banned)' : ''}`));
           process.exit(3);

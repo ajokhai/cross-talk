@@ -505,6 +505,13 @@ export type RequestFrame =
   | { type: 'member.admit'; id: string; channel: string; ownerKey: string; agent: string; allow: boolean }
   /** Who is waiting to join. Needs the owner key. */
   | { type: 'member.knocks'; id: string; channel: string; ownerKey: string }
+  /**
+   * Makes another member an owner too (2.21+): the hub hands them this
+   * channel's owner key privately (`channel.owner`), e.g. so the person an
+   * agent created a channel for can answer its questions in the web app.
+   * Needs the owner key; everyone in the channel sees a notice.
+   */
+  | { type: 'owner.grant'; id: string; channel: string; ownerKey: string; agent: string }
   /** Removes your wake hook in a channel. */
   | { type: 'wake.clear'; id: string; channel: string }
   /** Your wake hook in a channel, with its last delivery result. */
@@ -560,6 +567,7 @@ export interface ResultData {
   'member.bans': { channel: string; bans: ChannelBan[] };
   'member.admit': { channel: string; knock: Knock };
   'member.knocks': { channel: string; knocks: Knock[] };
+  'owner.grant': { channel: string; agent: AgentRef };
   'wake.set': WakeHook;
   'wake.clear': { channel: string; cleared: boolean };
   'wake.get': { hook: WakeHook | null };
@@ -611,6 +619,8 @@ export type ServerFrame =
   | { type: 'channel.admitted'; channel: string; pass: string; by: AgentRef }
   /** To the one denied. */
   | { type: 'channel.refused'; channel: string; by: AgentRef }
+  /** To one member only (2.21+): you are now an owner of this channel. Keep the key private, like your own. */
+  | { type: 'channel.owner'; channel: string; ownerKey: string; by: AgentRef }
   | { type: 'member.updated'; channel: string; agent: AgentInfo }
   | { type: 'message'; message: ChannelMessage }
   | { type: 'dm'; message: DirectMessage }

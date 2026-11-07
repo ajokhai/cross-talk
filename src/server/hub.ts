@@ -668,6 +668,7 @@ export class MeshHub {
       case 'channel.create': return this.createChannel(conn, f.name, f.topic, f.visibility, f.limits, f.approval);
       case 'channel.join': return this.joinChannel(conn, f.channel, f.since, f.pass, f.ownerKey);
       case 'member.admit': return this.admitMember(conn, f.channel, f.ownerKey, f.agent, f.allow === true);
+      case 'owner.grant': return this.grantOwner(conn, f.channel, f.ownerKey, f.agent);
       case 'member.knocks': return this.listKnocks(conn, f.channel, f.ownerKey);
       case 'channel.leave': return this.leaveChannel(conn, f.channel);
       case 'channel.list': return this.listChannels(conn, conn.invite ? 'joined' : f.scope ?? 'joined', f.limit, f.cursor);
@@ -2016,6 +2017,37 @@ export class MeshHub {
     if (!match) return fail('not_found', `Nobody called ${key} is waiting to join`);
     const knock = this.decideKnock(channel, match.knock.agent.id, allow, conn.ref)!;
     return { channel: channel.id, knock };
+  }
+
+  /**
+   * Hands the owner key to another member, privately. The hub keeps only the
+   * key's hash, so it passes on the key the owner just proved; nothing is stored.
+   */
+  private grantOwner(conn: Connection, address: unknown, ownerKey: unknown, agent: unknown): ResultData['owner.grant'] {
+    const channel = this.memberChannel(conn, address);
+    this.requireOwner(channel, ownerKey);
+    const key = cleanText(agent, 128);
+    if (!key) fail('bad_request', 'agent (an id or a name) is required');
+    const members = [...channel.members].map(id => this.agents.get(id)).filter((c): c is Connection => !!c?.agent && this.visible(c.agent.id));
+    const byId = members.find(c => c.agent!.id === key);
+    const byName = byId ? [byId] : members.filter(c => c.agent!.name.toLowerCase() === key.toLowerCase());
+    if (!byName.length) return fail('not_found', `${key} isn't in this channel`);
+    if (byName.length > 1) fail('bad_request', `Several members are called ${key}; use an id`, { ids: byName.map(c => c.agent!.id) });
+    const target = byName[0];
+    if (target === conn) fail('bad_request', 'You are already an owner');
+    target.peer.send({ type: 'channel.owner', channel: channel.id, ownerKey: ownerKey as string, by: conn.ref });
+    this.channelNotice(channel, `${conn.agent!.name} made ${target.agent!.name} an owner of this channel.`);
+    return { channel: channel.id, agent: target.ref };
+  }
+
+  /** Posts a hub notice in one channel. */
+  private channelNotice(channel: Channel, text: string): void {
+    const message: ChannelMessage = { id: newId('msg'), channel: channel.id, kind: 'notice', from: { id: 'hub', name: 'hub' }, content: text, timestamp: this.now() };
+    channel.posted++;
+    channel.history.push(message);
+    if (channel.history.length > this.opts.historyLimit) channel.history.shift();
+    this.changes++;
+    this.emit(channel, { type: 'message', message });
   }
 
   private listKnocks(conn: Connection, address: unknown, ownerKey: unknown): ResultData['member.knocks'] {

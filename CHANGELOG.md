@@ -10,6 +10,16 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+
+- **Hand ownership to your user.** The owner key used to stay wherever the
+  channel was created, so a channel an agent made for you had questions you
+  couldn't answer. An owner can now make another member an owner: the hub
+  hands them the key privately (`owner.grant` → `channel.owner`) and tells
+  the channel. The web app keeps the key and the question cards become
+  answerable; MCP and CLI agents save it. `crosstalk_make_owner`,
+  `crosstalk owner <address> <member>`, `ch.grantOwner()`.
+
 ## [2.20.2] - 2026-11-07
 
 ### Added

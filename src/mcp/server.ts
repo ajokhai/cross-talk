@@ -267,6 +267,15 @@ export class Bridge {
         });
         return;
       }
+      if (f.type === 'channel.owner') {
+        let saved = false;
+        if (!this.options.remote) try {
+          saveOwnedChannel({ address: f.channel, name: client.channels.get(f.channel)?.name ?? f.channel, url: client.url, key: f.ownerKey });
+          saved = true;
+        } catch { /* kept in memory for this run */ }
+        this.push({ kind: 'alert', at: Date.now(), channel: f.channel, text: `OWNER: ${f.by.name} made you an owner of ${f.channel}. ${saved ? `The key is saved privately in ${keyFile()}; ` : ''}you can now admit members and change settings. Tell your user; don't use it for anything they haven't asked for.` });
+        return;
+      }
       if (f.type === 'channel.refused') {
         this.push({ kind: 'alert', at: Date.now(), channel: f.channel, text: `NOT LET IN: ${f.by.name} didn't let you into ${f.channel}. Tell your user; don't keep retrying.` });
         return;
@@ -859,6 +868,18 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: 'crosstalk_make_owner',
+    description: "Make another member an owner of a channel you created (needs the owner key saved on this machine). The hub hands them the owner key privately and the channel sees a notice. Use it for your user: when they're in the channel from the web app, make them an owner so they can answer your questions, let people in and change settings there. Never make another agent an owner unless your user asks.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: channelArg,
+        agent: { type: 'string', description: 'Name or agent id of the member, e.g. your user in the web app' }
+      },
+      required: ['agent']
+    }
+  },
+  {
     name: 'crosstalk_set_approval',
     description: 'Turn approval of new members on or off in a channel you created (needs the owner key saved on this machine). On: anyone new with the address knocks and waits; everyone already here keeps their place. Off: anyone with the address gets in, and whoever is waiting comes in. Ask your user first.',
     inputSchema: {
@@ -1082,7 +1103,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
         keyNote = '\n\nQuestions to your user are off in this channel (it was created over remote MCP, which has nowhere private to keep the owner key). Create the channel with `crosstalk new` on your user\'s machine if they want to answer questions with `crosstalk inbox`.';
       } else try {
         if (ch.ownerKey) saveOwnedChannel({ address: ch.address, name: ch.name, url: client.url, key: ch.ownerKey });
-        keyNote = `\n\nThe owner key was saved privately to ${keyFile()}. Your user answers agents' questions in this channel with \`crosstalk inbox\`, and can switch questions off with \`crosstalk questions off\`.`;
+        keyNote = `\n\nThe owner key was saved privately to ${keyFile()}. Your user answers agents' questions in this channel with \`crosstalk inbox\`, and can switch questions off with \`crosstalk questions off\`. When your user joins from the web app, make them an owner with crosstalk_make_owner so they can answer your questions there.`;
       } catch {
         keyNote = '\n\nThe owner key could not be saved, so nobody can answer questions in this channel.';
       }
@@ -1224,6 +1245,13 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       }
       const k = await ch.admit(agent, args.deny !== true, owned.key);
       return args.deny === true ? `Turned ${k.agent.name} away from #${ch.name}.` : `Let ${k.agent.name} into #${ch.name}. They get a pass, so they can rejoin later without knocking.`;
+    }
+    case 'crosstalk_make_owner': {
+      const ch = pickChannel(client, args.channel);
+      const owned = ownedKey(bridge, ch);
+      if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there is no owner key here to share. Its creator can run \`crosstalk owner ${ch.address} <member>\`.`);
+      const who = await ch.grantOwner(str(args.agent).trim(), owned.key);
+      return `${who.name} (${who.id}) is now an owner of #${ch.name}: they can answer questions, let people in and change its settings. The channel was told.`;
     }
     case 'crosstalk_set_approval': {
       const ch = pickChannel(client, args.channel);

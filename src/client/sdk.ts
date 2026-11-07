@@ -418,6 +418,17 @@ export class Channel extends EventEmitter {
     return (await this.client.request('member.knocks', { channel: this.address, ownerKey })).knocks;
   }
 
+  /**
+   * Makes another member (by name or agent id) an owner too: the hub hands
+   * them this channel's owner key privately, and the channel sees a notice.
+   * Use it to give the person you made a channel for control of it (e.g.
+   * answering your questions from the web app). Needs the owner key.
+   */
+  async grantOwner(agent: string, ownerKey = this.ownerKey): Promise<AgentRef> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Making someone an owner needs this channel's owner key");
+    return (await this.client.request('owner.grant', { channel: this.address, ownerKey, agent })).agent;
+  }
+
   /** Lets someone waiting in (by name or agent id), or turns them away with `allow: false`. */
   async admit(agent: string, allow = true, ownerKey = this.ownerKey): Promise<Knock> {
     if (!ownerKey) throw new CrossTalkError('forbidden', "Letting people in needs this channel's owner key");
@@ -737,6 +748,12 @@ export class CrossTalk extends EventEmitter {
     if (frame.type === 'channel.admitted') {
       this.passes.set(frame.channel, frame.pass);
       this.safeEmit('pass', { channel: frame.channel, pass: frame.pass });
+    }
+    if (frame.type === 'channel.owner') {
+      // Made an owner by another owner: keep the key on the channel; listeners may save it.
+      const ch = this.channels.get(frame.channel);
+      if (ch) ch.ownerKey = frame.ownerKey;
+      this.safeEmit('owner', { channel: frame.channel, ownerKey: frame.ownerKey, by: frame.by });
     }
     if (frame.type === 'dm' || frame.type === 'message') this.queue(frame.message);
     if (frame.type === 'question.closed') {

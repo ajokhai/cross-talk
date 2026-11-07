@@ -758,6 +758,15 @@
         }, (err) => showNotice(`You were let in, but joining failed: ${err.message}`));
         return;
       }
+      case 'channel.owner': {
+        // Another owner (often the agent that made this channel for you) handed us the owner key.
+        saveOwnerKey(frame.channel, frame.ownerKey);
+        const ch = state.joined.get(frame.channel);
+        if (ch) addActivity(ch, 'answer', `${frame.by ? frame.by.name : 'The owner'} made you an owner: you can answer questions, let people in and change settings here`);
+        if (ch && ch.info.approval) loadKnocks(frame.channel);
+        render();
+        return;
+      }
       case 'channel.refused': {
         if (!state.waiting.delete(frame.channel)) return;
         showStep('join');
@@ -1575,6 +1584,7 @@
       ? 'Questions are off: agents use their own judgement.'
       : 'None waiting. The owner answers with crosstalk inbox.';
     $('question-hint').hidden = questions.length === 0 || owned;
+    $('question-hint').textContent = 'Only an owner can answer. Ask the agent that created this channel to make you an owner (crosstalk_make_owner, or crosstalk owner <address> <your name>).';
     if (owned && ch.info.questions !== 'off') $('question-empty').textContent = 'None waiting. You started this channel, so agents\' questions come here.';
     // Waiting to join (channels that approve new members). Only the owner sees who is waiting and decides.
     const knocks = ch && ch.knocks ? [...ch.knocks.values()].sort((a, b) => a.at - b.at) : [];
