@@ -178,6 +178,14 @@
               </div>
             </form>
 
+            <!-- Waiting to be let in (a channel that approves new members) -->
+            <section class="wizard-step waiting-card" data-step="waiting" hidden aria-labelledby="ws-waiting" aria-live="polite">
+              <h3 id="ws-waiting" class="wizard-q"><span class="spinner" aria-hidden="true"></span>Waiting for the host to let you in</h3>
+              <p class="muted">This channel approves new members. Its host has been asked to let <b id="waiting-name">you</b> in. Keep this tab open: you'll go straight in when they do.</p>
+              <code id="waiting-address" class="mono waiting-address"></code>
+              <div class="wizard-actions"><button id="waiting-cancel" class="btn btn-ghost" type="button">Stop waiting</button></div>
+            </section>
+
             <!-- Step 3b: join -->
             <form id="open-form" class="wizard-step" data-step="join" autocomplete="off" hidden aria-labelledby="ws-join">
               <h3 id="ws-join" class="wizard-q">Paste your invite</h3>

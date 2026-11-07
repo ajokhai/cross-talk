@@ -268,8 +268,15 @@
   /** Knocked on a channel that approves new members: wait for its host. */
   function startWaiting(address) {
     state.waiting.set(address, Date.now());
-    showNotice(`This channel approves new members. You're waiting for its host to let ${state.config.name || 'you'} in; keep this tab open. You'll go straight in when they do.`);
+    hideNotice();
+    $('waiting-address').textContent = address;
+    $('waiting-name').textContent = state.config.name || 'you';
+    showStep('waiting');
     render();
+  }
+  /** Shows one step of the start screen (name, choose, start, join, waiting). */
+  function showStep(step) {
+    for (const s of document.querySelectorAll('.wizard-step')) s.hidden = s.dataset.step !== step;
   }
 
   // ---------------------------------------------------------------------------
@@ -741,7 +748,9 @@
       case 'channel.admitted': {
         savePass(frame.channel, frame.pass);
         if (state.joined.has(frame.channel)) return; // approval was turned on while we were in
+        if (!state.waiting.has(frame.channel)) return; // stopped waiting: the pass is kept for next time
         state.waiting.delete(frame.channel);
+        showStep('choose');
         request('channel.join', joinParams(frame.channel, frame.pass)).then((snap) => {
           hideNotice();
           adoptSnapshot(snap);
@@ -750,8 +759,9 @@
         return;
       }
       case 'channel.refused': {
-        state.waiting.delete(frame.channel);
-        showNotice(`${frame.by ? frame.by.name : 'The host'} didn't let you in to ${shortAddress(frame.channel)}.`);
+        if (!state.waiting.delete(frame.channel)) return;
+        showStep('join');
+        showNotice(`${frame.by ? frame.by.name : 'The host'} didn't let you into ${shortAddress(frame.channel)}.`);
         render();
         return;
       }
@@ -1453,9 +1463,10 @@
       const info = ch.info;
       $('channel-title').textContent = label(info);
       const parts = [info.topic || (info.visibility === 'public' ? 'Public channel' : 'Private channel')];
-      if (info.approval) parts.push('approves new members');
+      if (info.approval) parts.push('approval on');
       parts.push(info.maxMembers ? `${ch.members.size}/${info.maxMembers} members` : `${ch.members.size} member${ch.members.size === 1 ? '' : 's'}`);
       $('channel-topic').textContent = parts.join(' · ');
+      $('channel-topic').title = info.approval ? 'New members wait until the owner lets them in' : '';
       $('address-code').textContent = info.id;
 
       const members = sortedMembers(ch);
@@ -1728,7 +1739,9 @@
       el('p', { class: 'card-hint' },
         'Agents need CrossTalk once: ',
         el('a', { href: 'docs.html#mcp', text: 'setup guide' }),
-        '. Anyone with the address can join, so share it only with agents and people you trust.'));
+        (state.joined.get(address) && state.joined.get(address).info.approval)
+          ? '. New members wait until you let them in (Details › Waiting to join).'
+          : '. Anyone with the address can join, so share it only with agents and people you trust.'));
     box.dataset.address = address;
     box.hidden = false;
     $('invite-btn').setAttribute('aria-expanded', 'true');
@@ -2521,6 +2534,10 @@
       if (!ch) return;
       if (ch.info.approval && !window.confirm('Let anyone with the address in? Whoever is waiting comes in too.')) return;
       attempt(e.currentTarget, () => setApproval(ch.info.id, !ch.info.approval));
+    });
+    $('waiting-cancel').addEventListener('click', () => {
+      state.waiting.delete($('waiting-address').textContent);
+      showStep('join');
     });
     $('questions-toggle').addEventListener('click', (e) => {
       const ch = state.selected && state.joined.get(state.selected);
