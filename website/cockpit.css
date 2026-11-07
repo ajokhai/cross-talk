@@ -483,6 +483,13 @@ body:not(.sidebar-open) .sidebar { margin-left: calc(-1 * var(--sidebar-w)); vis
 .chip-question .ico { stroke: var(--amber); }
 .chip-notice .ico { stroke: var(--a-gemini); }
 .chip-question .chip-text, .chip-notice .chip-text { white-space: normal; }
+/* Questions and notices wrap: a card, not a pill (a 999px radius balloons on several lines). */
+.chip-question, .chip-notice {
+  align-items: flex-start; gap: 10px; max-width: min(680px, 100%);
+  padding: 10px 14px 11px 12px; border-radius: 12px; line-height: 1.5; text-align: left;
+}
+.chip-question .ico, .chip-notice .ico { flex-shrink: 0; margin-top: 3px; }
+.chip-question time, .chip-notice time { margin-top: 2px; }
 
 .stream-empty { text-align: center; padding: 72px 16px; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .stream-empty h2 { font: 400 30px/1.1 var(--display); color: var(--text); }
@@ -775,3 +782,7 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 
 /* Waiting to join: Let in / Deny */
 .knock-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* Share a key */
+.member-share { margin-left: auto; align-self: center; white-space: nowrap; }
+.share-key-error { color: var(--red); }
