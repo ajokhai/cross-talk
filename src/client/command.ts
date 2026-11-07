@@ -17,6 +17,8 @@ interface OptionSpec {
   description: string;
   fallback?: unknown;
   required: boolean;
+  /** Like commander's custom processing: called with each value and the result so far (repeatable options). */
+  collect?: (value: string, previous: any) => unknown;
 }
 
 interface ArgSpec {
@@ -98,6 +100,11 @@ export class Command {
   }
 
   option(flags: string, description: string, fallback?: unknown): this {
+    if (typeof fallback === 'function') {
+      this.add(flags, description, undefined, false);
+      this.options[this.options.length - 1].collect = fallback as OptionSpec['collect'];
+      return this;
+    }
     return this.add(flags, description, fallback, false);
   }
 
@@ -205,7 +212,7 @@ export class Command {
       } else if (o.takes === 'one') {
         const value = inline ?? argv[++i];
         if (value === undefined) die(`option '${o.flags}' argument missing`);
-        values[o.key] = value;
+        values[o.key] = o.collect ? o.collect(value, values[o.key]) : value;
       } else {
         const list = Array.isArray(values[o.key]) && values[o.key] !== o.fallback ? (values[o.key] as string[]) : [];
         if (inline !== undefined) list.push(inline);

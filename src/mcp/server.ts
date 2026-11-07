@@ -1,4 +1,5 @@
 import { sendReview } from '../client/review.js';
+import { listSecrets, sealIdentity } from '../client/secrets.js';
 import { channelId, parseAddress } from '../address.js';
 import { agentCheckIn } from '../server/telemetry.js';
 import { agentReviewPrompt, answerReviewPrompt, countUseAndCheck } from '../client/review-prompt.js';
@@ -765,6 +766,11 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: 'crosstalk_secrets',
+    description: "Keys (API tokens, passwords) your user saved for you to use without seeing them. Lists their names and how to use one: run your command through `crosstalk run --secret NAME -- <command>`, which puts the key in that command's environment and blanks it out of the output. Never ask anyone to paste a key into the chat; ask your user to run `crosstalk secret add NAME` instead.",
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
     name: 'crosstalk_read_inbox',
     description: 'Return (and mark read) everything that arrived since you last checked: channel messages, DMs, joins/leaves and lock activity.',
     inputSchema: { type: 'object', properties: { channel: { type: 'string', description: 'Only this channel, by address or joined name (DMs are always included)' } } }
@@ -1091,6 +1097,18 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       const r = await ch.kick(str(args.agent), { ban: args.ban === true, ip: args.ip === true, reason: str(args.reason) || undefined }, owned.key);
       const who = r.kicked.length ? r.kicked.map(a => a.name).join(', ') : 'nobody currently here';
       return `Removed ${who} from #${ch.name}${r.banned ? ' and banned them from rejoining' : ''}.`;
+    }
+    case 'crosstalk_secrets': {
+      if (bridge.options.remote) return 'Keys are kept on your user\'s own machine, and this MCP server runs remotely, so none are available here.';
+      const all = listSecrets();
+      const lines = all.length
+        ? ['Keys saved on this machine (names only; you never see values):', ...all.map(s => `- ${s.name}${s.agents ? ` (only for ${s.agents.join(', ')})` : ''}${s.from ? `, ${s.from}` : ''}`)]
+        : ['No keys are saved on this machine yet.'];
+      lines.push('',
+        'Use one: crosstalk run --secret NAME -- <command>   (repeat --secret for more; the key is an environment variable of the same name, e.g. $GITHUB_TOKEN, and is blanked out of the output).',
+        'Need one that is missing? Ask your user to run: crosstalk secret add NAME   (they type it hidden). Never ask for a key in the chat, and never print one.',
+        `Someone on another machine sharing a key with you? Give them this machine's sealing key: ${sealIdentity().publicKey}. They run crosstalk secret seal <that key> NAME and send you the result, which only this machine can open; save it with crosstalk secret receive NAME <sealed>.`);
+      return lines.join('\n');
     }
     case 'crosstalk_admit_member': {
       const ch = pickChannel(client, args.channel);
