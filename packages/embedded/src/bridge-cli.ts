@@ -80,6 +80,8 @@ joining with \`crosstalk llm --serial\`.`);
     const b = new DeviceBridge({ transport: link, channel: values.channel!, name, hub, role: values.role, maxPayloadBytes: maxFrame - 10 });
     b.on('error', err => log(`${name}:`, err instanceof Error ? err.message : err));
     b.on('closed', () => log(`${name} disconnected`));
+    b.on('waiting', () => log(`${name} is waiting for the channel's owner to let it in`));
+    b.on('refused', () => log(`${name} was refused by the channel's owner`));
     const ch = await b.start();
     log(`${name} joined #${ch.name} (${ch.address})`);
     return b;

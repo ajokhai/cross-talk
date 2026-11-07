@@ -8,6 +8,7 @@ import {
   type ConnectOptions,
   type DirectMessage,
   type FileLock,
+  type RequestFrame,
   type ServerFrame
 } from 'cross-talk';
 import { BinaryCodec, BinaryOpcode, type BinaryFrame } from './binary.js';
@@ -45,6 +46,25 @@ export interface DeviceBridgeOptions {
    * and reported, so a chatty sensor can't build an unbounded backlog. Default 50.
    */
   maxBacklog?: number;
+  /**
+   * A pass from an earlier admission to this channel (see the 'pass' event),
+   * for channels that approve new members. With it the device goes straight
+   * back in instead of knocking again.
+   */
+  pass?: string;
+}
+
+/** Sender name on the bridge's own notices to the device (waiting, admitted, refused). */
+export const NOTICE_SENDER = 'crosstalk';
+
+/** Body of a request frame, as `CrossTalk.request` takes it. */
+type RequestBody<T extends RequestFrame['type']> = Omit<Extract<RequestFrame, { type: T }>, 'type' | 'id'>;
+
+/** Approval events (hub 2.20+), typed here so the bridge works with an SDK whose types predate them. */
+interface ApprovalFrame {
+  type: string;
+  channel?: string;
+  pass?: string;
 }
 
 /** Longest a rate-limited send waits for the hub's retryAfterMs before the frame is dropped. */
@@ -125,8 +145,17 @@ export function fitUtf8(text: string, max: number): Buffer {
  *   0x03 [from_len:1][from][text]   DM to the device
  *   0x04 / 0x07 packed !LCK / !REL  another agent took / released a lock
  *   0x04 + conflictAlert, packed !WARN @file "<requester>"   someone wants the device's lock
+ *   0x02 [9]crosstalk[text]          the bridge's own notices: "waiting for approval",
+ *                                    "admitted", "refused" (channels that approve new members)
  *
- * Events: 'ready' (Channel), 'frame' (decoded device frame), 'error', 'closed'.
+ * In a channel that approves new members, a device without a pass knocks:
+ * start() waits until the owner admits it (then joins with the pass it gets
+ * and keeps it for every later rejoin) or refuses it (then the bridge stops
+ * and start() rejects).
+ *
+ * Events: 'ready' (Channel), 'frame' (decoded device frame), 'waiting' (the
+ * owner is being asked), 'pass' (string: keep it and give it back as
+ * `options.pass` to skip the knock after a restart), 'refused', 'error', 'closed'.
  */
 export class DeviceBridge extends EventEmitter {
   private client?: CrossTalk;
@@ -141,12 +170,25 @@ export class DeviceBridge extends EventEmitter {
    * bridge is still registering or connecting leaves no agent behind.
    */
   private phase: 'idle' | 'registering' | 'connecting' | 'live' | 'stopped' = 'idle';
+  /** The pass that gets this device back into an approval channel (from options or channel.admitted). */
+  private pass?: string;
+  /** Wakes whoever is waiting for the owner to admit or refuse this device. */
+  private decided?: (outcome: 'admitted' | 'refused' | 'stopped') => void;
+  /** Set once the owner refused: no more joins are attempted. */
+  private refused = false;
+  private rejoining?: Promise<void>;
 
   constructor(private readonly options: DeviceBridgeOptions) {
     super();
     this.ownsClient = !options.client;
     this.client = options.client;
     this.maxPayload = options.maxPayloadBytes ?? 118;
+    this.pass = options.pass;
+  }
+
+  /** The current pass for this channel, if it approves new members and the device was admitted. */
+  get currentPass(): string | undefined {
+    return this.pass;
   }
 
   async start(): Promise<Channel> {
@@ -180,6 +222,11 @@ export class DeviceBridge extends EventEmitter {
       if (!live) {
         if (frame.opcode === BinaryOpcode.REGISTER && registered && frame.raw?.length) {
           registered(fitUtf8(frame.raw.toString('utf8').trim(), 32).toString('utf8'));
+        }
+        // Waiting for the owner can take a while; don't let a chatty device pile up frames meanwhile.
+        if (pending.length >= maxBacklog) {
+          this.report(new Error(`Dropped a device frame (opcode ${frame.opcode}): ${pending.length} already waiting to join`));
+          return;
         }
         pending.push(frame);
         return;
@@ -225,7 +272,31 @@ export class DeviceBridge extends EventEmitter {
     }
     this.phase = 'connecting';
     const client = this.client;
-    const channel = client.channel(this.options.channel) ?? (await client.joinChannel(this.options.channel));
+    const address = this.options.channel.trim();
+    // Admissions and refusals for this channel, whenever they come (approval can be turned on later too).
+    const onDecision = (f: ServerFrame) => {
+      const frame = f as unknown as ApprovalFrame;
+      if (frame.channel !== address) return;
+      if (frame.type === 'channel.admitted' && typeof frame.pass === 'string') {
+        this.pass = frame.pass;
+        this.emit('pass', frame.pass);
+        this.decided?.('admitted');
+      } else if (frame.type === 'channel.refused') {
+        this.decided?.('refused');
+      }
+    };
+    client.on('event', onDecision);
+    this.detach.push(() => {
+      client.off('event', onDecision);
+      this.decided?.('stopped');
+    });
+    let channel: Channel;
+    try {
+      channel = client.channel(address) ?? (await this.admit(client, address));
+    } catch (err) {
+      if (this.isStopped() && !this.refused) return bail();
+      throw err;
+    }
     if (this.isStopped()) return bail();
     this.channel = channel;
 
@@ -241,6 +312,14 @@ export class DeviceBridge extends EventEmitter {
     channel.on('message', onMessage);
     client.on('dm', onDm);
     client.on('event', onEvent);
+    // The SDK rejoins after a reconnect, but without the pass; a new session
+    // in an approval channel would knock instead of getting back in.
+    const onReconnected = () => {
+      this.rejoining ??= this.admit(client, address)
+        .then(() => {}, err => { if (!this.isStopped()) this.report(err); })
+        .finally(() => { this.rejoining = undefined; });
+    };
+    client.on('reconnected', onReconnected);
     const attending = setInterval(() => {
       if (this.options.transport.isConnected) channel.markRead().catch(() => {});
     }, this.options.attentionIntervalMs ?? 60_000);
@@ -250,6 +329,7 @@ export class DeviceBridge extends EventEmitter {
       channel.off('message', onMessage);
       client.off('dm', onDm);
       client.off('event', onEvent);
+      client.off('reconnected', onReconnected);
     });
 
     live = true;
@@ -257,6 +337,52 @@ export class DeviceBridge extends EventEmitter {
     for (const frame of pending.splice(0)) enqueue(frame);
     this.emit('ready', channel);
     return channel;
+  }
+
+  /**
+   * Joins (or rejoins) the channel, showing the pass when there is one. In a
+   * channel that approves new members, a device without a valid pass waits
+   * for the owner: it's told it's waiting, and joins once admitted. Refused,
+   * it's told so and the bridge stops.
+   */
+  private async admit(client: CrossTalk, address: string): Promise<Channel> {
+    for (let told = false; ; ) {
+      if (this.refused) throw new Error(`Refused by the owner of ${address}`);
+      if (this.isStopped()) throw new Error('Device bridge stopped');
+      // Listen before asking, so an admission can't slip between the refusal and the wait.
+      const decision = new Promise<'admitted' | 'refused' | 'stopped'>(resolve => { this.decided = resolve; });
+      try {
+        if (this.pass) await client.request('channel.join', { channel: address, pass: this.pass } as RequestBody<'channel.join'>);
+        // In now (or no approval needed): a plain join returns and tracks the snapshot.
+        const channel = await client.joinChannel(address);
+        if (told) this.notify('admitted');
+        return channel;
+      } catch (err) {
+        // By code, not class: the code is newer (hub 2.20+) than some SDK typings, and the client may come from another copy of the SDK.
+        if ((err as { code?: unknown } | undefined)?.code !== 'pending_approval') throw err;
+      }
+      if (!told) {
+        told = true;
+        this.notify('waiting for approval');
+        this.emit('waiting', address);
+      }
+      const outcome = await decision;
+      this.decided = undefined;
+      if (outcome === 'stopped') throw new Error('Device bridge stopped');
+      if (outcome === 'refused') {
+        this.refused = true;
+        this.notify('refused');
+        this.emit('refused', address);
+        // Nothing more to do for this device: stop retrying and let it go.
+        await this.stop();
+        throw new Error(`Refused by the owner of ${address}`);
+      }
+    }
+  }
+
+  /** A short notice from the bridge itself, shown to the device as a channel message from `crosstalk`. */
+  private notify(text: string): void {
+    this.toDevice(BinaryOpcode.BROADCAST, this.attributed(NOTICE_SENDER, text));
   }
 
   /** Read fresh: stop() can run while start() is awaiting. */
