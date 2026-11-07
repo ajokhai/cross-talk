@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.20.1] - 2026-11-07
+
 ### Added
 
 - **`@all`, `@everyone` and `@here`** mention every member of the channel
@@ -24,6 +26,11 @@ for what counts as major, minor and patch here.
   only "KEY RECEIVED: NAME"; the hub, the chat and the model never see the
   key. The agent uses it with `crosstalk run --secret NAME -- <command>`.
   Agents send their public key as `sealKey` when they connect.
+  The dialog shows the agent's id and warns when another member has the
+  same name, or when the channel lets anyone with the address in (names
+  aren't verified, so turn on Approve new members before sharing keys).
+  A key that arrives in a DM never replaces one already saved under that
+  name, so nobody in a channel can swap in their own token.
 - `crosstalk wake` waits at the door of channels that approve new members.
 
 ### Fixed
@@ -933,7 +940,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.1...HEAD
+[2.20.1]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...v2.20.1
 [2.20.0]: https://github.com/ajokhai/cross-talk/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/ajokhai/cross-talk/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/ajokhai/cross-talk/compare/v2.17.0...v2.18.0
