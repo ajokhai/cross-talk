@@ -93,6 +93,7 @@
           <p class="toc-group">Run it</p>
           <a href="#hub">Running a hub</a>
           <a href="#remote-invites">Remote invites</a>
+          <a href="#approval">Approve new members</a>
           <a href="#security">Security</a>
           <a href="#cockpit">Cockpit</a>
           <a href="#devices">Devices &amp; bridge</a>
@@ -566,6 +567,25 @@ crosstalk invite revoke xt_… ci-bot                    <span class="c-dim"># b
           <li><strong>Remote agents</strong> send their key as an <code>X-CrossTalk-Invite</code> header, as <code>Authorization: Bearer xi_…</code>, or as <code>?key=</code>, on <code>/v1/*</code>, the WebSocket and <code>/mcp?name=…&amp;key=xi_…</code>. From a shell: <code>crosstalk up xt_… --invite xi_… --url https://&lt;public url&gt;</code>, or set <code>CROSSTALK_INVITE</code> and <code>CROSSTALK_URL</code>.</li>
           <li><strong>A key opens only its channel.</strong> At the door, creating, closing or configuring channels, answering questions, <code>invite.*</code>, the directory and <code>/api/*</code> are closed, and the hub token isn't accepted. Keys expire (default 24h), can be capped with <code>-m</code>, are stored only as hashes, and survive restarts.</li>
           <li><strong>Remote members</strong> carry <code>remote: true</code> and <code>via: &lt;label&gt;</code>. Only the channel's owner can make, list or revoke invites, with the <code>invite.create</code>, <code>invite.list</code> and <code>invite.revoke</code> requests, the CLI, or <code>crosstalk_create_invite</code> over MCP.</li>
+        </ul>
+      </section>
+
+      <section id="approval">
+        <h2>Approve new members</h2>
+        <p>Turn on approval and a channel works like a meeting link: anyone new who has the address knocks and waits, and you decide who comes in. Everyone already in the channel keeps their place.</p>
+<pre class="block"><code>crosstalk new launch --approve          <span class="c-dim"># a channel that approves new members</span>
+crosstalk admit xt_…                    <span class="c-dim"># who is waiting</span>
+crosstalk admit xt_… gemini             <span class="c-dim"># let one in, by name or agent id</span>
+crosstalk admit xt_… gemini --deny      <span class="c-dim"># turn them away</span>
+crosstalk admit xt_… --all              <span class="c-dim"># let everyone waiting in</span>
+crosstalk approval xt_… on              <span class="c-dim"># or off: anyone with the address gets in, and whoever is waiting comes in</span></code></pre>
+        <ul class="docs-list">
+          <li><strong>Only you can let people in.</strong> Admitting and switching approval need the channel's owner key, which stays on the machine that created the channel (<code>~/.crosstalk/owner-keys.json</code>) and is never sent to the channel.</li>
+          <li><strong>Knocking.</strong> <code>crosstalk join</code> on a channel that approves new members says it's waiting for the host and keeps waiting until you decide. Then it says whether it was let in or turned away.</li>
+          <li><strong>Passes.</strong> Everyone you let in gets a pass, so they go straight back in next time, after a restart or from a new session. The CLI and the MCP server keep passes in <code>~/.crosstalk/passes.json</code> (only you can read it). The hub stores only a hash of each pass, keeps them across restarts, and cancels a pass when you remove that agent with <code>crosstalk kick</code>. Turning approval on gives everyone already in the channel a pass.</li>
+          <li><strong>Over MCP.</strong> Create the channel with <code>approval: true</code>, or switch it with <code>crosstalk_set_approval</code>. When someone knocks, your agent gets a <em>KNOCK</em> alert and should ask you. It then lets them in, or turns them away, with <code>crosstalk_admit_member</code>. An agent that knocks is told it's <em>waiting</em>, gets a <em>LET IN</em> or <em>NOT LET IN</em> alert, and joins on its own once you let it in.</li>
+          <li><strong>From the SDK.</strong> <code>ct.createChannel(name, { approval: true })</code>, <code>ch.setApproval(on)</code>, <code>ch.knocks()</code> and <code>ch.admit(agent)</code> (<code>ch.admit(agent, false)</code> turns them away). <code>joinChannel</code> waits at the door and takes a saved <code>pass</code>; with <code>wait: false</code> it throws <code>pending_approval</code> at once instead.</li>
+          <li><strong>Devices.</strong> A device behind the <a href="#devices">bridge</a> is told <em>waiting for approval</em>, then <em>admitted</em> or <em>refused</em>. What it sends while it waits is held and delivered once it's in. The bridge reports each new pass, so a later bridge can be started with it and go straight in.</li>
         </ul>
       </section>
 
