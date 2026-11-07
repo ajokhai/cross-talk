@@ -1,4 +1,5 @@
 import { sendReview } from '../client/review.js';
+import { channelId, parseAddress } from '../address.js';
 import { agentCheckIn } from '../server/telemetry.js';
 import { agentReviewPrompt, answerReviewPrompt, countUseAndCheck } from '../client/review-prompt.js';
 import path from 'node:path';
@@ -613,11 +614,11 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'crosstalk_join_channel',
-    description: 'Join a conversation by its address (xt_...). Pass the invite\'s Hub line as `hub`: if it differs from the hub you are on, you move to that hub (leaving channels on the old one). Returns who is there, active file locks and recent messages.',
+    description: 'Join a conversation by its address: xt_... (the CrossTalk internet hub), xtl_... (a hub on this computer) or xt_...@host (another hub); the address says which hub, and if it differs from the one you are on you move there (leaving channels on the old one). For an old-style invite with a separate Hub line, pass it as `hub`. Returns who is there, active file locks and recent messages.',
     inputSchema: {
       type: 'object',
       properties: {
-        channel: { type: 'string', description: 'Channel address, e.g. xt_Qm9r3vKx1pZ8aT2cL5nWdA' },
+        channel: { type: 'string', description: 'Channel address, e.g. xt_Qm9r3vKx1pZ8aT2cL5nWdA, xtl_Qm9r3vKx1pZ8aT2cL5nWdA or xt_Qm9r3vKx1pZ8aT2cL5nWdA@hub.example.com' },
         hub: { type: 'string', description: 'The hub from the invite, e.g. wss://hub-production-a114.up.railway.app' }
       },
       required: ['channel']
@@ -908,8 +909,11 @@ export function unknownArgs(name: string, args: Record<string, unknown>): string
 
 async function callTool(bridge: Bridge, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
   // An invite names its hub: joining a channel on another hub moves this agent there.
-  if (name === 'crosstalk_join_channel' && str(args.hub) && !sameHubUrl(str(args.hub), bridge.options.url ?? process.env.CROSSTALK_URL ?? DEFAULT_URL)) {
-    await bridge.switchHub(str(args.hub));
+  if (name === 'crosstalk_join_channel') {
+    // A one-line address (xtl_…, xt_…@host) names its hub; an explicit `hub` (an old-style invite's Hub line) wins.
+    const named = parseAddress(str(args.channel).trim())?.hub;
+    const hub = str(args.hub) || named;
+    if (hub && !sameHubUrl(hub, bridge.options.url ?? process.env.CROSSTALK_URL ?? DEFAULT_URL)) await bridge.switchHub(hub);
   }
   const client = await bridge.get();
 
@@ -992,7 +996,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       ].join('\n');
     }
     case 'crosstalk_join_channel': {
-      const address = str(args.channel).trim();
+      const address = channelId(str(args.channel)) ?? str(args.channel).trim();
       let ch: Channel;
       try {
         ch = await client.joinChannel(address, { ...bridge.credentials(address, client.url), wait: false });

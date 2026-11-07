@@ -8,6 +8,7 @@ import { Command } from './command.js';
 import { CrossTalk, CrossTalkError, DEFAULT_URL, LOCAL_URL, type Channel } from './sdk.js';
 import { WELCOME_TEXT, welcomeOnce, describeHub } from './welcome.js';
 import { HttpAgent, httpBase } from './http.js';
+import { resolveAddress } from '../address.js';
 import { askHolder, ensureHolder, holderIfRunning, runHolder, type HolderTarget } from './holder.js';
 import { parseSize, runWithSlot } from './slots.js';
 import { inviteText, remoteInviteText } from './invite.js';
@@ -132,8 +133,20 @@ function fail(err: unknown): never {
 }
 
 /** Connects a one-shot HTTP agent and makes sure it is in the channel at `address`. */
-async function oneShot(address: string, opts: { name: string; url: string }) {
-  if (!CrossTalk.isAddress(address)) fail(`"${address}" is not a channel address (they look like xt_Qm9r3vKx1pZ8aT2cL5nWdA)`);
+/**
+ * Reads a channel address in any form (xt_…, xtl_… for a hub on this computer,
+ * xt_…@host for another hub) and points `opts.url` at the hub it names, so the
+ * rest of the command talks to the right hub. Returns the hub's `xt_…` id.
+ */
+function atAddress(address: string, opts: { url: string }): string {
+  const where = resolveAddress(address, opts.url);
+  if (!where) fail(`"${address}" is not a channel address (they look like xt_Qm9r3vKx1pZ8aT2cL5nWdA, xtl_… for a hub on this computer, or xt_…@host)`);
+  opts.url = where.hub;
+  return where.channel;
+}
+
+async function oneShot(target: string, opts: { name: string; url: string }) {
+  const address = atAddress(target, opts);
   const agent = new HttpAgent({ name: opts.name, url: opts.url });
   await agent.open();
   checkForUpdate(agent.serverVersion);
@@ -628,6 +641,7 @@ program
     let ct: CrossTalk;
     let ch: Channel;
     try {
+      if (address) address = atAddress(address, opts);
       ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start, invite: opts.invite });
       checkForUpdate(ct.serverVersion);
       ch = address ? await ct.joinChannel(address) : await ct.createChannel(opts.label, { limits: limitsFrom(opts) });
@@ -1269,8 +1283,9 @@ program
       const sub = what === 'list' || what === 'revoke' ? what : 'create';
       const target = sub === 'create' ? what : address;
       if (!target || !CrossTalk.isAddress(target)) fail('Which channel? Give its address (xt_…).');
+      const id = atAddress(target!, opts);
       if (sub === 'create' && !opts.remote) {
-        console.log(inviteText({ address: target!, hub: opts.url }));
+        console.log(inviteText({ address: id, hub: opts.url }));
         return;
       }
       const ownerKey = ownerKeyFor(target!, opts.url);
@@ -1325,7 +1340,8 @@ const defaultChannel = () => (process.env.CROSSTALK_CHANNEL || '').split(',').ma
 function lockTarget(opts: { channel?: string; name: string; url: string }): HolderTarget {
   const channel = opts.channel || defaultChannel();
   if (!CrossTalk.isAddress(channel)) fail('Which channel? Pass --channel xt_… or set CROSSTALK_CHANNEL.');
-  return { url: opts.url, channel, name: opts.name, token: process.env.CROSSTALK_AUTH_TOKEN || undefined };
+  const id = atAddress(channel, opts);
+  return { url: opts.url, channel: id, name: opts.name, token: process.env.CROSSTALK_AUTH_TOKEN || undefined };
 }
 
 /** The git checkout the CLI runs in, and `file` relative to it with forward slashes (what every lock is keyed by). */
@@ -1657,8 +1673,9 @@ program
       return fail(err);
     }
     try {
+      const id = atAddress(target, opts);
       const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'supervisor', environment: 'terminal' });
-      const ch = await ct.joinChannel(target);
+      const ch = await ct.joinChannel(id);
       new WakeSupervisor(ch, ct, {
         agent: opts.agent,
         adapter: adapter!,
@@ -1712,8 +1729,9 @@ program
   .option('--full', 'print long messages whole (over 2,000 chars they are stubbed: first line, size, hash)')
   .action(async (target: string, opts) => {
     try {
+      const id = atAddress(target, opts);
       const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'observer', environment: 'terminal' });
-      const ch = await ct.joinChannel(target, { since: opts.since });
+      const ch = await ct.joinChannel(id, { since: opts.since });
       for (const m of ch.messages) console.log(formatMessage(m, undefined, !!opts.full));
       ch.on('message', m => console.log(formatMessage(m, undefined, !!opts.full)));
       ch.on('lock.acquired', l => console.log(yellow(`🔒 ${l.holder.name} locked ${l.file}: ${l.reason}`)));
