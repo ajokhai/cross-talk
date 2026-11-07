@@ -68,3 +68,19 @@ test('a sealed secret opens only on the machine it was sealed to', () => {
   assert.throws(() => openSealed(sealed, 'OPENAI_API_KEY', alice), 'someone else cannot open it');
   assert.throws(() => openSealed(sealed, 'OTHER_NAME', bob), 'renaming it breaks the seal');
 });
+
+test('a key received in a DM never replaces one already saved', async () => {
+  const { receiveSealedDm } = await import('../src/client/secrets.js');
+  const dir = tmp();
+  addSecret('GITHUB_TOKEN', 'ghp_original_value', { dir });
+  const sealed = sealSecret(sealIdentity(dir).publicKey, 'GITHUB_TOKEN', 'ghp_attacker_value');
+  const r = receiveSealedDm(`xsecret GITHUB_TOKEN ${sealed}`, 'mallory', dir)!;
+  assert.equal(r.ok, false);
+  assert.match(r.notice, /already has one/);
+  const out = collect();
+  await runWithSecrets(['GITHUB_TOKEN'], process.execPath, ['-e', 'process.stdout.write(String(process.env.GITHUB_TOKEN.length))'], { dir, stdout: out.s });
+  await new Promise(res => setTimeout(res, 20));
+  assert.equal(out.text(), String('ghp_original_value'.length), 'the original key is kept');
+  const fresh = receiveSealedDm(`xsecret NEW_KEY ${sealSecret(sealIdentity(dir).publicKey, 'NEW_KEY', 'v_123456')}`, 'josh', dir)!;
+  assert.equal(fresh.ok, true);
+});

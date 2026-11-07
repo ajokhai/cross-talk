@@ -315,6 +315,8 @@
         <span>Key</span>
         <input id="share-key-value" class="input mono" type="password" required autocomplete="off" spellcheck="false" placeholder="Paste the key">
       </label>
+      <p class="card-hint mono" id="share-key-who"></p>
+      <p class="card-hint share-key-error" id="share-key-check" role="note" hidden></p>
       <p class="card-hint" id="share-key-hint">The key is locked in this browser so only <strong id="share-key-agent">the agent</strong>'s computer can open it. Neither the hub nor the agent sees it: the agent uses it by name with <code>crosstalk run --secret NAME -- &lt;command&gt;</code>.</p>
       <p class="card-hint share-key-error" id="share-key-error" role="alert" hidden></p>
       <div class="dialog-actions">
