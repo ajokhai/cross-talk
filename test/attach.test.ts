@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { startServer } from '../src/server/index.js';
+import { HubFailure } from '../src/server/hub.js';
 import { CrossTalk } from '../src/client/sdk.js';
 import { Bridge } from '../src/mcp/server.js';
 import type { ChannelSnapshot } from '../src/protocol.js';
@@ -88,5 +89,29 @@ test('with no MCP server for that name, crosstalk wait joins on its own as befor
   } finally {
     await josh.close();
     await server.close();
+  }
+});
+
+test("on a hub that doesn't know listener.report, the MCP server doesn't offer attaching", async () => {
+  const server = await startServer({ port: 0, quiet: true, stateFile: false });
+  // Behave like a 2.20 hub: listener.report is an unknown request.
+  const hub = server.hub as unknown as { dispatch(conn: unknown, frame: { type: string }): Promise<unknown> };
+  const dispatch = hub.dispatch.bind(hub);
+  hub.dispatch = async (conn, frame) => {
+    if (frame.type === 'listener.report') throw new HubFailure('bad_request', 'Unknown request type "listener.report"');
+    return dispatch(conn, frame);
+  };
+  const listenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xt-listen-'));
+  const previous = process.env.CROSSTALK_LISTEN_DIR;
+  process.env.CROSSTALK_LISTEN_DIR = listenDir;
+  const bridge = new Bridge({ name: 'gemini', url: server.url });
+  try {
+    await bridge.get();
+    assert.deepEqual(fs.readdirSync(listenDir), [], 'no endpoint recorded, so crosstalk wait joins on its own');
+  } finally {
+    await bridge.close();
+    await server.close();
+    if (previous === undefined) delete process.env.CROSSTALK_LISTEN_DIR;
+    else process.env.CROSSTALK_LISTEN_DIR = previous;
   }
 });

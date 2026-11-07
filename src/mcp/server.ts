@@ -331,6 +331,13 @@ export class Bridge {
   private async startAttach(client: CrossTalk): Promise<void> {
     this.stopAttach();
     const report = (open: boolean) => client.request('listener.report', { open }).catch(() => {});
+    // A hub older than 2.21 doesn't know listener.report: an attached listener would never
+    // count as listening there, so let listeners join as their own member, as before.
+    try {
+      await client.request('listener.report', { open: false });
+    } catch {
+      return;
+    }
     try {
       this.attach = await serveAttach({
         url: client.url,
