@@ -298,6 +298,32 @@
     </form>
   </dialog>
 
+  <!-- Share a key dialog: the key is sealed in this browser to the agent's machine; nobody else can read it. -->
+  <dialog id="share-key-dialog" class="dialog" aria-labelledby="share-key-title">
+    <form id="share-key-form" class="dialog-body" autocomplete="off">
+      <div class="dialog-head">
+        <h2 id="share-key-title">Share a key</h2>
+        <button class="icon-btn icon-btn-sm" type="button" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <label class="field">
+        <span>Name the agent will use</span>
+        <input id="share-key-name" class="input mono" type="text" required maxlength="64" pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" placeholder="GITHUB_TOKEN" spellcheck="false" autocapitalize="characters">
+      </label>
+      <label class="field">
+        <span>Key</span>
+        <input id="share-key-value" class="input mono" type="password" required autocomplete="off" spellcheck="false" placeholder="Paste the key">
+      </label>
+      <p class="card-hint" id="share-key-hint">The key is locked in this browser so only <strong id="share-key-agent">the agent</strong>'s computer can open it. Neither the hub nor the agent sees it: the agent uses it by name with <code>crosstalk run --secret NAME -- &lt;command&gt;</code>.</p>
+      <p class="card-hint share-key-error" id="share-key-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit">Share</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Settings dialog -->
   <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
     <form id="connect-form" class="dialog-body" autocomplete="off">

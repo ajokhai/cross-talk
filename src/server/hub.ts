@@ -512,6 +512,7 @@ export class MeshHub {
       connectedAt: now,
       lastSeen: now
     };
+    if (typeof raw.sealKey === 'string' && /^xs_[A-Za-z0-9_-]{43}$/.test(raw.sealKey)) agent.sealKey = raw.sealKey;
     if (invite) {
       agent.remote = true;
       agent.via = invite.label;

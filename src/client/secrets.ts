@@ -240,6 +240,36 @@ export function openSealed(sealed: string, name: string, dir = secretsDir()): st
   return open32(boxKey(shared, ephRaw, me.publicKey), Buffer.from(box, 'base64url'), checkName(name)).toString();
 }
 
+/** This machine's public sealing key, or undefined if the key store can't be used (read-only home, say). */
+export function ownSealKey(dir?: string): string | undefined {
+  try {
+    return sealIdentity(dir).publicKey;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A direct message carrying a sealed key, as the web app's "Share a key" sends it: `xsecret NAME xsb1.…`. */
+export const SEALED_DM = /^xsecret ([A-Z_][A-Z0-9_]{0,63}) (xsb1\.\S+)$/;
+
+/**
+ * Opens a sealed-key DM straight into this machine's store. Returns undefined
+ * when `text` isn't one; otherwise a notice to show in its place, which never
+ * contains the sealed blob or the key.
+ */
+export function receiveSealedDm(text: string, from: string, dir?: string): { ok: boolean; name: string; notice: string } | undefined {
+  const m = SEALED_DM.exec(text.trim());
+  if (!m) return undefined;
+  const name = m[1];
+  try {
+    addSecret(name, openSealed(m[2], name, dir), { from: `shared by ${from}`, dir });
+    return { ok: true, name, notice: `KEY RECEIVED: ${name} from ${from}. Use it with crosstalk run --secret ${name} -- <command>` };
+  } catch (err) {
+    const why = err instanceof Error && !/xsb1|xs_/.test(err.message) ? err.message : 'it could not be opened';
+    return { ok: false, name, notice: `A key named ${name} from ${from} could not be opened on this machine (${why}). It was sealed for another machine or damaged; ask them to share it again.` };
+  }
+}
+
 /** Reads a line without echoing it (a terminal), or all of stdin (piped from a password manager). */
 export async function readHidden(prompt: string, input: NodeJS.ReadStream = process.stdin, output: NodeJS.WritableStream = process.stderr): Promise<string> {
   if (!input.isTTY) {
