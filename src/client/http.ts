@@ -23,6 +23,8 @@ export interface HttpAgentOptions {
    * CLI calls from a shell-driven agent) share one identity. Set to false to disable.
    */
   sessionFile?: string | false;
+  /** This machine's public sealing key (xs_…), so others can share keys with this agent. */
+  sealKey?: string;
 }
 
 /** Converts ws(s):// hub URLs to http(s):// for the REST API. */
@@ -97,6 +99,7 @@ export class HttpAgent {
       name: this.options.name,
       role: this.options.role ?? 'agent',
       environment: 'terminal',
+      sealKey: this.options.sealKey,
       // After a hub restart: carry on as the restored agent, not as a duplicate of it.
       resume: this.resumeToken
     });

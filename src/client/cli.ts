@@ -16,15 +16,16 @@ import { startServer } from '../server/index.js';
 import { startTelemetry } from '../server/telemetry.js';
 import { DIALECT_V1 } from '../dialect/dictionary.js';
 import { DialectEngine } from '../dialect/engine.js';
+import { joinAsMember } from './door.js';
 import { ADAPTERS, WakeSupervisor, execAdapter, type WakeAdapter } from './wake.js';
 import { forgetOwnedChannels, keyFile, loadOwnedChannels, loadPass, saveOwnedChannel, savePass, sameHub } from './keys.js';
 import type { ChannelLimits, ChannelMessage, FileLock, ChannelSnapshot, DirectMessage, MessageReceipt, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { SERVER_VERSION } from '../server/hub.js';
 import { sendReview } from './review.js';
-import { addSecret, listSecrets, openSealed, readHidden, removeSecret, runWithSecrets, sealIdentity, sealSecret } from './secrets.js';
+import { addSecret, listSecrets, openSealed, ownSealKey, readHidden, receiveSealedDm, removeSecret, runWithSecrets, sealIdentity, sealSecret, SEALED_DM } from './secrets.js';
 import { agentCheckIn } from '../server/telemetry.js';
 import { answerReviewPrompt, cliReviewPrompt, countUseAndCheck } from './review-prompt.js';
-import { INSTALL_URL as RELEASE_URL, VERSION, cachedLatest, compareVersions, latestRelease, newest, updateNotice } from '../version.js';
+import { installUrl, VERSION, cachedLatest, compareVersions, latestRelease, newest, updateNotice } from '../version.js';
 
 /**
  * Tells the user once per run when the hub runs a newer CrossTalk than this
@@ -49,7 +50,7 @@ function checkForUpdate(serverVersion: string | undefined): void {
   if (!note) return;
   if (process.env.CROSSTALK_AUTO_UPDATE === '1') {
     try {
-      execFileSync('npm', ['install', '-g', RELEASE_URL], { stdio: 'ignore', timeout: 120_000 });
+      execFileSync('npm', ['install', '-g', '--prefer-online', installUrl(newest(serverVersion, cachedLatest()))], { stdio: 'ignore', timeout: 120_000 });
       console.error(yellow(`↑ Updated CrossTalk to the latest release (hub runs ${serverVersion}); it takes effect from the next command.`));
       return;
     } catch {
@@ -111,6 +112,19 @@ function formatMessage(m: ChannelMessage | DirectMessage, label?: string, full =
   return `${time(m.timestamp)} ${magenta('DM')} ${who(m.from)} ${dim(`(${m.from.id})`)}: ${text}`;
 }
 
+/**
+ * How a listener prints what woke it. A DM carrying a sealed key (the web
+ * app's "Share a key") is opened straight into this machine's key store and
+ * shown only as a notice: the agent reading the output never sees the key.
+ */
+function wakeLine(f: Extract<ServerFrame, { type: 'message' | 'dm' }>, json: boolean | undefined, label?: string): string {
+  if (f.type === 'dm' && SEALED_DM.test(f.message.content.trim())) {
+    const got = receiveSealedDm(f.message.content, f.message.from.name)!;
+    return json ? JSON.stringify({ type: 'key.received', ok: got.ok, name: got.name, from: f.message.from, notice: got.notice }) : (got.ok ? green(got.notice) : yellow(got.notice));
+  }
+  return json ? JSON.stringify(f.message) : formatMessage(f.message, label);
+}
+
 /** True when --name/-n was on the command line; the parser keeps no record of which options fell back to their default. */
 const namedExplicitly = () => argv.some(a => a === '-n' || a === '--name' || a.startsWith('--name='));
 
@@ -148,7 +162,7 @@ function atAddress(address: string, opts: { url: string }): string {
 
 async function oneShot(target: string, opts: { name: string; url: string }) {
   const address = atAddress(target, opts);
-  const agent = new HttpAgent({ name: opts.name, url: opts.url });
+  const agent = new HttpAgent({ name: opts.name, url: opts.url, sealKey: ownSealKey() });
   await agent.open();
   checkForUpdate(agent.serverVersion);
   const snapshot = await joinWithApproval(agent, address, opts.url);
@@ -502,7 +516,7 @@ async function listenUntilNeeded(agent: HttpAgent, channel: string, opts: { json
     return f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me() && !!f.message.mentions?.some(m => m.id === me()));
   };
   const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
-    opts.json ? JSON.stringify(f.message) : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
+    wakeLine(f, opts.json, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
   // A first, instant poll: if this fails, the listener (and so the start) failed.
   let pending = (await agent.events(0)).filter(wanted);
   console.log(green(`✔ Listening as ${agent.agent!.name}`) + dim(' — this command now waits and exits when you are @mentioned or DMed. Run it as a background command; start it again after each wake.'));
@@ -548,7 +562,7 @@ const createAction = async (label: string | undefined, opts: any) => {
   try {
     warnDefaultName(opts);
     if (opts.listen) listenTimeoutMinutes(opts);
-    const agent = new HttpAgent({ name: opts.name, url: opts.url });
+    const agent = new HttpAgent({ name: opts.name, url: opts.url, sealKey: ownSealKey() });
     await agent.open();
     checkForUpdate(agent.serverVersion);
     const snap = await agent.request('channel.create', {
@@ -593,14 +607,30 @@ for (const cmd of [program.command('new [label]'), channel.command('create [labe
 program
   .command('update')
   .description('Install the latest CrossTalk release (CLI, hub and MCP server), then restart your listener and MCP server. Set CROSSTALK_AUTO_UPDATE=1 to update automatically whenever the hub runs a newer version')
-  .action(() => {
-    console.log(dim(`npm install -g ${RELEASE_URL}`));
+  .action(async () => {
+    // Ask GitHub which version is newest and install that version's own URL: npm caches
+    // tarballs by URL, so the "latest" URL can quietly reinstall what you already have.
+    const latest = await latestRelease({ force: true }).catch(() => undefined);
+    if (latest && compareVersions(latest, VERSION) <= 0) {
+      console.log(green(`✔ You already have the latest CrossTalk (${VERSION}).`));
+      return;
+    }
+    const url = installUrl(latest);
+    console.log(dim(`npm install -g --prefer-online ${url}`));
     try {
-      execFileSync('npm', ['install', '-g', RELEASE_URL], { stdio: 'inherit' });
-      console.log(green('✔ CrossTalk updated. Restart your listener (crosstalk join …) and your MCP server to use it.'));
+      execFileSync('npm', ['install', '-g', '--prefer-online', url], { stdio: 'inherit' });
     } catch (err) {
       fail(err);
     }
+    // Check what the crosstalk on PATH now reports, so a stale install doesn't pass for an update.
+    let now = '';
+    try { now = execFileSync('crosstalk', ['--version'], { encoding: 'utf8', timeout: 20_000 }).trim().split(/\s+/).pop() ?? ''; } catch { /* not on PATH */ }
+    if (latest && now && compareVersions(now, latest) < 0) {
+      console.log(yellow(`! The crosstalk on your PATH still reports ${now}, not ${latest}. Another copy may come first on your PATH (check: which -a crosstalk), or npm reused an old download. Try: npm install -g ${installUrl(latest)}`));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(green(`✔ CrossTalk updated${now ? ` to ${now}` : ''}. Restart your listener (crosstalk join …) and your MCP server to use it.`));
   });
 
 program
@@ -643,7 +673,7 @@ program
     let ch: Channel;
     try {
       if (address) address = atAddress(address, opts);
-      ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start, invite: opts.invite });
+      ct = await CrossTalk.connect({ name: opts.name, role: opts.role, url: opts.url, environment: 'terminal', autoStart: opts.start, invite: opts.invite, sealKey: opts.invite ? undefined : ownSealKey() });
       checkForUpdate(ct.serverVersion);
       ch = address ? await ct.joinChannel(address) : await ct.createChannel(opts.label, { limits: limitsFrom(opts) });
     } catch (err) {
@@ -665,7 +695,7 @@ program
     };
 
     ct.on('message', m => print(formatMessage(m)));
-    ct.on('dm', m => print(formatMessage(m)));
+    ct.on('dm', m => print(wakeLine({ type: 'dm', message: m }, false)));
     ch.on('member.joined', a => print(dim(`→ ${a.name} joined`)));
     ch.on('member.left', a => print(dim(`← ${a.name} left`)));
     ch.on('lock.acquired', l => print(yellow(`🔒 ${l.holder.name} locked ${l.file}: ${l.reason}`)));
@@ -1644,8 +1674,7 @@ program
         return f.type === 'dm' || (f.type === 'message' && f.message.from.id !== me() && (!opts.mentions || !!f.message.mentions?.some(m => m.id === me())));
       };
       const show = (f: Extract<ServerFrame, { type: 'message' | 'dm' }>) =>
-        opts.json ? JSON.stringify(f.message)
-          : formatMessage(f.message, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
+        wakeLine(f, opts.json, f.type === 'message' && f.message.channel !== channel ? f.message.channel : undefined);
       if (opts.since && !opts.onMessage) {
         // Catch up first: what arrived between the last wait and this one.
         // An id the hub no longer has (too old, or from another channel) catches up nothing.
@@ -1763,7 +1792,8 @@ program
     try {
       const id = atAddress(target, opts);
       const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'supervisor', environment: 'terminal' });
-      const ch = await ct.joinChannel(id);
+      // The supervisor is a member too: in a channel that approves new members, the host lets it in once.
+      const ch = await joinAsMember(ct, id, { log: line => console.log(`${time(Date.now())} ${line}`) });
       new WakeSupervisor(ch, ct, {
         agent: opts.agent,
         adapter: adapter!,

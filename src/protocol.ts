@@ -54,6 +54,12 @@ export interface AgentInfo {
   remote?: boolean;
   /** The label of the invite a remote agent joined with. */
   via?: string;
+  /**
+   * The public key (xs_ + 43 base64url chars, X25519) this agent's machine
+   * opens sealed secrets with (2.20+). Anyone can seal a key to it, e.g. the
+   * web app's "Share a key"; only that machine can open it.
+   */
+  sealKey?: string;
 }
 
 /** A reference to the sender embedded in messages; kept small on purpose. */
@@ -405,6 +411,8 @@ export interface HelloFrame {
     environment?: AgentEnvironment;
     branch?: string;
     currentTask?: string;
+    /** See AgentInfo.sealKey; dropped unless it is xs_ + 43 base64url characters. */
+    sealKey?: string;
   };
   /** Resume token from an earlier welcome: carry on as that agent if the hub still holds it. */
   resume?: string;

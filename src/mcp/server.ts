@@ -1,4 +1,5 @@
 import { sendReview } from '../client/review.js';
+import { ownSealKey, receiveSealedDm, SEALED_DM } from '../client/secrets.js';
 import { listSecrets, sealIdentity } from '../client/secrets.js';
 import { channelId, parseAddress } from '../address.js';
 import { agentCheckIn } from '../server/telemetry.js';
@@ -201,6 +202,8 @@ export class Bridge {
       token: o.token,
       headers: o.headers,
       autoStart: o.autoStart ?? false,
+      // Lets people share keys with this agent (web app "Share a key"); not for agents hosted on the hub.
+      sealKey: o.remote ? undefined : ownSealKey(),
       // The hub's own checkout says nothing about a remote agent.
       ...(o.remote ? { branch: '', workspaceRoot: '/' } : {})
     });
@@ -221,7 +224,17 @@ export class Bridge {
       this.releaseWatch.unref?.();
     }
     client.on('message', m => this.push({ kind: 'message', at: m.timestamp, message: m }));
-    client.on('dm', m => this.push({ kind: 'dm', at: m.timestamp, message: m }));
+    client.on('dm', m => {
+      // A shared key goes straight into this machine's key store and is never shown to the model.
+      if (SEALED_DM.test(m.content.trim())) {
+        const text = o.remote
+          ? `A key named ${SEALED_DM.exec(m.content.trim())![1]} from ${m.from.name} arrived, but this agent runs on the hub, which can't keep keys. Ask them to share it with an agent on your own machine.`
+          : receiveSealedDm(m.content, m.from.name)!.notice;
+        this.push({ kind: 'alert', at: m.timestamp, channel: '', text });
+        return;
+      }
+      this.push({ kind: 'dm', at: m.timestamp, message: m });
+    });
     client.on('question.closed', (q: UserQuestion) => {
       if (q.from.id === client.agent.id) this.push({ kind: 'answer', at: q.closedAt ?? Date.now(), question: q });
     });

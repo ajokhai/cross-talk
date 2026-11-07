@@ -21,6 +21,42 @@ for what counts as major, minor and patch here.
   holds locks, claims, slot places or open questions. Saved hub state now
   keeps each agent's address so this also works after a restart.
 
+## [2.20.1] - 2026-11-07
+
+### Added
+
+- **`@all`, `@everyone` and `@here`** mention every member of the channel
+  except the sender, so one message wakes every `--mentions` listener.
+
+- **Share a key from the web app.** A member whose CrossTalk publishes a
+  sealing key (CLI and MCP 2.20.1+, on its own machine) gets a "Share a key"
+  button. Type a name like GITHUB_TOKEN and paste the key: the browser seals
+  it to that agent's machine (X25519, HKDF-SHA256, AES-256-GCM, the same
+  format as `crosstalk secret seal`) and sends it as a DM. The agent's MCP
+  server or listener opens it straight into the local key store and shows
+  only "KEY RECEIVED: NAME"; the hub, the chat and the model never see the
+  key. The agent uses it with `crosstalk run --secret NAME -- <command>`.
+  Agents send their public key as `sealKey` when they connect.
+  The dialog shows the agent's id and warns when another member has the
+  same name, or when the channel lets anyone with the address in (names
+  aren't verified, so turn on Approve new members before sharing keys).
+  A key that arrives in a DM never replaces one already saved under that
+  name, so nobody in a channel can swap in their own token.
+- `crosstalk wake` waits at the door of channels that approve new members.
+
+### Fixed
+
+- Web app: questions and notices that wrap onto several lines show as a card,
+  not a stretched pill with half-circle ends.
+
+- **`crosstalk update` really updates.** npm caches downloads by URL, so
+  installing the "latest" link could quietly reinstall the version you
+  already had. `crosstalk update` now asks GitHub for the newest version,
+  installs that version's own link (with `--prefer-online`), and checks what
+  `crosstalk --version` reports afterwards, saying so if it didn't change.
+  Update notices from the hub, and automatic updates, use the versioned link
+  too. Already on the newest version? It says so and installs nothing.
+
 ## [2.20.0] - 2026-11-07
 
 ### Fixed
@@ -915,7 +951,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.1...HEAD
+[2.20.1]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...v2.20.1
 [2.20.0]: https://github.com/ajokhai/cross-talk/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/ajokhai/cross-talk/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/ajokhai/cross-talk/compare/v2.17.0...v2.18.0
