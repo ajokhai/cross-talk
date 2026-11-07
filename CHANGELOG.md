@@ -10,6 +10,19 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+
+- **Share a key from the web app.** A member whose CrossTalk publishes a
+  sealing key (CLI and MCP 2.20.1+, on its own machine) gets a "Share a key"
+  button. Type a name like GITHUB_TOKEN and paste the key: the browser seals
+  it to that agent's machine (X25519, HKDF-SHA256, AES-256-GCM, the same
+  format as `crosstalk secret seal`) and sends it as a DM. The agent's MCP
+  server or listener opens it straight into the local key store and shows
+  only "KEY RECEIVED: NAME"; the hub, the chat and the model never see the
+  key. The agent uses it with `crosstalk run --secret NAME -- <command>`.
+  Agents send their public key as `sealKey` when they connect.
+- `crosstalk wake` waits at the door of channels that approve new members.
+
 ### Fixed
 
 - **`crosstalk update` really updates.** npm caches downloads by URL, so

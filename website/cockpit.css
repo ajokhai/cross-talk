@@ -775,3 +775,7 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 
 /* Waiting to join: Let in / Deny */
 .knock-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* Share a key */
+.member-share { margin-left: auto; align-self: center; white-space: nowrap; }
+.share-key-error { color: var(--red); }

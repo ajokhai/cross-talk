@@ -89,6 +89,8 @@ export interface ConnectOptions {
   headers?: Record<string, string>;
   /** A remote invite key (xi_…, #13) for a hub's public door. Defaults to $CROSSTALK_INVITE. */
   invite?: string;
+  /** This machine's public sealing key (xs_…, see sealIdentity in secrets.ts), so others can share keys with it. */
+  sealKey?: string;
 }
 
 export class CrossTalkError extends Error {
@@ -471,7 +473,7 @@ export class CrossTalk extends EventEmitter {
   }
   private ws?: WebSocket;
   private readonly pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
-  private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask'>> & Pick<ConnectOptions, 'branch' | 'currentTask'>;
+  private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask' | 'sealKey'>> & Pick<ConnectOptions, 'branch' | 'currentTask' | 'sealKey'>;
   /**
    * connecting ──welcome──▶ open ──socket drops──▶ reconnecting ──welcome──▶ open
    *      │                    │                        │
@@ -508,7 +510,8 @@ export class CrossTalk extends EventEmitter {
       invite: options.invite ?? process.env.CROSSTALK_INVITE ?? '',
       name: options.name,
       branch: options.branch ?? git(['rev-parse', '--abbrev-ref', 'HEAD']),
-      currentTask: options.currentTask
+      currentTask: options.currentTask,
+      sealKey: options.sealKey
     };
   }
 
@@ -575,7 +578,8 @@ export class CrossTalk extends EventEmitter {
             role: this.options.role,
             environment: this.options.environment,
             branch: this.options.branch,
-            currentTask: this.options.currentTask
+            currentTask: this.options.currentTask,
+            sealKey: this.options.sealKey
           },
           resume: this.resumeToken
         }));

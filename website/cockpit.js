@@ -1495,6 +1495,7 @@
             el('span', { class: 'dot', dataset: { state: p.state }, 'aria-hidden': 'true' }),
             p.text,
             att && att.unread && !isMe ? ` · ${att.unread} unread` : '')),
+        !isMe && m.sealKey && !m.remote ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `Send ${m.name} a key it can use but never see`, onclick: () => openShareKey(m), text: 'Share a key' }) : null,
         el('span', { class: 'badge-status', dataset: { status: m.status || 'idle' }, text: m.status || 'idle' }));
     }));
     $('member-count').textContent = ch ? (ch.info.maxMembers ? `${members.length}/${ch.info.maxMembers}` : String(members.length)) : '';
@@ -2208,6 +2209,86 @@
     update();
   }
 
+  // seal:start — sealSecret() from src/client/secrets.ts in WebCrypto; test/share-key.test.ts opens its output with openSealed().
+  /**
+   * Seals `value` so only the machine holding `recipient`'s private key (xs_…)
+   * can open it: X25519 with a one-off key, HKDF-SHA256 (salt = that key's
+   * public half, info = "crosstalk-secret-v1|" + recipient), AES-256-GCM with
+   * the name as associated data. Returns xsb1.<ephemeral>.<iv|ciphertext|tag>.
+   */
+  async function sealForAgent(recipient, name, value) {
+    const subtle = globalThis.crypto && globalThis.crypto.subtle;
+    if (!subtle) throw new Error('unsupported');
+    if (!/^xs_[A-Za-z0-9_-]{43}$/.test(recipient)) throw new Error('That agent has no sealing key');
+    const b64urlDecode = (t) => {
+      const bin = atob(t.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (t.length % 4)) % 4));
+      return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    };
+    const b64url = (bytes) => {
+      let bin = '';
+      for (const b of new Uint8Array(bytes)) bin += String.fromCharCode(b);
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
+    const utf8 = (t) => new TextEncoder().encode(t);
+    let theirs, eph;
+    try {
+      theirs = await subtle.importKey('raw', b64urlDecode(recipient.slice(3)), { name: 'X25519' }, false, []);
+      eph = await subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+    } catch {
+      throw new Error('unsupported');
+    }
+    const ephRaw = new Uint8Array(await subtle.exportKey('raw', eph.publicKey));
+    const shared = await subtle.deriveBits({ name: 'X25519', public: theirs }, eph.privateKey, 256);
+    const hkdf = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits']);
+    const keyBits = await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: ephRaw, info: utf8(`crosstalk-secret-v1|${recipient}`) }, hkdf, 256);
+    const aes = await subtle.importKey('raw', keyBits, 'AES-GCM', false, ['encrypt']);
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+    const sealed = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: utf8(name) }, aes, utf8(value)));
+    const box = new Uint8Array(12 + sealed.length);
+    box.set(iv, 0);
+    box.set(sealed, 12); // WebCrypto puts the 16-byte tag last, as sealSecret does
+    return `xsb1.${b64url(ephRaw)}.${b64url(box)}`;
+  }
+  // seal:end
+
+  /** Who the Share a key dialog is for. */
+  let shareKeyTarget = null;
+
+  function openShareKey(member) {
+    shareKeyTarget = member;
+    $('share-key-title').textContent = `Share a key with ${member.name}`;
+    $('share-key-agent').textContent = member.name;
+    $('share-key-name').value = '';
+    $('share-key-value').value = '';
+    $('share-key-error').hidden = true;
+    openDialog($('share-key-dialog'));
+    $('share-key-name').focus();
+  }
+
+  async function submitShareKey() {
+    const member = shareKeyTarget;
+    const field = $('share-key-value');
+    const name = $('share-key-name').value.trim().toUpperCase();
+    const value = field.value;
+    // Whatever happens next, the key leaves the page.
+    field.value = '';
+    const error = $('share-key-error');
+    error.hidden = true;
+    if (!member || !member.sealKey) throw new Error('That agent can\'t receive keys (it needs CrossTalk 2.20 or later on its own computer).');
+    if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(name)) throw new Error('Use letters, digits and _ for the name, like GITHUB_TOKEN.');
+    if (!value) throw new Error('Paste the key first.');
+    let sealed;
+    try {
+      sealed = await sealForAgent(member.sealKey, name, value);
+    } catch (err) {
+      if (err.message === 'unsupported') throw new Error(`This browser can't seal keys. Use crosstalk secret seal instead: run crosstalk secret seal ${member.sealKey} ${name} in a terminal, then DM ${member.name} xsecret ${name} followed by what it prints.`);
+      throw err;
+    }
+    await request('dm.send', { to: member.id, content: `xsecret ${name} ${sealed}`, replyExpected: false });
+    $('share-key-dialog').close();
+    showNotice(`Sent ${name} to ${member.name}, sealed so only its computer can open it. It uses the key by name: crosstalk run --secret ${name} -- <command>.`);
+  }
+
   // ---------------------------------------------------------------------------
   // Dialogs
   // ---------------------------------------------------------------------------
@@ -2330,6 +2411,22 @@
       if ($('directory').open && !state.directory.loaded) loadDirectory(true);
     });
     $('public-more').addEventListener('click', () => loadDirectory(false));
+
+    $('share-key-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = e.submitter;
+      if (button) button.disabled = true;
+      try {
+        await submitShareKey();
+      } catch (err) {
+        const error = $('share-key-error');
+        error.textContent = err.message || String(err);
+        error.hidden = false;
+      } finally {
+        if (button) button.disabled = false;
+      }
+    });
+    $('share-key-dialog').addEventListener('close', () => { $('share-key-value').value = ''; shareKeyTarget = null; });
 
     $('join-form').addEventListener('submit', async (e) => {
       e.preventDefault();
