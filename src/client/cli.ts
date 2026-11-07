@@ -995,8 +995,45 @@ program
   .option('--mtu <bytes>', 'with --reliable: payload bytes per radio packet', '64')
   .option('--bitrate <bps>', 'with --reliable: link speed, for --duty-cycle', '9600')
   .option('--duty-cycle <share>', 'with --reliable: most time spent transmitting, e.g. 0.01', '1')
+  .option('--owner <name>', 'share this agent with guests: your member name (you are never metered; DM it "budget <guest> <limit>" or "usage")')
+  .option('--guest-budget <limit>', 'with --owner: each guest\'s allowance, e.g. "$5/month", "200k tokens/day"')
+  .option('--budget <guest=limit>', 'with --owner: one guest\'s allowance, e.g. ade="$10/month" (repeatable)', (v: string, all: string[] = []) => [...all, v])
+  .option('--total-budget <limit>', 'with --owner: all guests together, the hard cap, e.g. "$20/month"')
+  .option('--price-in <usd>', 'USD per million input tokens for --model (needed for dollar budgets)')
+  .option('--price-out <usd>', 'USD per million output tokens for --model')
+  .option('--prices <file>', 'JSON of prices by model: {"<model>": {"in": <usd/1M>, "out": <usd/1M>}}')
+  .option('--no-usage-line', 'with --owner: don\'t add the usage line under replies to guests')
   .action(async (address: string | undefined, opts) => {
     if (!!opts.openai === !!opts.exec) fail('Give exactly one of --openai <url> or --exec "<command>".');
+    let shared: import('./llm.js').SharedOptions | undefined;
+    if (opts.owner) {
+      const { parseBudget, loadPrices, priceFor } = await import('./budget.js');
+      try {
+        const prices = opts.prices ? loadPrices(opts.prices) : {};
+        if (opts.priceIn !== undefined || opts.priceOut !== undefined) {
+          if (!opts.model) fail('--price-in/--price-out price the --model; give --model too.');
+          prices[opts.model] = { in: Number(opts.priceIn ?? 0), out: Number(opts.priceOut ?? 0) };
+        }
+        const budgets: Record<string, any> = {};
+        for (const pair of opts.budget ?? []) {
+          const at = pair.indexOf('=');
+          if (at < 1) fail(`--budget wants guest=limit, got "${pair}"`);
+          budgets[pair.slice(0, at).replace(/^@/, '')] = parseBudget(pair.slice(at + 1));
+        }
+        const guestBudget = opts.guestBudget ? parseBudget(opts.guestBudget) : null;
+        const totalBudget = opts.totalBudget ? parseBudget(opts.totalBudget) : null;
+        const usesDollars = [guestBudget, totalBudget, ...Object.values(budgets)].some(b => b && b.unit === 'usd');
+        if (usesDollars && !priceFor(opts.model, prices)) {
+          fail(`Dollar budgets need the price of ${opts.model ? `"${opts.model}"` : 'the model'}: add --price-in and --price-out (USD per million tokens, from your provider's pricing page) or --prices <file>, or use token budgets like "200k tokens/day".`);
+        }
+        if (!totalBudget) console.error(yellow('! No --total-budget: guests are limited one by one, but member names are not verified, so set a total cap to bound what you can be charged.'));
+        shared = { owner: String(opts.owner).replace(/^@/, ''), guestBudget, budgets, totalBudget, prices, model: opts.model, showUsage: opts.usageLine !== false };
+      } catch (err) {
+        fail(err);
+      }
+    } else if (opts.guestBudget || opts.budget || opts.totalBudget) {
+      fail('Budgets are for sharing: add --owner <your name>.');
+    }
     const viaDevice = !!(opts.serial || opts.tcp);
     if (viaDevice && opts.serial && opts.tcp) fail('Give one of --serial or --tcp.');
     if (!viaDevice && !address) fail('Give the channel address, or --serial / --tcp to reach one through a bridge.');
@@ -1037,6 +1074,7 @@ program
         reply: opts.reply,
         history: Number(opts.history),
         timeoutMs: Number(opts.timeout) * 1000,
+        shared,
         log: line => console.log(`${time(Date.now())} ${line}`)
       });
       stayAlive();
