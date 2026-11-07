@@ -25,6 +25,7 @@ import {
   type UserQuestion,
   type AgentRef,
   type ChannelBan,
+  type Knock,
   type WakeHook
 } from '../protocol.js';
 
@@ -396,6 +397,28 @@ export class Channel extends EventEmitter {
     return (await this.client.request('member.bans', { channel: this.address, ownerKey })).bans;
   }
 
+  /**
+   * Turns approval on or off (2.20+). On: someone new knocks and you admit
+   * them; everyone already here gets a pass. Off: whoever is waiting comes in.
+   */
+  async setApproval(on: boolean, ownerKey = this.ownerKey): Promise<ChannelInfo> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Changing settings needs this channel's owner key");
+    this.info = await this.client.request('channel.configure', { channel: this.address, ownerKey, approval: on });
+    return this.info;
+  }
+
+  /** Who is waiting to be let in. Needs the owner key. */
+  async knocks(ownerKey = this.ownerKey): Promise<Knock[]> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Seeing who is waiting needs this channel's owner key");
+    return (await this.client.request('member.knocks', { channel: this.address, ownerKey })).knocks;
+  }
+
+  /** Lets someone waiting in (by name or agent id), or turns them away with `allow: false`. */
+  async admit(agent: string, allow = true, ownerKey = this.ownerKey): Promise<Knock> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Letting people in needs this channel's owner key");
+    return (await this.client.request('member.admit', { channel: this.address, ownerKey, agent, allow })).knock;
+  }
+
   /** Re-fetches members, locks and recent history from the hub. */
   async refresh(): Promise<this> {
     this.apply(await this.client.request('channel.state', { channel: this.address }));
@@ -432,6 +455,17 @@ export class CrossTalk extends EventEmitter {
   serverVersion?: string;
   /** Joined channels by address. */
   readonly channels = new Map<string, Channel>();
+  /**
+   * Passes for channels that approve new members (2.20+), by address. Filled
+   * when you're admitted (or when approval is turned on while you're in);
+   * listen for 'pass' to keep them across runs, and seed them with setPass().
+   */
+  readonly passes = new Map<string, string>();
+
+  /** Remember a pass from an earlier run, so joining doesn't knock again. */
+  setPass(address: string, pass: string): void {
+    this.passes.set(address, pass);
+  }
   private ws?: WebSocket;
   private readonly pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
   private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask'>> & Pick<ConnectOptions, 'branch' | 'currentTask'>;
@@ -645,7 +679,7 @@ export class CrossTalk extends EventEmitter {
     for (const channel of [...this.channels.values()]) {
       if (!this.isOpen()) return; // dropped again: the next reconnect rejoins what's left
       try {
-        channel.apply(await this.request('channel.join', { channel: channel.address }));
+        channel.apply(await this.request('channel.join', { channel: channel.address, pass: this.passes.get(channel.address), ownerKey: channel.ownerKey }));
       } catch (err) {
         if (err instanceof CrossTalkError && (err.code === 'not_found' || err.code === 'forbidden')) {
           // Only a channel the hub no longer has, or won't let us back into, is forgotten.
@@ -693,6 +727,10 @@ export class CrossTalk extends EventEmitter {
 
     this.emit('event', frame);
     if (frame.type === 'error') return this.report(new CrossTalkError(frame.error.code, frame.error.message));
+    if (frame.type === 'channel.admitted') {
+      this.passes.set(frame.channel, frame.pass);
+      this.safeEmit('pass', { channel: frame.channel, pass: frame.pass });
+    }
     if (frame.type === 'dm' || frame.type === 'message') this.queue(frame.message);
     if (frame.type === 'question.closed') {
       this.closedQuestions.set(frame.question.id, frame.question);
@@ -784,22 +822,54 @@ export class CrossTalk extends EventEmitter {
    * them in the hub's discovery directory.
    */
   /** `limits`: message length and rate for this channel, fixed for its life; unset ones take the hub's defaults. */
-  async createChannel(name?: string, options: { topic?: string; public?: boolean; limits?: Partial<ChannelLimits> } = {}): Promise<Channel> {
+  async createChannel(name?: string, options: { topic?: string; public?: boolean; limits?: Partial<ChannelLimits>; approval?: boolean } = {}): Promise<Channel> {
     const created = await this.request('channel.create', {
       limits: options.limits,
       name,
       topic: options.topic,
-      visibility: options.public ? 'public' : 'private'
+      visibility: options.public ? 'public' : 'private',
+      ...(options.approval ? { approval: true } : {})
     });
     const channel = this.track(created);
     channel.ownerKey = created.ownerKey;
+    if (created.pass) {
+      this.passes.set(channel.address, created.pass);
+      this.safeEmit('pass', { channel: channel.address, pass: created.pass });
+    }
     return channel;
   }
 
   /** Joins a conversation by its address (`xt_...`). */
   /** `since`: a message id you already have; the snapshot then holds only newer messages. */
-  async joinChannel(address: string, options: { since?: string } = {}): Promise<Channel> {
-    return this.track(await this.request('channel.join', { channel: address.trim(), since: options.since }));
+  /**
+   * In a channel that approves new members, joining knocks and (by default)
+   * waits until the owner lets you in, then joins with the pass you were
+   * given; 'knocking' is emitted while you wait. A refusal throws
+   * `CrossTalkError('forbidden')`. `wait: false` throws `pending_approval`
+   * at once instead; `waitMs` gives up after that long.
+   */
+  async joinChannel(address: string, options: { since?: string; pass?: string; ownerKey?: string; wait?: boolean; waitMs?: number } = {}): Promise<Channel> {
+    const channel = address.trim();
+    const attempt = () => this.request('channel.join', { channel, since: options.since, pass: options.pass ?? this.passes.get(channel), ownerKey: options.ownerKey });
+    try {
+      return this.track(await attempt());
+    } catch (err) {
+      if (!(err instanceof CrossTalkError) || err.code !== 'pending_approval' || options.wait === false) throw err;
+    }
+    this.safeEmit('knocking', { channel });
+    const pass = await new Promise<string>((resolve, reject) => {
+      const timer = options.waitMs ? setTimeout(() => { this.off('event', on); reject(new CrossTalkError('pending_approval', 'Still waiting for the host to let you in')); }, options.waitMs) : undefined;
+      const on = (f: ServerFrame) => {
+        if ((f.type === 'channel.admitted' || f.type === 'channel.refused') && f.channel === channel) {
+          this.off('event', on);
+          if (timer) clearTimeout(timer);
+          if (f.type === 'channel.admitted') resolve(f.pass);
+          else reject(new CrossTalkError('forbidden', `${f.by.name} didn't let you in to this channel`));
+        }
+      };
+      this.on('event', on);
+    });
+    return this.track(await this.request('channel.join', { channel, since: options.since, pass, ownerKey: options.ownerKey }));
   }
 
   static isAddress(value: string): boolean {

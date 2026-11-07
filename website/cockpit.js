@@ -1318,18 +1318,27 @@
     const isMe = state.me && member.id === state.me.id;
     if (isMe) return { state: state.status === 'connected' ? 'online' : 'offline', text: 'You' };
     if (!a) return { state: 'online', text: 'Connected' };
-    if (!a.connected) return { state: 'offline', text: 'Disconnected; the hub is holding their place' };
+    if (!a.connected) {
+      // The same name connected again: this is the older session, waiting to expire.
+      const twin = [...ch.members.values()].some((o) => o.id !== member.id && o.name === member.name && (ch.attention.get(o.id) || { connected: true }).connected);
+      return { state: 'offline', text: twin ? 'Earlier session of the same agent; the hub drops it soon' : 'Disconnected; the hub is holding their place' };
+    }
     if (a.listening === false) return { state: 'away', text: 'Connected but not listening for new messages' };
     if (a.idle) return { state: 'idle', text: `Hasn't read the channel in a while${a.unread ? ` (${a.unread} unread)` : ''}` };
     return { state: 'online', text: a.listening ? 'Listening' : 'Reading the channel' };
   }
 
+  /** Me first, then who is connected, then held places; by name within each. */
   function sortedMembers(ch) {
-    return [...ch.members.values()].sort((a, b) => {
-      const meA = state.me && a.id === state.me.id ? 0 : 1;
-      const meB = state.me && b.id === state.me.id ? 0 : 1;
-      return meA - meB || a.name.localeCompare(b.name);
-    });
+    const rank = (m) => (state.me && m.id === state.me.id ? 0 : (ch.attention.get(m.id) || { connected: true }).connected ? 1 : 2);
+    return [...ch.members.values()].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }
+
+  /** A short tag that tells apart members with the same name: the end of their agent id. */
+  function twinTag(ch, member) {
+    if (!ch) return '';
+    const same = [...ch.members.values()].filter((o) => o.name === member.name);
+    return same.length > 1 ? `#${member.id.slice(-4)}` : '';
   }
 
   // ---------------------------------------------------------------------------
@@ -1364,7 +1373,7 @@
       stack.replaceChildren(...shown);
       const online = members.filter((m) => presence(ch, m).state === 'online').length;
       stack.setAttribute('aria-label', `${members.length} member${members.length === 1 ? '' : 's'}, ${online} active. Show details`);
-      stack.title = members.map((m) => `${m.name} · ${presence(ch, m).text}`).join('\n');
+      stack.title = members.map((m) => `${m.name}${twinTag(ch, m) ? ` ${twinTag(ch, m)}` : ''} · ${presence(ch, m).text}`).join('\n');
     }
 
     // Members
@@ -1380,6 +1389,7 @@
         el('div', { class: 'member-info' },
           el('div', { class: 'member-name' },
             el('span', { title: `${m.name} · ${m.id}`, text: isMe ? `${m.name} (you)` : m.name }),
+            twinTag(ch, m) ? el('span', { class: 'pill mono', title: `Agent id ${m.id}: another member has the same name`, text: twinTag(ch, m) }) : null,
             m.remote ? el('span', { class: 'pill', title: m.via ? `Joined with remote invite "${m.via}"` : 'Joined from outside the hub\'s machine', text: 'remote' }) : null),
           el('div', { class: 'member-sub', text: [m.role, m.environment, m.branch && `⎇ ${m.branch}`].filter(Boolean).join(' · ') }),
           m.currentTask ? el('div', { class: 'member-task', text: m.currentTask }) : null,
@@ -1728,7 +1738,8 @@
       prev.message.from && prev.message.from.id === from.id && entry.timestamp - prev.timestamp < GROUP_MS;
     const raw = m.kind === 'shorthand' && m.shorthand ? m.shorthand.raw : null;
     const member = ch.members.get(from.id);
-    const nameEl = el('span', { class: 'msg-author', title: `Agent id: ${from.id}`, text: from.name });
+    const tag = twinTag(ch, from);
+    const nameEl = el('span', { class: 'msg-author', title: `Agent id: ${from.id}`, text: tag ? `${from.name} ${tag}` : from.name });
     nameEl.style.setProperty('--c', agentColour(from, ch));
 
     const article = el('article', {

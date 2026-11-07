@@ -102,3 +102,40 @@ test('approval and passes survive a hub restart; the passes themselves are never
     await hub.close();
   }
 });
+
+test('SDK: joinChannel waits at the door until admitted, keeps the pass, and a refusal throws', async () => {
+  const hub = await startServer({ port: 0, quiet: true, stateFile: false });
+  const host = await CrossTalk.connect({ name: 'host', url: hub.url, reconnect: false });
+  const guest = await CrossTalk.connect({ name: 'guest', url: hub.url, reconnect: false });
+  const other = await CrossTalk.connect({ name: 'other', url: hub.url, reconnect: false });
+  try {
+    const ch = await host.createChannel('door', { approval: true });
+    assert.equal(ch.info.approval, true);
+    assert.ok(host.passes.get(ch.address), 'the creator keeps a pass');
+
+    const knocked = nextEvent(host, 'channel.knock');
+    const passes: string[] = [];
+    guest.on('pass', (p: any) => passes.push(p.pass));
+    const joining = guest.joinChannel(ch.address);
+    await knocked;
+    assert.deepEqual((await ch.knocks()).map(k => k.agent.name), ['guest']);
+    await ch.admit('guest');
+    const joined = await joining;
+    assert.equal(joined.address, ch.address);
+    assert.equal(passes.length, 1);
+    assert.equal(guest.passes.get(ch.address), passes[0]);
+
+    await assert.rejects(other.joinChannel(ch.address, { wait: false }), (e: any) => e.code === 'pending_approval');
+    const refused = assert.rejects(other.joinChannel(ch.address), (e: any) => e.code === 'forbidden');
+    await new Promise(r => setTimeout(r, 50));
+    await ch.admit('other', false);
+    await refused;
+
+    // Turning it off: anyone with the address gets in.
+    await ch.setApproval(false);
+    await other.joinChannel(ch.address);
+  } finally {
+    await Promise.all([host.close(), guest.close(), other.close()]);
+    await hub.close();
+  }
+});

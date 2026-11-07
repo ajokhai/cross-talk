@@ -7,7 +7,7 @@ import { CrossTalk, CrossTalkError, DEFAULT_URL, type Channel, type ChannelLost,
 import { VERSION } from '../version.js';
 import { inviteText, remoteInviteText } from '../client/invite.js';
 import { httpBase } from '../client/http.js';
-import { forgetOwnedChannels, keyFile, loadOwnedChannels, saveOwnedChannel } from '../client/keys.js';
+import { forgetOwnedChannels, keyFile, loadOwnedChannels, loadPass, saveOwnedChannel, savePass, sameHub } from '../client/keys.js';
 import type { ChannelLimits, ChannelMessage, DirectMessage, FileLock, MemberAttention, ServerFrame, TaskClaim, UserQuestion } from '../protocol.js';
 import { STAY_AWAKE_GUIDANCE } from '../protocol.js';
 import { UPDATE_CHECK_MS, compareVersions, latestRelease, updateNotice } from '../version.js';
@@ -228,6 +228,27 @@ export class Bridge {
         this.push({ kind: 'alert', at: Date.now(), channel: f.slot.channel, text: `SLOT GRANTED: you now hold a place in slot ${f.slot.name} (${f.slot.holders.length} of ${f.slot.capacity} taken). Run your command now, and release it with crosstalk_slot_release when done.` });
         return;
       }
+      if (f.type === 'channel.admitted') {
+        if (!this.options.remote) try { savePass(f.channel, client.url, f.pass); } catch { /* kept in memory for this run */ }
+        if (client.channels.has(f.channel)) return; // approval was turned on while we were here: nothing to do
+        client.joinChannel(f.channel, { pass: f.pass }).then(ch => {
+          this.push({ kind: 'alert', at: Date.now(), channel: ch.address, text: `LET IN: ${f.by.name} let you into #${ch.name} (${ch.address}). You're a member now; read the channel with crosstalk_channel_state and carry on. Your pass is saved, so rejoining later goes straight in.` });
+        }, (err: Error) => {
+          this.push({ kind: 'alert', at: Date.now(), channel: f.channel, text: `LET IN, but joining failed: ${err.message}. Try crosstalk_join_channel ${f.channel} again.` });
+        });
+        return;
+      }
+      if (f.type === 'channel.refused') {
+        this.push({ kind: 'alert', at: Date.now(), channel: f.channel, text: `NOT LET IN: ${f.by.name} didn't let you into ${f.channel}. Tell your user; don't keep retrying.` });
+        return;
+      }
+      if (f.type === 'channel.knock' && f.knock.status === 'waiting') {
+        const ch = client.channels.get(f.channel);
+        if (ch && !this.options.remote && loadOwnedChannels().some(c => c.address === f.channel)) {
+          this.push({ kind: 'alert', at: Date.now(), channel: f.channel, text: `KNOCK: ${f.knock.agent.name} (${f.knock.agent.id}${f.knock.environment ? `, ${f.knock.environment}` : ''}) is waiting to join #${ch.name}. Ask your user whether to let them in, then call crosstalk_admit_member (deny=true to turn them away). Never admit someone your user doesn't expect.` });
+          return;
+        }
+      }
       if (f.type === 'claim.updated' && f.claim.owner.id === client.agent.id) {
         if (f.claim.status === 'stalled') this.push({ kind: 'nudge', at: Date.now(), claim: f.claim });
         return;
@@ -261,12 +282,24 @@ export class Bridge {
     // (likely on a remote hub) waits for the joins instead of finding no channel.
     for (const target of (o.channels ?? []).map(s => s.trim()).filter(Boolean)) {
       try {
-        await client.joinChannel(target);
+        await client.joinChannel(target, { ...this.credentials(target, client.url), wait: false });
       } catch (err: any) {
+        if (err instanceof CrossTalkError && err.code === 'pending_approval') {
+          this.push({ kind: 'alert', at: Date.now(), channel: target, text: `WAITING: ${target} approves new members, and its host hasn't let you in yet. You'll get a LET IN alert here when they do.` });
+        }
         console.error(`[crosstalk-mcp] could not join ${target}: ${err.message}`);
       }
     }
     return client;
+  }
+
+  /** The saved pass and owner key for a channel, so a rejoin goes straight in (approval, 2.20+). */
+  credentials(address: string, url: string): { pass?: string; ownerKey?: string } {
+    if (this.options.remote) return {};
+    return {
+      pass: loadPass(address, url),
+      ownerKey: loadOwnedChannels().find(c => c.address === address && sameHub(c.url, url))?.key
+    };
   }
 
   private push(item: InboxItem): void {
@@ -356,7 +389,13 @@ function describeEvent(f: ServerFrame): { channel: string; text: string } | unde
     case 'lock.released': return { channel: f.channel, text: `${f.file} unlocked (${f.reason})` };
     case 'lock.contended': return { channel: f.lock.channel, text: `${who(f.requester)} wants ${f.lock.file}, which you hold: ${f.reason}` };
     case 'question.asked': return { channel: f.question.channel, text: `${who(f.question.from)} asked the owner: ${f.question.question}` };
-    case 'channel.updated': return { channel: f.channel.id, text: `questions are now ${f.channel.questions}` };
+    case 'channel.updated': return { channel: f.channel.id, text: `questions are now ${f.channel.questions}${f.channel.approval ? '; new members need approval' : ''}` };
+    case 'channel.knock': return {
+      channel: f.channel,
+      text: f.knock.status === 'waiting' ? `${who(f.knock.agent)} is waiting to be let in (only the owner can admit them)`
+        : f.knock.status === 'admitted' ? `${who(f.knock.agent)} was let in`
+        : f.knock.status === 'denied' ? `${who(f.knock.agent)} was turned away` : `${who(f.knock.agent)} stopped waiting`
+    };
     case 'channel.closed': return { channel: f.channel, text: `the channel was closed by ${who(f.by)}; you are no longer in it` };
     case 'claim.updated': {
       const c = f.claim;
@@ -565,6 +604,7 @@ const TOOLS: Tool[] = [
         name: { type: 'string', description: 'Short label, e.g. "auth-refactor"' },
         topic: { type: 'string', description: 'What this conversation is for' },
         public: { type: 'boolean', description: 'Also list it in the hub\'s public directory (default false)' },
+        approval: { type: 'boolean', description: 'Approve new members, like a meeting link: anyone new with the address knocks and waits until your user lets them in (crosstalk_admit_member). Default false' },
         maxMessageChars: { type: 'number', description: 'Longest message allowed, fixed for the channel\'s life (default: the hub\'s, usually 1000)' },
         messagesPerMinute: { type: 'number', description: 'Messages each member may post per minute (default: the hub\'s, usually 120)' },
         messageBurst: { type: 'number', description: 'Messages a member may post back to back before that rate applies (default: the hub\'s, usually 30)' }
@@ -700,6 +740,27 @@ const TOOLS: Tool[] = [
         reason: { type: 'string', description: 'Shown to the removed agent' }
       },
       required: ['agent']
+    }
+  },
+  {
+    name: 'crosstalk_admit_member',
+    description: 'In a channel you created that approves new members: list who is waiting (no `agent`), let one in, or turn them away (deny=true). Needs the owner key saved on this machine. Only admit agents your user expects; ask them first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: channelArg,
+        agent: { type: 'string', description: 'Name or agent id of whoever is waiting; leave out to list them' },
+        deny: { type: 'boolean', description: 'Turn them away instead' }
+      }
+    }
+  },
+  {
+    name: 'crosstalk_set_approval',
+    description: 'Turn approval of new members on or off in a channel you created (needs the owner key saved on this machine). On: anyone new with the address knocks and waits; everyone already here keeps their place. Off: anyone with the address gets in, and whoever is waiting comes in. Ask your user first.',
+    inputSchema: {
+      type: 'object',
+      properties: { channel: channelArg, on: { type: 'boolean', description: 'true to require approval, false to let anyone with the address in' } },
+      required: ['on']
     }
   },
   {
@@ -893,8 +954,13 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       const ch = await client.createChannel(str(args.name) || undefined, {
         topic: str(args.topic) || undefined,
         public: args.public === true,
-        limits: Object.keys(limits).length ? limits : undefined
+        limits: Object.keys(limits).length ? limits : undefined,
+        approval: args.approval === true
       });
+      if (args.approval === true && !bridge.options.remote) {
+        const pass = client.passes.get(ch.address);
+        if (pass) try { savePass(ch.address, client.url, pass); } catch { /* the owner key still gets you in */ }
+      }
       // The owner key answers questions, so it goes to a private file, never into this conversation.
       let keyNote = '';
       if (bridge.options.remote) {
@@ -918,7 +984,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
         invite,
         '```',
         '',
-        `Started #${ch.name} (${ch.address}), ${describeHub(bridge.options.publicUrl ?? client.url)}${keyNote}`,
+        `Started #${ch.name} (${ch.address}), ${describeHub(bridge.options.publicUrl ?? client.url)}${keyNote}${ch.info.approval ? '\n\nThis channel approves new members: anyone new with the address knocks, you get a KNOCK alert, and your user decides (crosstalk_admit_member). Tell your user.' : ''}`,
         '',
         formatChannel(client, ch),
         '',
@@ -926,7 +992,16 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       ].join('\n');
     }
     case 'crosstalk_join_channel': {
-      const ch = await client.joinChannel(str(args.channel));
+      const address = str(args.channel).trim();
+      let ch: Channel;
+      try {
+        ch = await client.joinChannel(address, { ...bridge.credentials(address, client.url), wait: false });
+      } catch (err) {
+        if (err instanceof CrossTalkError && err.code === 'pending_approval') {
+          return `WAITING TO BE LET IN: ${address} approves new members, so its host has been asked to let ${client.agent.name} in. Tell your user you're waiting for the host. You'll get a LET IN alert (or NOT LET IN) from crosstalk_wait or crosstalk_read_inbox, and you join automatically once admitted. Don't call crosstalk_join_channel again in the meantime.`;
+        }
+        throw err;
+      }
       bridge.drain(ch.address);
       return `Joined #${ch.name} as ${client.agent.name} (${client.agent.id}).\n${formatChannel(client, ch)}\n\n${STAY_AWAKE_GUIDANCE}`;
     }
@@ -1012,6 +1087,28 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       const r = await ch.kick(str(args.agent), { ban: args.ban === true, ip: args.ip === true, reason: str(args.reason) || undefined }, owned.key);
       const who = r.kicked.length ? r.kicked.map(a => a.name).join(', ') : 'nobody currently here';
       return `Removed ${who} from #${ch.name}${r.banned ? ' and banned them from rejoining' : ''}.`;
+    }
+    case 'crosstalk_admit_member': {
+      const ch = pickChannel(client, args.channel);
+      const owned = ownedKey(bridge, ch);
+      if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there is no owner key here to let people in with. Its creator can run \`crosstalk admit ${ch.address}\`.`);
+      const agent = str(args.agent).trim();
+      if (!agent) {
+        const waiting = await ch.knocks(owned.key);
+        if (!waiting.length) return ch.info.approval ? `Nobody is waiting to join #${ch.name}.` : `#${ch.name} lets anyone with the address in (approval is off). Turn it on with crosstalk_set_approval.`;
+        return [`Waiting to join #${ch.name}:`, ...waiting.map(k => `- ${k.agent.name} (${k.agent.id}${k.environment ? `, ${k.environment}` : ''}), since ${time(k.at)}`), 'Ask your user who to let in.'].join('\n');
+      }
+      const k = await ch.admit(agent, args.deny !== true, owned.key);
+      return args.deny === true ? `Turned ${k.agent.name} away from #${ch.name}.` : `Let ${k.agent.name} into #${ch.name}. They get a pass, so they can rejoin later without knocking.`;
+    }
+    case 'crosstalk_set_approval': {
+      const ch = pickChannel(client, args.channel);
+      const owned = ownedKey(bridge, ch);
+      if (!owned) throw new Error(`#${ch.name} wasn't created on this machine, so there is no owner key here to change it with. Its creator can run \`crosstalk approval ${ch.address} on|off\`.`);
+      await ch.setApproval(args.on === true, owned.key);
+      return args.on === true
+        ? `#${ch.name} now approves new members: anyone new knocks and waits for crosstalk_admit_member. Everyone already here keeps their place.`
+        : `#${ch.name} now lets anyone with the address in; whoever was waiting has been let in.`;
     }
     case 'crosstalk_close_channel': {
       const ch = pickChannel(client, args.channel);

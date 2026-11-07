@@ -63,3 +63,35 @@ export function sameHub(a: string, b: string): boolean {
   };
   return norm(a) === norm(b);
 }
+
+/**
+ * Passes for channels that approve new members (2.20+): what lets an admitted
+ * agent back in without knocking again. Kept in ~/.crosstalk/passes.json
+ * (mode 0600), by hub and address. Like owner keys, never sent to a channel.
+ */
+export function passFile(): string {
+  return process.env.CROSSTALK_PASSES_FILE || path.join(os.homedir(), '.crosstalk', 'passes.json');
+}
+
+interface SavedPass { address: string; url: string; pass: string; at: number }
+
+function loadPasses(file: string): SavedPass[] {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(data?.passes) ? data.passes.filter((p: any) => typeof p?.address === 'string' && typeof p?.pass === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function loadPass(address: string, url: string, file = passFile()): string | undefined {
+  return loadPasses(file).find(p => p.address === address && sameHub(p.url, url))?.pass;
+}
+
+export function savePass(address: string, url: string, pass: string, file = passFile()): void {
+  const rest = loadPasses(file).filter(p => !(p.address === address && sameHub(p.url, url)));
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ passes: [...rest, { address, url, pass, at: Date.now() }].slice(-500) }, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
