@@ -36,7 +36,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections import deque
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     import websocket  # websocket-client
@@ -46,7 +46,10 @@ except ImportError:
 PROTOCOL_VERSION = 2
 # The public CrossTalk hub (2.15+); set CROSSTALK_URL=ws://localhost:4488 for a hub on this machine.
 DEFAULT_URL = "wss://hub-production-a114.up.railway.app"
-ADDRESS_RE = re.compile(r"^xt_[A-Za-z0-9_-]{22}$")
+LOCAL_URL = "ws://localhost:4488"
+# One-line addresses (see src/address.ts): xt_<id> (the internet hub, or the hub
+# you're set up for), xtl_<id> (a hub on this computer), xt_<id>@<hub> (any other).
+ADDRESS_RE = re.compile(r"^(xtl?)_([A-Za-z0-9_-]{22})(?:@(\S+))?$")
 
 # Longest long-poll the hub allows is 55s; stay under it.
 POLL_WAIT_SECONDS = 25
@@ -97,9 +100,52 @@ class CrossTalkError(Exception):
         return ms / 1000 if isinstance(ms, (int, float)) else None
 
 
+def _private_host(host: str) -> bool:
+    h = host.strip("[]").lower()
+    if h in ("localhost", "::1") or h.endswith((".local", ".lan", ".internal")) or ("." not in h and ":" not in h):
+        return True
+    if re.match(r"^(127\.|10\.|192\.168\.|169\.254\.)", h):
+        return True
+    m = re.match(r"^172\.(\d+)\.", h)
+    if m and 16 <= int(m.group(1)) <= 31:
+        return True
+    return bool(re.match(r"^f[cd][0-9a-f]{2}:", h)) or h.startswith("fe80:")
+
+
+def _hub_url(text: str) -> Optional[str]:
+    raw = re.sub(r"[.,;:!?]+$", "", text.strip())
+    if not raw:
+        return None
+    if re.match(r"^https?://", raw, re.I):
+        raw = "ws" + raw[4:]
+    elif re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I) and not re.match(r"^wss?://", raw, re.I):
+        return None
+    if not re.match(r"^wss?://", raw, re.I):
+        host = re.sub(r":\d+$", "", raw.split("/")[0])
+        raw = ("ws" if _private_host(host) else "wss") + "://" + raw
+    parsed = urllib.parse.urlsplit(raw)
+    if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return None
+    return f"{parsed.scheme.lower()}://{parsed.netloc}{parsed.path}".rstrip("/")
+
+
+def parse_address(value: str) -> Optional[Tuple[str, Optional[str]]]:
+    """(channel id "xt_...", hub URL or None for a plain xt_ address), or None if it isn't an address."""
+    m = ADDRESS_RE.match(str(value).strip())
+    if not m:
+        return None
+    channel = "xt_" + m.group(2)
+    if m.group(1) == "xtl":
+        return None if m.group(3) else (channel, LOCAL_URL)
+    if m.group(3) is None:
+        return (channel, None)
+    hub = _hub_url(m.group(3))
+    return (channel, hub) if hub else None
+
+
 def is_address(value: str) -> bool:
-    """True for a channel address: "xt_" followed by 22 base64url characters."""
-    return bool(ADDRESS_RE.match(value.strip()))
+    """True for a channel address: xt_<id>, xtl_<id> or xt_<id>@<hub> (<id> is 22 base64url characters)."""
+    return parse_address(value) is not None
 
 
 def _http_base(url: str) -> str:
@@ -535,8 +581,9 @@ class CrossTalk:
                                         visibility="public" if public else "private", limits=limits or None))
 
     def join_channel(self, address: str) -> Channel:
-        """Joins a channel by its address (xt_...). Raises quota_exceeded when it is full."""
-        return self._track(self.request("channel.join", channel=address.strip()))
+        """Joins a channel by its address (xt_..., xtl_... or xt_...@hub; connect to that hub first). Raises quota_exceeded when it is full."""
+        parsed = parse_address(address)
+        return self._track(self.request("channel.join", channel=parsed[0] if parsed else address.strip()))
 
     def leave_channel(self, address: str) -> None:
         self.request("channel.leave", channel=address)
@@ -728,6 +775,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.cmd == "install":
         _install()
         return 0
+
+    # An address that names its hub (xtl_..., xt_...@host) decides where to connect.
+    parsed = parse_address(args.address) if getattr(args, "address", None) else None
+    if parsed:
+        args.address = parsed[0]
+        if parsed[1]:
+            args.url = parsed[1]
 
     try:
         with CrossTalk.connect(args.name, url=args.url, token=args.token, transport=args.transport,

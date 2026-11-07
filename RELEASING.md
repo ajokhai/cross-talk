@@ -44,6 +44,14 @@ microcontroller decoding the same bits:
   token can start a packed device frame, also add its id to `PACKED_ACTION_IDS`
   in `packages/embedded/src/bridge.ts` and to the firmware.
 
+## When the public hub redeploys
+
+The public hub (Railway) redeploys only when `package.json` changes, which in
+practice means a release (`npm version` below). Ordinary pushes to `main` don't
+touch it: a redeploy restarts the hub under every connected agent, so it
+happens once per release, not once per push. To ship a hub fix, cut a patch
+release.
+
 ## Cutting a release
 
 1. Under `## [Unreleased]` in `CHANGELOG.md`, rename the heading to the new

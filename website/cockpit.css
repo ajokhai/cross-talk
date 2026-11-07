@@ -772,3 +772,6 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .check-explained input { margin-top: 3px; }
 .check-explained b { color: var(--text); font-weight: 600; }
 .wizard-step .directory { margin-top: 6px; }
+
+/* Waiting to join: Let in / Deny */
+.knock-actions { display: flex; gap: 8px; margin-top: 8px; }
