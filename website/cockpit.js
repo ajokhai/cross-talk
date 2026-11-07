@@ -41,6 +41,8 @@
   const STORE_NAME = 'crosstalk.cockpit.name';
   /** Owner keys of conversations started in this browser, by "hub|address". Never sent anywhere but that hub. */
   const STORE_KEYS = 'crosstalk.cockpit.owner-keys';
+  /** Passes for channels that approve new members, by "hub|address": what lets this browser back in without knocking. */
+  const STORE_PASSES = 'crosstalk.cockpit.passes';
   /** Joined channels by hub: { [hub]: [{ id, name, seen }] }, rejoined on reload. */
   const STORE_CHANNELS = 'crosstalk.cockpit.channels';
   /** Unsent composer text by "hub|address". */
@@ -178,6 +180,8 @@
   // ---------------------------------------------------------------------------
 
   const state = {
+    /** Channels we knocked on and are waiting to be let into: address -> since. */
+    waiting: new Map(),
     ws: null,
     /** 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error' */
     status: 'disconnected',
@@ -241,6 +245,31 @@
     const keys = ownerKeys();
     keys[`${state.hub}|${address}`] = key;
     save(STORE_KEYS, JSON.stringify(keys));
+  }
+
+  // Passes (channels that approve new members): kept like owner keys, sent only to that hub.
+  function passes() {
+    try { return JSON.parse(load(STORE_PASSES) || '{}') || {}; } catch { return {}; }
+  }
+  function savePass(address, pass) {
+    const all = passes();
+    all[`${state.hub}|${address}`] = pass;
+    save(STORE_PASSES, JSON.stringify(all));
+  }
+  /** What a join shows: a saved pass and the owner key, when this browser has them. */
+  function joinParams(address, pass) {
+    const params = { channel: address };
+    const p = pass || passes()[`${state.hub}|${address}`];
+    const key = ownerKey(address);
+    if (p) params.pass = p;
+    if (key) params.ownerKey = key;
+    return params;
+  }
+  /** Knocked on a channel that approves new members: wait for its host. */
+  function startWaiting(address) {
+    state.waiting.set(address, Date.now());
+    showNotice(`This channel approves new members. You're waiting for its host to let ${state.config.name || 'you'} in; keep this tab open. You'll go straight in when they do.`);
+    render();
   }
 
   // ---------------------------------------------------------------------------
@@ -544,13 +573,15 @@
       state.joining.add(address);
       // A resumed member is still in its channels: read their state rather than joining again.
       const fetch = resumed
-        ? request('channel.state', { channel: address }).catch(() => request('channel.join', { channel: address }))
-        : request('channel.join', { channel: address });
+        ? request('channel.state', { channel: address }).catch(() => request('channel.join', joinParams(address)))
+        : request('channel.join', joinParams(address));
       return fetch
         .then((snap) => adoptSnapshot(snap, address === target))
         .catch((err) => {
           state.joined.delete(address);
-          if (err.code === 'not_found' || err.code === 'forbidden') {
+          if (err.code === 'pending_approval') {
+            if (address === fromHash) startWaiting(address);
+          } else if (err.code === 'not_found' || err.code === 'forbidden') {
             forgetChannel(address);
             showNotice(`${address === fromHash ? 'That channel' : `Channel ${shortAddress(address)}`} is gone or no longer lets you in (${err.message}).`);
           } else if (address === fromHash) {
@@ -691,11 +722,46 @@
         renderIfSelected(q.channel, true);
         return;
       }
+      case 'channel.knock': {
+        const ch = state.joined.get(frame.channel);
+        const k = frame.knock;
+        if (!ch || !k) return;
+        if (!ch.knocks) ch.knocks = new Map();
+        if (k.status === 'waiting') ch.knocks.set(k.agent.id, k);
+        else ch.knocks.delete(k.agent.id);
+        const mine = !!ownerKey(frame.channel);
+        if (k.status === 'waiting') {
+          addActivity(ch, 'join', `${k.agent.name} is waiting to be let in`, null, mine ? 'Admit or deny them in Details' : 'Only the owner can let them in');
+          if (mine) bumpAttention(ch, true);
+        } else if (k.status === 'admitted') addActivity(ch, 'join', `${k.agent.name} was let in`);
+        else if (k.status === 'denied') addActivity(ch, 'leave', `${k.agent.name} was turned away`);
+        renderIfSelected(frame.channel, true);
+        return;
+      }
+      case 'channel.admitted': {
+        savePass(frame.channel, frame.pass);
+        if (state.joined.has(frame.channel)) return; // approval was turned on while we were in
+        state.waiting.delete(frame.channel);
+        request('channel.join', joinParams(frame.channel, frame.pass)).then((snap) => {
+          hideNotice();
+          adoptSnapshot(snap);
+          refreshChannels();
+        }, (err) => showNotice(`You were let in, but joining failed: ${err.message}`));
+        return;
+      }
+      case 'channel.refused': {
+        state.waiting.delete(frame.channel);
+        showNotice(`${frame.by ? frame.by.name : 'The host'} didn't let you in to ${shortAddress(frame.channel)}.`);
+        render();
+        return;
+      }
       case 'channel.updated': {
         const ch = frame.channel && state.joined.get(frame.channel.id);
         if (!ch) return;
+        const approvalChanged = !!frame.channel.approval !== !!(ch.info && ch.info.approval);
         ch.info = frame.channel;
-        addActivity(ch, 'config', `Questions for the owner are now ${frame.channel.questions}`);
+        if (approvalChanged) addActivity(ch, 'config', frame.channel.approval ? 'New members now need the owner\'s approval' : 'Anyone with the address can join again');
+        else addActivity(ch, 'config', `Questions for the owner are now ${frame.channel.questions}`);
         renderIfSelected(frame.channel.id, true);
         renderChannels();
         return;
@@ -864,6 +930,7 @@
     }
     state.joined.set(address, ch);
     rememberChannel(snap.channel);
+    loadKnocks(address);
     if (focus) select(address);
     else render();
   }
@@ -960,19 +1027,28 @@
 
   async function joinChannel(address) {
     if (state.joined.has(address)) { select(address); return; }
-    const snap = await request('channel.join', { channel: address });
+    let snap;
+    try {
+      snap = await request('channel.join', joinParams(address));
+    } catch (err) {
+      if (err.code === 'pending_approval') return startWaiting(address);
+      throw err;
+    }
+    state.waiting.delete(address);
     adoptSnapshot(snap);
     refreshChannels();
   }
 
   /** `limits`: any of maxMessageChars, messagesPerMinute, messageBurst; the hub fills in the rest. */
-  async function createChannel(name, topic, visibility, limits) {
+  async function createChannel(name, topic, visibility, limits, approval) {
     const params = { visibility };
+    if (approval) params.approval = true;
     if (name) params.name = name;
     if (topic) params.topic = topic;
     if (limits && Object.keys(limits).length) params.limits = limits;
     const snap = await request('channel.create', params);
     if (snap.ownerKey) saveOwnerKey(snap.channel.id, snap.ownerKey);
+    if (snap.pass) savePass(snap.channel.id, snap.pass);
     adoptSnapshot(snap);
     refreshChannels();
     if (visibility === 'public' && state.directory.loaded) loadDirectory(true);
@@ -980,6 +1056,26 @@
 
   async function answerQuestion(address, id, answer) {
     await request('question.answer', { channel: address, question: id, answer, ownerKey: ownerKey(address) });
+  }
+
+  async function setApproval(address, on) {
+    const info = await request('channel.configure', { channel: address, ownerKey: ownerKey(address), approval: on });
+    const ch = state.joined.get(address);
+    if (ch && info) { ch.info = { ...ch.info, ...info }; renderIfSelected(address, false); }
+  }
+
+  async function decideKnock(address, agentId, allow) {
+    await request('member.admit', { channel: address, ownerKey: ownerKey(address), agent: agentId, allow });
+  }
+
+  /** Who is already waiting, for a channel we own (knocks that came before this page loaded). */
+  function loadKnocks(address) {
+    const ch = state.joined.get(address);
+    if (!ch || !ch.info.approval || !ownerKey(address)) return;
+    request('member.knocks', { channel: address, ownerKey: ownerKey(address) }).then((r) => {
+      ch.knocks = new Map((r.knocks || []).map((k) => [k.agent.id, k]));
+      renderIfSelected(address, false);
+    }).catch(() => { /* older hub */ });
   }
 
   async function setQuestions(address, mode) {
@@ -1357,6 +1453,7 @@
       const info = ch.info;
       $('channel-title').textContent = label(info);
       const parts = [info.topic || (info.visibility === 'public' ? 'Public channel' : 'Private channel')];
+      if (info.approval) parts.push('approves new members');
       parts.push(info.maxMembers ? `${ch.members.size}/${info.maxMembers} members` : `${ch.members.size} member${ch.members.size === 1 ? '' : 's'}`);
       $('channel-topic').textContent = parts.join(' · ');
       $('address-code').textContent = info.id;
@@ -1461,11 +1558,31 @@
       : 'None waiting. The owner answers with crosstalk inbox.';
     $('question-hint').hidden = questions.length === 0 || owned;
     if (owned && ch.info.questions !== 'off') $('question-empty').textContent = 'None waiting. You started this channel, so agents\' questions come here.';
+    // Waiting to join (channels that approve new members). Only the owner sees who is waiting and decides.
+    const knocks = ch && ch.knocks ? [...ch.knocks.values()].sort((a, b) => a.at - b.at) : [];
+    $('knock-section').hidden = !ch || !(ch.info.approval || owned);
+    $('knock-list').replaceChildren(...(owned ? knocks : []).map((k) => el('li', { class: 'card-item knock' },
+      el('div', { class: 'question-from' }, avatar(k.agent, ch, 'sm'), el('span', { title: k.agent.id, text: k.agent.name }),
+        el('time', { datetime: new Date(k.at).toISOString(), text: formatTime(k.at) })),
+      el('div', { class: 'item-meta' }, el('span', { class: 'mono', text: [k.agent.id, k.environment].filter(Boolean).join(' · ') })),
+      el('div', { class: 'knock-actions' },
+        el('button', { type: 'button', class: 'btn btn-primary btn-sm', text: 'Let in', onclick: (e) => attempt(e.currentTarget, () => decideKnock(ch.info.id, k.agent.id, true)) }),
+        el('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'Deny', onclick: (e) => attempt(e.currentTarget, () => decideKnock(ch.info.id, k.agent.id, false)) })))));
+    $('knock-count').textContent = owned && knocks.length ? String(knocks.length) : '';
+    $('knock-count').classList.toggle('hot', owned && knocks.length > 0);
+    $('knock-empty').hidden = owned && knocks.length > 0;
+    $('knock-empty').textContent = !ch ? '' : !ch.info.approval
+      ? 'Anyone with the address can join. Turn approval on to let people in yourself, like a meeting link.'
+      : owned ? 'Nobody is waiting. New members knock first, and you let them in here.' : 'New members wait for the owner to let them in.';
+    const approvalToggle = $('approval-toggle');
+    approvalToggle.hidden = !owned;
+    if (owned) approvalToggle.textContent = ch.info.approval ? 'Let anyone with the address in' : 'Approve new members';
+
     const toggle = $('questions-toggle');
     toggle.hidden = !owned;
     if (owned) toggle.textContent = ch.info.questions === 'off' ? 'Turn questions on' : 'Turn questions off';
     // A waiting question gets a dot on the details button.
-    $('details-toggle').classList.toggle('has-dot', owned && questions.length > 0);
+    $('details-toggle').classList.toggle('has-dot', owned && (questions.length > 0 || knocks.length > 0));
 
     // Channel facts
     const facts = [];
@@ -1477,6 +1594,7 @@
       facts.push(['Address', el('span', { class: 'fact-addr' }, addr, copy)]);
       facts.push(['Hub', el('span', { class: 'mono', text: state.hub })]);
       facts.push(['Visibility', info.visibility === 'public' ? 'Listed in the public directory' : 'Private (address only)']);
+      facts.push(['New members', info.approval ? 'Need the owner\'s approval' : 'Anyone with the address']);
       if (info.createdBy) facts.push(['Started by', `${info.createdBy.name}${info.createdAt ? `, ${formatFull(info.createdAt)}` : ''}${owned ? ' (you hold the owner key)' : ''}`]);
       // Older hubs don't report limits.
       if (info.limits) facts.push(['Limits', `Messages up to ${info.limits.maxMessageChars} chars, ${info.limits.messagesPerMinute}/min each`]);
@@ -2271,11 +2389,13 @@
         const value = $(id).value.trim();
         if (value) limits[key] = Number(value);
       }
-      const ok = await attempt(e.submitter, () => ensureConnected().then(() => createChannel(name, '', visibility, limits)));
+      const approval = $('create-approval').checked;
+      const ok = await attempt(e.submitter, () => ensureConnected().then(() => createChannel(name, '', visibility, limits, approval)));
       if (ok) {
         wizard('choose');
         $('create-name').value = '';
         $('create-public').checked = false;
+        $('create-approval').checked = false;
         for (const id of ['create-max-chars', 'create-rate', 'create-burst']) $(id).value = '';
         $('composer-input').focus();
       }
@@ -2289,6 +2409,12 @@
       if (!window.confirm(`Leave "${label(ch.info)}"? Agents see you go. You can rejoin with its address.`)) return;
       if (midMq.matches) closeOverlays();
       attempt(e.currentTarget, () => leaveChannel(address));
+    });
+    $('approval-toggle').addEventListener('click', (e) => {
+      const ch = state.selected && state.joined.get(state.selected);
+      if (!ch) return;
+      if (ch.info.approval && !window.confirm('Let anyone with the address in? Whoever is waiting comes in too.')) return;
+      attempt(e.currentTarget, () => setApproval(ch.info.id, !ch.info.approval));
     });
     $('questions-toggle').addEventListener('click', (e) => {
       const ch = state.selected && state.joined.get(state.selected);
