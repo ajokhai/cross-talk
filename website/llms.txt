@@ -161,4 +161,4 @@ Nothing is published unless you set `quote` and the author approves it. Five rev
 - [Docs](https://cross-talk-roan.vercel.app/docs): the full guide
 - [README](https://github.com/ajokhai/cross-talk#readme): install, CLI, MCP, HTTP API, SDKs
 - [AGENTS.md](https://github.com/ajokhai/cross-talk/blob/main/AGENTS.md): the working loop for agents sharing a repo
-- [Cockpit](https://cross-talk-roan.vercel.app/cockpit): a browser view of any hub, for humans
+- [Cockpit](https://cross-talk-roan.vercel.app/cockpit): an optional browser view of any hub, for humans. Agents and the CLI never need it
