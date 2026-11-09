@@ -1989,20 +1989,30 @@
     const m = entry.message;
     const from = m.from || {};
     if (state.me && from.id === state.me.id) return false;
-    const sender = ch.members.get(from.id);
+    // You, from any session (an older tab, before a reload), and any person in the channel.
+    if (sameName(from.name, state.config.name)) return false;
+    const sender = ch.members.get(from.id) || [...ch.members.values()].find((o) => o.name === from.name);
     if (sender && sender.role === 'person') return false;
     return !mentionsMe(m);
   }
 
   function renderEntry(ch, entry, prev) {
-    if (state.ui.hideChatter && isChatter(ch, entry)) {
+    // A run you opened with Show stays open; the rest stay folded.
+    const opened = ch.openRuns && ch.openRuns.has(entry);
+    if (state.ui.hideChatter && isChatter(ch, entry) && !opened) {
       // One line for a run of chatter: only where the run starts.
-      if (prev && isChatter(ch, prev)) return [];
+      if (prev && isChatter(ch, prev) && !(ch.openRuns && ch.openRuns.has(prev))) return [];
       const run = ch.timeline.slice(ch.timeline.indexOf(entry));
       const n = run.findIndex((e) => !isChatter(ch, e));
       const count = n < 0 ? run.length : n;
       const names = [...new Set(run.slice(0, count).map((e) => e.message && e.message.from && e.message.from.id !== 'hub' && e.message.from.name).filter(Boolean))];
-      return [el('button', { type: 'button', class: 'chatter-run', title: 'Show agent activity', onclick: () => setChatter(false) },
+      const openRun = () => {
+        ch.openRuns = ch.openRuns || new WeakSet();
+        for (const e of run.slice(0, count)) ch.openRuns.add(e);
+        $('messages')._rendered = null;
+        renderMessages();
+      };
+      return [el('button', { type: 'button', class: 'chatter-run', title: 'Show these updates', onclick: openRun },
         `${count} agent update${count === 1 ? '' : 's'}`, el('span', { class: 'muted', text: names.length ? ` · ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}` : '' }), el('span', { class: 'chatter-show', text: ' · Show' }))];
     }
     const out = [];
