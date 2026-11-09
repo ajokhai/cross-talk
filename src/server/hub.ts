@@ -374,6 +374,13 @@ const cleanText = (value: unknown, max: number): string =>
  * Transport-agnostic: callers hand it a `Peer` per connection and feed it
  * decoded frames. See `server/index.ts` for the WebSocket and HTTP bindings.
  */
+/** Pronouns as a member gives them ("she/her", "they/them"): short plain text, or nothing. */
+function cleanPronouns(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const p = value.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
+  return p || undefined;
+}
+
 export class MeshHub {
   readonly locks: LockManager;
   /** `lock.wait` queues, by channel + file, oldest first. Not persisted. */
@@ -515,6 +522,8 @@ export class MeshHub {
       lastSeen: now
     };
     if (typeof raw.sealKey === 'string' && /^xs_[A-Za-z0-9_-]{43}$/.test(raw.sealKey)) agent.sealKey = raw.sealKey;
+    const pronouns = cleanPronouns(raw.pronouns);
+    if (pronouns) agent.pronouns = pronouns;
     if (invite) {
       agent.remote = true;
       agent.via = invite.label;
@@ -693,7 +702,7 @@ export class MeshHub {
       case 'lock.wait': return this.waitLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'slot.acquire': return this.acquireSlot(conn, f.channel, f.name, f.capacity, f.ttlSeconds);
       case 'slot.release': return this.releaseSlot(conn, f.channel, f.name);
-      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask);
+      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns);
       case 'listener.report': {
         if (typeof f.open !== 'boolean') fail('bad_request', 'open must be true or false');
         if (f.open) this.pollStarted(conn);
@@ -1929,7 +1938,7 @@ export class MeshHub {
     }
   }
 
-  private updateStatus(conn: Connection, status: unknown, currentTask: unknown): AgentInfo {
+  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown): AgentInfo {
     const agent = conn.agent!;
     if (status !== undefined) {
       if (status !== 'idle' && status !== 'working' && status !== 'waiting') {
@@ -1938,6 +1947,10 @@ export class MeshHub {
       agent.status = status as AgentInfo['status'];
     }
     if (currentTask !== undefined) agent.currentTask = cleanText(currentTask, 280);
+    if (pronouns !== undefined) {
+      const p = cleanPronouns(pronouns);
+      if (p) agent.pronouns = p; else delete agent.pronouns;
+    }
     for (const name of conn.channels) {
       const channel = this.channels.get(name);
       if (channel && this.visible(agent.id)) this.emit(channel, { type: 'member.updated', channel: name, agent }, agent.id);

@@ -109,6 +109,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></svg>
             </button>
           </div>
+          <button id="chatter-btn" class="btn btn-ghost btn-sm" type="button" aria-pressed="false" title="Hide messages agents send each other that don't involve you">Hide chatter</button>
           <button id="invite-btn" class="btn btn-ghost btn-sm" type="button">Invite agents</button>
           <button id="avatar-stack" class="avatar-stack" type="button" aria-label="Members"></button>
         </div>
@@ -212,6 +213,21 @@
 
       <form id="composer" class="composer" hidden autocomplete="off">
         <div class="composer-box">
+          <div id="key-strip" class="key-strip" hidden>
+            <span class="key-icon" aria-hidden="true">🔑</span>
+            <label class="sr-only" for="key-name">Key name</label>
+            <input id="key-name" class="key-name mono" type="text" spellcheck="false" autocomplete="off" placeholder="GITHUB_TOKEN" maxlength="64">
+            <label class="sr-only" for="key-value">Key</label>
+            <input id="key-value" class="key-value mono" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the key (hidden)">
+            <button id="key-cancel" class="icon-btn icon-btn-sm" type="button" aria-label="Don't share a key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            <p class="key-note">Locked in this browser so only the agents you @mention can open it, on their own computer. Nobody sees the key: not the hub, the channel or the agent.</p>
+          </div>
+          <div class="plus-wrap">
+            <button id="plus-btn" class="plus-btn" type="button" aria-label="More" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+            <div id="plus-menu" class="plus-menu" role="menu" hidden>
+              <button id="plus-share-key" type="button" role="menuitem"><span aria-hidden="true">🔑</span> Share a key</button>
+            </div>
+          </div>
           <label class="sr-only" for="composer-input">Message</label>
           <textarea id="composer-input" rows="1" placeholder="Message the channel" aria-autocomplete="list" aria-controls="mention-list" aria-expanded="false" aria-describedby="composer-hint"></textarea>
           <ul id="mention-list" class="mention-list" role="listbox" aria-label="Mention a member" hidden></ul>
@@ -368,6 +384,10 @@
       <label class="field">
         <span>Your name <span class="muted">(agents see this; blank watches anonymously)</span></span>
         <input id="settings-name" class="input" type="text" spellcheck="false" placeholder="e.g. Sam" maxlength="64" autocomplete="nickname">
+      </label>
+      <label class="field">
+        <span>Your pronouns <span class="muted">(optional, shown next to your name)</span></span>
+        <input id="settings-pronouns" class="input" type="text" spellcheck="false" placeholder="e.g. he/him" maxlength="24">
       </label>
 
       <fieldset class="field hub-choice">

@@ -39,6 +39,8 @@
   const STORE_URL = 'crosstalk.cockpit.url';
   const STORE_TOKEN = 'crosstalk.cockpit.token';
   const STORE_NAME = 'crosstalk.cockpit.name';
+  /** Your pronouns, shown next to your name (2.21+ hubs). */
+  const STORE_PRONOUNS = 'crosstalk.cockpit.pronouns';
   /** Owner keys of conversations started in this browser, by "hub|address". Never sent anywhere but that hub. */
   const STORE_KEYS = 'crosstalk.cockpit.owner-keys';
   /** Passes for channels that approve new members, by "hub|address": what lets this browser back in without knocking. */
@@ -397,7 +399,7 @@
         protocol: PROTOCOL_VERSION,
         // A named person takes part; an anonymous tab is an observer.
         agent: name
-          ? { name, role: 'person', environment: 'web', currentTask: 'In the cockpit' }
+          ? { name, role: 'person', environment: 'web', currentTask: 'In the cockpit', ...(state.config.pronouns ? { pronouns: state.config.pronouns } : {}) }
           : { name: `cockpit-${suffix}`, role: 'observer', environment: 'web', currentTask: 'Watching conversations' },
         resume: resuming && state.resumeToken ? state.resumeToken : handover,
       });
@@ -1163,6 +1165,13 @@
     }
   }
 
+  /** "xt_nAqakCJk6WubVE76lc20vA" -> "xt_nA…20vA": enough to tell channels apart, not enough to join. */
+  function maskAddress(address) {
+    const m = /^(xtl?_)([A-Za-z0-9_-]+)(@.*)?$/.exec(String(address || ''));
+    if (!m || m[2].length < 10) return address;
+    return `${m[1]}${m[2].slice(0, 2)}…${m[2].slice(-4)}${m[3] || ''}`;
+  }
+
   async function copyText(text, button, sourceNode) {
     try {
       await navigator.clipboard.writeText(text);
@@ -1507,7 +1516,9 @@
       parts.push(`${team} member${team === 1 ? '' : 's'}`);
       $('channel-topic').textContent = parts.join(' · ');
       $('channel-topic').title = info.approval ? 'New members wait until the owner lets them in' : '';
-      $('address-code').textContent = info.id;
+      // Shortened on screen so a screenshot doesn't hand out the invite; Copy uses the full address.
+      $('address-code').textContent = maskAddress(info.id);
+      $('address-code').dataset.address = info.id;
 
       const members = sortedMembers(ch);
       const stack = $('avatar-stack');
@@ -1533,23 +1544,33 @@
       const att = ch.attention.get(m.id);
       const av = avatar(m, ch, 'md');
       av.append(el('span', { class: 'presence', dataset: { state: p.state } }));
-      return el('li', { class: 'member' },
+      // At a glance: name, pronouns, and one line of what they're doing. The rest is in the tooltip.
+      const helpers = helpersOf(ch, m);
+      const tag = twinTag(ch, m);
+      const doing = m.currentTask && !/^shared by /i.test(m.currentTask) ? m.currentTask : p.text;
+      const details = [
+        `${m.name}${m.pronouns ? ` (${m.pronouns})` : ''} · ${m.id}`,
+        [m.role, m.environment, m.branch && `branch ${m.branch}`].filter(Boolean).join(' · '),
+        p.text + (att && att.unread && !isMe ? ` · ${att.unread} unread` : ''),
+        ...helpers.map((h) => (h.role === 'supervisor' ? `Wake helper: ${h.name}` : `Read-only viewer: ${h.name}`)),
+      ].filter(Boolean).join('\n');
+      const busy = m.status === 'working' || m.status === 'waiting';
+      return el('li', { class: 'member', title: details },
         av,
         el('div', { class: 'member-info' },
           el('div', { class: 'member-name' },
-            el('span', { title: `${m.name} · ${m.id}`, text: isMe ? `${m.name} (you)` : m.name }),
-            twinTag(ch, m) ? el('span', { class: 'pill mono', title: `Agent id ${m.id}: another member has the same name`, text: twinTag(ch, m) }) : null,
+            el('span', { class: 'member-label', text: isMe ? `${m.name} (you)` : m.name }),
+            m.pronouns ? el('span', { class: 'member-pronouns', text: m.pronouns }) : null,
+            tag ? el('span', { class: 'pill mono', title: `Agent id ${m.id}: another member has the same name`, text: tag }) : null,
             m.remote ? el('span', { class: 'pill', title: m.via ? `Joined with remote invite "${m.via}"` : 'Joined from outside the hub\'s machine', text: 'remote' }) : null),
-          el('div', { class: 'member-sub', text: [m.role, m.environment, m.branch && `⎇ ${m.branch}`].filter(Boolean).join(' · ') }),
-          m.currentTask ? el('div', { class: 'member-task', text: m.currentTask }) : null,
-          ...helpersOf(ch, m).map((h) => el('div', { class: 'member-helper', title: `${h.name} (${h.id})`, text: h.role === 'supervisor' ? `+ wake helper (${h.name}): pokes ${m.name} when @mentioned` : `+ read-only viewer (${h.name})` })),
-          el('div', { class: 'member-presence', dataset: { state: p.state } },
+          el('div', { class: 'member-doing', dataset: { state: p.state } },
             el('span', { class: 'dot', dataset: { state: p.state }, 'aria-hidden': 'true' }),
-            p.text,
-            att && att.unread && !isMe ? ` · ${att.unread} unread` : '')),
-        !isMe && sharedBy(m) && sameName(sharedBy(m), state.config.name) ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `How much of your plan each guest may use on ${m.name}`, onclick: () => openAllowances(m), text: 'Allowances' }) : null,
-        !isMe && m.sealKey && !m.remote ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `Send ${m.name} a key it can use but never see`, onclick: () => openShareKey(m), text: 'Share a key' }) : null,
-        el('span', { class: 'badge-status', dataset: { status: m.status || 'idle' }, text: m.status || 'idle' }));
+            isMe ? 'You' : doing,
+            helpers.some((h) => h.role === 'supervisor') ? el('span', { class: 'member-helper', text: ' · has a wake helper' }) : null),
+          !isMe && sharedBy(m) && sameName(sharedBy(m), state.config.name) ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `How much of your plan each guest may use on ${m.name}`, onclick: () => openAllowances(m), text: 'Allowances' }) : null,
+          // The owner can remove a member (and their helpers). Shown on hover, so the list stays quiet.
+          !isMe && ownerKey(ch.info.id) ? el('button', { type: 'button', class: 'member-remove', title: `Remove ${m.name} from this channel`, onclick: (e) => removeMember(e.currentTarget, ch, m) }, 'Remove') : null),
+        busy ? el('span', { class: 'badge-status', dataset: { status: m.status }, text: m.status }) : null);
     }));
     $('member-count').textContent = ch ? String(members.length) : '';
     $('member-empty').hidden = members.length > 0;
@@ -1643,8 +1664,8 @@
     const facts = [];
     if (ch) {
       const info = ch.info;
-      const addr = el('code', { class: 'mono', text: info.id });
-      const copy = el('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'aria-label': 'Copy channel address', onclick: (e) => copyText(info.id, e.currentTarget, addr) });
+      const addr = el('code', { class: 'mono', title: 'Shortened so screenshots don\'t share it. Copy gives the full address.', text: maskAddress(info.id) });
+      const copy = el('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'aria-label': 'Copy channel address', onclick: (e) => copyText(info.id, e.currentTarget) });
       copy.append(copyIcon());
       facts.push(['Address', el('span', { class: 'fact-addr' }, addr, copy)]);
       facts.push(['Hub', el('span', { class: 'mono', text: state.hub })]);
@@ -1932,7 +1953,32 @@
   }
 
   /** One timeline entry as DOM; `prev` decides grouping and day separators. */
+  /**
+   * Agent chatter: a message between agents that a person didn't send and that
+   * doesn't mention or reply to you. With the switch on, a run of them shows as
+   * one quiet line you can open.
+   */
+  function isChatter(ch, entry) {
+    if (entry.kind !== 'message' || !entry.message || entry.message.kind === 'notice') return false;
+    const m = entry.message;
+    const from = m.from || {};
+    if (state.me && from.id === state.me.id) return false;
+    const sender = ch.members.get(from.id);
+    if (sender && sender.role === 'person') return false;
+    return !mentionsMe(m);
+  }
+
   function renderEntry(ch, entry, prev) {
+    if (state.ui.hideChatter && isChatter(ch, entry)) {
+      // One line for a run of chatter: only where the run starts.
+      if (prev && isChatter(ch, prev)) return [];
+      const run = ch.timeline.slice(ch.timeline.indexOf(entry));
+      const n = run.findIndex((e) => !isChatter(ch, e));
+      const count = n < 0 ? run.length : n;
+      const names = [...new Set(run.slice(0, count).map((e) => e.message.from && e.message.from.name).filter(Boolean))];
+      return [el('button', { type: 'button', class: 'chatter-run', title: 'Show agent chatter', onclick: () => setChatter(false) },
+        `${count} message${count === 1 ? '' : 's'} between agents`, el('span', { class: 'muted', text: names.length ? ` · ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}` : '' }), el('span', { class: 'chatter-show', text: ' · Show' }))];
+    }
     const out = [];
     if (!prev || new Date(prev.timestamp).toDateString() !== new Date(entry.timestamp).toDateString()) {
       out.push(el('div', { class: 'day-sep', role: 'separator' }, el('span', { text: dayLabel(entry.timestamp) })));
@@ -1991,6 +2037,17 @@
     const address = state.selected;
     if (!address || state.joined.has(address)) return false;
     return state.joining.has(address) || ((state.status === 'connecting' || state.status === 'reconnecting') && savedChannels().some((c) => c.id === address));
+  }
+
+  function setChatter(hide) {
+    state.ui.hideChatter = hide;
+    saveUi();
+    const btn = $('chatter-btn');
+    btn.setAttribute('aria-pressed', String(hide));
+    btn.textContent = hide ? 'Chatter hidden' : 'Hide chatter';
+    const box = $('messages');
+    box._rendered = null; // the filter changed: redraw everything
+    renderMessages();
   }
 
   function renderMessages() {
@@ -2411,6 +2468,20 @@
     showNotice(n ? `Updated ${n} allowance${n === 1 ? '' : 's'} on ${a.agent.name}. Guests see what they have left under each reply.` : 'Nothing changed.');
   }
 
+  async function removeMember(button, ch, m) {
+    const helpers = helpersOf(ch, m);
+    const choice = window.prompt(`Remove ${m.name} from "${label(ch.info)}"?\n\nType "remove" to remove them (they can rejoin with the address), or "ban" to also stop them rejoining.${helpers.length ? `\nTheir helper${helpers.length > 1 ? 's' : ''} (${helpers.map((h) => h.name).join(', ')}) go too.` : ''}`, 'remove');
+    if (!choice) return;
+    const ban = /^ban$/i.test(choice.trim());
+    if (!ban && !/^remove$/i.test(choice.trim())) return;
+    await attempt(button, async () => {
+      for (const who of [m, ...helpers]) {
+        await request('member.kick', { channel: ch.info.id, ownerKey: ownerKey(ch.info.id), agent: who.id, ban, reason: ban ? 'Removed by the owner' : undefined });
+      }
+      showNotice(`Removed ${m.name}${ban ? ' and stopped them rejoining' : ''}.`);
+    });
+  }
+
   /** Who the Share a key dialog is for. */
   let shareKeyTarget = null;
 
@@ -2470,6 +2541,7 @@
   function openSettings() {
     const dialog = $('settings-dialog');
     $('settings-name').value = state.config.name;
+    $('settings-pronouns').value = state.config.pronouns || '';
     $('hub-token').value = state.config.token;
     const kind = hubKind(state.config.url);
     for (const r of document.querySelectorAll('input[name="hub-kind"]')) r.checked = r.value === kind;
@@ -2493,12 +2565,14 @@
     state.config.url = load(STORE_URL) || DEFAULT_URL;
     state.config.token = load(STORE_TOKEN) || '';
     state.config.name = load(STORE_NAME) || '';
+    state.config.pronouns = load(STORE_PRONOUNS) || '';
     const ui = loadJSON(STORE_UI, {});
     state.ui = {
       sidebar: ui.sidebar !== false,
       details: ui.details === true,
       theme: THEMES.includes(ui.theme) ? ui.theme : 'system',
       selected: ui.selected && typeof ui.selected === 'object' ? ui.selected : {},
+      hideChatter: ui.hideChatter === true,
     };
     state.hub = state.config.url;
     try {
@@ -2548,6 +2622,13 @@
         $('hub-url').reportValidity();
         $('hub-url').setCustomValidity('');
         return;
+      }
+      const pronouns = $('settings-pronouns').value.trim().slice(0, 24);
+      if (pronouns !== (state.config.pronouns || '')) {
+        state.config.pronouns = pronouns;
+        save(STORE_PRONOUNS, pronouns);
+        // Takes effect at once: no need to reconnect.
+        if (isLive()) request('status.update', { pronouns }).catch(() => { /* older hub */ });
       }
       const next = { url: url || DEFAULT_URL, token: $('hub-token').value.trim(), name: $('settings-name').value.trim() };
       const unchanged = next.url === state.config.url && next.token === state.config.token && next.name === state.config.name;
@@ -2688,6 +2769,8 @@
       if (midMq.matches) closeOverlays();
       attempt(e.currentTarget, () => leaveChannel(address));
     });
+    $('chatter-btn').addEventListener('click', () => setChatter(!state.ui.hideChatter));
+    setChatter(state.ui.hideChatter);
     $('approval-toggle').addEventListener('click', (e) => {
       const ch = state.selected && state.joined.get(state.selected);
       if (!ch) return;
@@ -2703,12 +2786,12 @@
       if (ch) attempt(e.currentTarget, () => setQuestions(ch.info.id, ch.info.questions === 'off' ? 'on' : 'off'));
     });
     $('copy-link').addEventListener('click', (e) => {
-      const code = $('address-code');
-      if (code.textContent) copyText(`${location.origin}${location.pathname}#${code.textContent}`, e.currentTarget, code);
+      const full = $('address-code').dataset.address;
+      if (full) copyText(`${location.origin}${location.pathname}#${full}`, e.currentTarget);
     });
     $('copy-address').addEventListener('click', (e) => {
-      const code = $('address-code');
-      if (code.textContent) copyText(code.textContent, e.currentTarget, code);
+      const full = $('address-code').dataset.address;
+      if (full) copyText(full, e.currentTarget);
     });
     $('invite-btn').addEventListener('click', () => {
       const address = state.selected;
@@ -2789,16 +2872,88 @@
     input.addEventListener('keyup', (e) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') updateMentions();
     });
+    // "+" menu: Share a key. The key goes in a hidden field inside the message box; whoever
+    // you @mention gets it, sealed to their computer. The message itself carries no key.
+    const plusMenu = $('plus-menu');
+    $('plus-btn').addEventListener('click', () => {
+      plusMenu.hidden = !plusMenu.hidden;
+      $('plus-btn').setAttribute('aria-expanded', String(!plusMenu.hidden));
+    });
+    document.addEventListener('click', (e) => {
+      if (!plusMenu.hidden && !e.target.closest('#plus-menu, #plus-btn')) { plusMenu.hidden = true; $('plus-btn').setAttribute('aria-expanded', 'false'); }
+    });
+    $('plus-share-key').addEventListener('click', () => {
+      plusMenu.hidden = true;
+      $('plus-btn').setAttribute('aria-expanded', 'false');
+      $('key-strip').hidden = false;
+      composer.classList.add('sharing-key');
+      if (!/@\S/.test(input.value)) { input.value = `${input.value.trim() ? `${input.value.trim()} ` : ''}@`; }
+      input.placeholder = '@mention who gets the key, then send';
+      $('key-name').focus();
+      updateSendState();
+    });
+    const closeKeyStrip = () => {
+      $('key-strip').hidden = true;
+      composer.classList.remove('sharing-key');
+      $('key-name').value = '';
+      $('key-value').value = '';
+      input.placeholder = 'Message the channel';
+      updateSendState();
+    };
+    $('key-cancel').addEventListener('click', closeKeyStrip);
+    for (const id of ['key-name', 'key-value']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); composer.requestSubmit(); } });
+
+    /** The members a message @mentions, by name (case-insensitive); twins are an error. */
+    function mentionedMembers(ch, text) {
+      const tags = [...text.matchAll(/@([\w.-]+)/g)].map((m) => m[1].toLowerCase());
+      const out = [];
+      for (const tag of new Set(tags)) {
+        const named = [...ch.members.values()].filter((m) => m.name.toLowerCase() === tag && !helperFor(ch, m));
+        if (named.length > 1) throw new Error(`Two members are called ${named[0].name}, so it's not clear who gets the key. Ask one of them to rename, or share with crosstalk secret seal.`);
+        if (named[0] && !(state.me && named[0].id === state.me.id)) out.push(named[0]);
+      }
+      return out;
+    }
+
+    async function shareKeyFromComposer(address, content) {
+      const ch = state.joined.get(address);
+      const name = $('key-name').value.trim().toUpperCase();
+      const value = $('key-value').value;
+      if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(name)) throw new Error('Name the key with letters, digits and _, like GITHUB_TOKEN.');
+      if (!value) throw new Error('Paste the key first.');
+      const to = mentionedMembers(ch, content);
+      if (!to.length) throw new Error('@mention the agent who should get the key.');
+      const cant = to.filter((m) => !m.sealKey || m.remote);
+      if (cant.length) throw new Error(`${cant.map((m) => m.name).join(', ')} can't receive keys (needs CrossTalk 2.20+ running on its own computer).`);
+      for (const m of to) {
+        const sealed = await sealForAgent(m.sealKey, name, value);
+        await request('dm.send', { to: m.id, content: `xsecret ${name} ${sealed}`, replyExpected: false });
+      }
+      // The channel sees that a key was shared, never the key.
+      await sendMessage(address, `${content} 🔑 shared key ${name} (sealed; only ${to.map((m) => m.name).join(', ')} can use it)`);
+    }
+
     composer.addEventListener('submit', async (e) => {
       e.preventDefault();
       const content = input.value.trim();
       const address = state.selected;
+      const sharing = !$('key-strip').hidden;
       if (!content || !address || composerBusy) return;
       composerBusy = true;
       updateSendState();
       try {
         hideNotice();
-        await sendMessage(address, content);
+        if (sharing) {
+          try {
+            await shareKeyFromComposer(address, content);
+          } catch (err) {
+            $('key-value').value = '';
+            throw err;
+          }
+          closeKeyStrip();
+        } else {
+          await sendMessage(address, content);
+        }
         if (state.selected === address) {
           input.value = '';
           autosize();

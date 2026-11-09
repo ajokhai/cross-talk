@@ -91,6 +91,8 @@ export interface ConnectOptions {
   invite?: string;
   /** This machine's public sealing key (xs_…, see sealIdentity in secrets.ts), so others can share keys with it. */
   sealKey?: string;
+  /** How to refer to this agent, e.g. "she/her" (2.21+). Defaults to $CROSSTALK_PRONOUNS. */
+  pronouns?: string;
 }
 
 export class CrossTalkError extends Error {
@@ -484,7 +486,7 @@ export class CrossTalk extends EventEmitter {
   }
   private ws?: WebSocket;
   private readonly pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
-  private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask' | 'sealKey'>> & Pick<ConnectOptions, 'branch' | 'currentTask' | 'sealKey'>;
+  private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask' | 'sealKey' | 'pronouns'>> & Pick<ConnectOptions, 'branch' | 'currentTask' | 'sealKey' | 'pronouns'>;
   /**
    * connecting ──welcome──▶ open ──socket drops──▶ reconnecting ──welcome──▶ open
    *      │                    │                        │
@@ -522,7 +524,8 @@ export class CrossTalk extends EventEmitter {
       name: options.name,
       branch: options.branch ?? git(['rev-parse', '--abbrev-ref', 'HEAD']),
       currentTask: options.currentTask,
-      sealKey: options.sealKey
+      sealKey: options.sealKey,
+      pronouns: options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || undefined)
     };
   }
 
@@ -590,7 +593,8 @@ export class CrossTalk extends EventEmitter {
             environment: this.options.environment,
             branch: this.options.branch,
             currentTask: this.options.currentTask,
-            sealKey: this.options.sealKey
+            sealKey: this.options.sealKey,
+            pronouns: this.options.pronouns
           },
           resume: this.resumeToken
         }));
@@ -928,8 +932,9 @@ export class CrossTalk extends EventEmitter {
     return this.request('dm.send', { to, content, ...options });
   }
 
-  async setStatus(status: AgentStatus, currentTask?: string): Promise<AgentInfo> {
-    this.agent = await this.request('status.update', { status, currentTask });
+  async setStatus(status: AgentStatus, currentTask?: string, options: { pronouns?: string } = {}): Promise<AgentInfo> {
+    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}) });
+    if (options.pronouns !== undefined) this.options.pronouns = options.pronouns || undefined;
     return this.agent;
   }
 

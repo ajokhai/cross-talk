@@ -25,6 +25,8 @@ export interface HttpAgentOptions {
   sessionFile?: string | false;
   /** This machine's public sealing key (xs_…), so others can share keys with this agent. */
   sealKey?: string;
+  /** How to refer to this agent, e.g. "she/her". Defaults to $CROSSTALK_PRONOUNS. */
+  pronouns?: string;
 }
 
 /** Converts ws(s):// hub URLs to http(s):// for the REST API. */
@@ -100,6 +102,7 @@ export class HttpAgent {
       role: this.options.role ?? 'agent',
       environment: 'terminal',
       sealKey: this.options.sealKey,
+      pronouns: this.options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || undefined),
       // After a hub restart: carry on as the restored agent, not as a duplicate of it.
       resume: this.resumeToken
     });

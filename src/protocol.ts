@@ -60,6 +60,8 @@ export interface AgentInfo {
    * web app's "Share a key"; only that machine can open it.
    */
   sealKey?: string;
+  /** How to refer to this member, e.g. "she/her", "they/them" (2.21+). Up to 24 characters. */
+  pronouns?: string;
 }
 
 /** A reference to the sender embedded in messages; kept small on purpose. */
@@ -329,7 +331,8 @@ export const STAY_AWAKE_GUIDANCE = [
   '- Background commands (Claude Code and similar): `crosstalk new` / `crosstalk join <channel>` start your listener: run them as a background command and end your turn. They exit when someone @mentions or DMs you, which wakes you: handle it, then run `crosstalk join <channel>` again. If nobody else joins within 5 minutes the listener turns itself off and says so: tell your user, and restart it when they say their agents are ready (`--listen-timeout 0` keeps it on). Over plain HTTP, run the `listen.command` the hub gave you the same way. If a listener stops for any other reason (a time limit, `not_registered` after a hub restart), start it again the same way.',
   '- MCP tools only: end every turn with crosstalk_wait.',
   '- Nothing can run between turns: register a wake hook (wake.set, `crosstalk wake-hook`) so the hub POSTs to your URL when you are @mentioned or DMed.',
-  'If someone you are working with goes quiet for 30+ minutes, @mention them.'
+  'If someone you are working with goes quiet for 30+ minutes, @mention them.',
+  `When your user is in the channel, answer them in the channel, not in your own app: they read CrossTalk and only open your app when they have to, so a reply written there is missed and wastes tokens. Put results, previews and links in the channel, and say plainly if they need to look at your app.`
 ].join('\n');
 
 /**
@@ -413,6 +416,8 @@ export interface HelloFrame {
     currentTask?: string;
     /** See AgentInfo.sealKey; dropped unless it is xs_ + 43 base64url characters. */
     sealKey?: string;
+    /** See AgentInfo.pronouns. */
+    pronouns?: string;
   };
   /** Resume token from an earlier welcome: carry on as that agent if the hub still holds it. */
   resume?: string;
@@ -467,7 +472,7 @@ export type RequestFrame =
   | { type: 'slot.acquire'; id: string; channel: string; name: string; capacity: number; ttlSeconds?: number }
   /** Gives up your place in a slot, or your place in its queue. */
   | { type: 'slot.release'; id: string; channel: string; name: string }
-  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string }
+  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string }
   /**
    * A WebSocket agent (an MCP server) reports that a local listener is
    * attached to it (2.21+): it counts as listening, exactly like an open

@@ -810,3 +810,37 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 
 /* A helper (wake supervisor, read-only viewer) shown on its agent's row */
 .member-helper { font-size: 12px; color: var(--muted); }
+
+/* Member rows: name, pronouns and one line of what they're doing */
+.member-pronouns { font-size: 12px; color: var(--muted); font-weight: 400; }
+.member-doing { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); min-width: 0; }
+.member-doing .dot { flex: none; }
+.member .member-share { margin-top: 6px; justify-self: start; }
+
+/* Agent chatter, folded */
+.chatter-run { display: block; margin: 6px auto; padding: 4px 12px; border: 1px dashed var(--border-strong); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.chatter-run:hover { color: var(--text); border-color: var(--text-2); }
+.chatter-show { color: var(--text-2); font-weight: 500; }
+#chatter-btn[aria-pressed="true"] { background: var(--bg-alt); border-color: var(--border-strong); }
+
+/* "+" menu and the key strip in the message box */
+.composer-box { flex-wrap: wrap; }
+.plus-wrap { position: relative; align-self: flex-end; }
+.plus-btn { width: 36px; height: 36px; margin: 7px 0 7px 7px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--text-2); cursor: pointer; }
+.plus-btn:hover, .plus-btn[aria-expanded="true"] { background: var(--bg-alt); color: var(--text); }
+.plus-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.plus-menu { position: absolute; left: 4px; bottom: calc(100% + 6px); z-index: 25; min-width: 180px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.plus-menu button { display: flex; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.plus-menu button:hover, .plus-menu button:focus-visible { background: var(--bg-alt); }
+.key-strip { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px 0; }
+.key-strip[hidden] { display: none; }
+.key-name, .key-value { min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-alt); color: var(--text); font-size: 13px; }
+.key-name { flex: 0 1 170px; text-transform: uppercase; }
+.key-value { flex: 1 1 200px; }
+.key-note { flex: 1 0 100%; margin: 0; font-size: 12px; color: var(--muted); }
+
+/* Remove: owner only, on hover or keyboard focus */
+.member { position: relative; }
+.member-remove { position: absolute; right: 0; bottom: 8px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--red); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.member:hover .member-remove, .member-remove:focus-visible { opacity: 1; }
+@media (hover: none) { .member-remove { opacity: 1; position: static; margin-top: 6px; } }
