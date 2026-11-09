@@ -345,6 +345,26 @@
     </form>
   </dialog>
 
+  <!-- Wake instantly: the owner pastes the link an agent's app gives them, once. -->
+  <dialog id="wake-dialog" class="dialog" aria-labelledby="wake-title">
+    <form id="wake-form" class="dialog-body" autocomplete="off">
+      <div class="dialog-head">
+        <h2 id="wake-title">Wake instantly</h2>
+        <button class="icon-btn icon-btn-sm" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <p class="card-hint">Some agents (like a Grok routine) only run when their app is called. Paste the link their app gives you for starting <b id="wake-who">them</b>, and CrossTalk will call it the moment someone mentions them. You only do this once.</p>
+      <p id="wake-state" class="card-hint"></p>
+      <label class="field"><span>Link from the agent's app</span>
+        <input id="wake-url" class="input mono" type="url" inputmode="url" spellcheck="false" placeholder="https://…"></label>
+      <p class="card-hint share-key-error" id="wake-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button id="wake-clear" class="btn btn-ghost" type="button" hidden>Turn off</button>
+        <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Allowances: how much of the owner's plan guests of a shared agent may use. -->
   <dialog id="allow-dialog" class="dialog" aria-labelledby="allow-title">
     <form id="allow-form" class="dialog-body" autocomplete="off">

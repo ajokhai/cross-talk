@@ -1221,6 +1221,12 @@
     refreshChannels();
   }
 
+  /** Members a message @mentions, by name (case-insensitive). */
+  function mentionedMembersOf(ch, text) {
+    const tags = new Set([...String(text).matchAll(/@([\w.-]+)/g)].map((m) => m[1].toLowerCase()));
+    return [...ch.members.values()].filter((m) => tags.has(m.name.toLowerCase()) && !(state.me && m.id === state.me.id));
+  }
+
   async function sendMessage(address, content) {
     // The hub does not echo our own message back as an event; use the result.
     const message = await request('message.send', { channel: address, content, split: true });
@@ -1228,9 +1234,28 @@
     // Long text goes out as numbered parts; only the first comes back here.
     if (message && message.parts > 1) pollChannel(address);
     const ch = state.joined.get(address);
-    if (ch && message && Array.isArray(message.idleMentions) && message.idleMentions.length) {
-      const names = message.idleMentions.map((a) => a.agent.name).join(', ');
-      addActivity(ch, 'notice', `${names} ${message.idleMentions.length > 1 ? 'haven\'t' : 'hasn\'t'} read this channel in a while and may not see your mention soon`);
+    // Agents you mentioned who can't hear you right now: not listening, no wake helper, or flagged idle by the hub.
+    const unreachable = ch && message ? mentionedMembersOf(ch, content).filter((m) => {
+      if (m.role === 'person' || helperFor(ch, m)) return false;
+      const att = ch.attention.get(m.id) || {};
+      const helped = helpersOf(ch, m).some((h) => h.role === 'supervisor');
+      return !helped && (att.listening !== true || att.connected === false);
+    }) : [];
+    for (const idle of (message && message.idleMentions) || []) if (!unreachable.some((m) => m.id === idle.agent.id)) unreachable.push(ch.members.get(idle.agent.id) || idle.agent);
+    if (ch && unreachable.length) {
+      // If they have a wake link the hub has already called it; otherwise say so plainly,
+      // and (owner) offer to set it up so next time a message is enough.
+      for (const who of unreachable) {
+        const member = ch.members.get(who.id) || who;
+        let hooked = false;
+        if (ownerKey(address) && member.role !== 'person') {
+          try { hooked = !!(await request('wake.get', { channel: address, agent: who.id, ownerKey: ownerKey(address) })).hook; } catch { /* older hub */ }
+        }
+        if (hooked) continue;
+        const entry = { kind: 'activity', icon: 'notice', keep: true, text: `${personName(ch, who)} will see this when they next check in`, subject: '', detail: '', timestamp: Date.now() };
+        if (ownerKey(address) && member.role !== 'person' && !member.remote) entry.action = { label: 'Wake them instantly next time', run: () => openWake(ch, member) };
+        pushTimeline(ch, entry);
+      }
       renderIfSelected(address, true);
     }
   }
@@ -1668,7 +1693,9 @@
             : null,
           !isMe && sharedBy(m) && sameName(sharedBy(m), state.config.name) ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `How much of your plan each guest may use on ${m.name}`, onclick: () => openAllowances(m), text: 'Allowances' }) : null,
           // The owner can remove a member (and their helpers). Shown on hover, so the list stays quiet.
-          !isMe && ownerKey(ch.info.id) ? el('button', { type: 'button', class: 'member-remove', title: `Remove ${m.name} from this channel`, onclick: (e) => removeMember(e.currentTarget, ch, m) }, 'Remove') : null),
+          !isMe && ownerKey(ch.info.id) ? el('span', { class: 'member-actions' },
+            m.role !== 'person' && !m.remote ? el('button', { type: 'button', class: 'member-remove member-wake', title: `Wake ${displayName(m.name)} the moment someone mentions them`, onclick: () => openWake(ch, m) }, 'Wake instantly') : null,
+            el('button', { type: 'button', class: 'member-remove', title: `Remove ${displayName(m.name)} from this channel`, onclick: (e) => removeMember(e.currentTarget, ch, m) }, 'Remove')) : null),
         busy ? el('span', { class: 'badge-status', dataset: { status: m.status }, text: m.status }) : null);
     }));
     $('member-count').textContent = ch ? String(members.length) : '';
@@ -2067,7 +2094,7 @@
    */
   function isChatter(ch, entry) {
     // Routine updates (joins, leaves, locks, claims, settings) count too; questions for you don't.
-    if (entry.kind === 'activity') return !['question', 'answer'].includes(entry.icon);
+    if (entry.kind === 'activity') return !entry.keep && !['question', 'answer'].includes(entry.icon);
     if (entry.kind !== 'message' || !entry.message) return false;
     // Hub notices ("X has not been listening…") are housekeeping, unless they're about you.
     if (entry.message.kind === 'notice') return !mentionsMe(entry.message);
@@ -2131,7 +2158,8 @@
           isNotice ? plainNotice(entry.message.content) : entry.text,
           entry.subject ? ' ' : null,
           entry.subject ? el('code', { class: 'chip-subject', text: entry.subject }) : null,
-          entry.detail ? el('span', { class: 'chip-detail', text: ` · ${entry.detail}` }) : null),
+          entry.detail ? el('span', { class: 'chip-detail', text: ` · ${entry.detail}` }) : null,
+          entry.action ? el('span', { class: 'chip-detail' }, ' · ', el('button', { type: 'button', class: 'chip-action', onclick: entry.action.run }, entry.action.label)) : null),
         time);
       out.push(el('div', { class: 'chip-row' }, chip));
       return out;
@@ -2618,6 +2646,37 @@
     });
   }
 
+  // ---- Wake instantly: for agents whose app only runs them when a link is called (e.g. a Grok routine).
+  let wakeFor = null;
+  async function openWake(ch, m) {
+    wakeFor = { ch, m };
+    $('wake-title').textContent = `Wake ${displayName(m.name)} instantly`;
+    $('wake-who').textContent = displayName(m.name);
+    $('wake-url').value = '';
+    $('wake-error').hidden = true;
+    $('wake-clear').hidden = true;
+    openDialog($('wake-dialog'));
+    try {
+      const r = await request('wake.get', { channel: ch.info.id, agent: m.id, ownerKey: ownerKey(ch.info.id) });
+      $('wake-state').textContent = r && r.hook ? 'On: they’re woken the moment someone mentions them.' : 'Off: they only see messages when they next check in.';
+      $('wake-clear').hidden = !(r && r.hook);
+    } catch { $('wake-state').textContent = ''; }
+    $('wake-url').focus();
+  }
+  async function saveWake(clear) {
+    const { ch, m } = wakeFor || {};
+    if (!ch) return;
+    const base = { channel: ch.info.id, agent: m.id, ownerKey: ownerKey(ch.info.id) };
+    if (clear) await request('wake.clear', base);
+    else {
+      const url = $('wake-url').value.trim();
+      if (!/^https:\/\//i.test(url)) throw new Error('Paste the full link, starting with https://');
+      await request('wake.set', { ...base, url });
+    }
+    $('wake-dialog').close();
+    showNotice(clear ? `${displayName(m.name)} won't be woken instantly any more.` : `Done: ${displayName(m.name)} is woken the moment someone mentions them or messages them privately.`);
+  }
+
   /** Who the Share a key dialog is for. */
   let shareKeyTarget = null;
 
@@ -2802,6 +2861,13 @@
     });
     $('public-more').addEventListener('click', () => loadDirectory(false));
 
+    $('wake-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await saveWake(false); } catch (err) { $('wake-error').textContent = err.message || String(err); $('wake-error').hidden = false; }
+    });
+    $('wake-clear').addEventListener('click', async () => {
+      try { await saveWake(true); } catch (err) { $('wake-error').textContent = err.message || String(err); $('wake-error').hidden = false; }
+    });
     $('allow-plan').addEventListener('input', () => {
       const v = Number($('allow-plan').value);
       if (!allowance || !(v > 0)) return;

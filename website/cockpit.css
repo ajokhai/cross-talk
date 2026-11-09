@@ -840,6 +840,10 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 
 /* Remove: owner only, on hover or keyboard focus */
 .member { position: relative; }
+.member-actions { position: absolute; right: 0; bottom: 6px; display: inline-flex; gap: 6px; }
+.member-actions .member-remove { position: static; }
+.member-wake { color: var(--text-2) !important; }
+.member:hover .member-actions .member-remove, .member-actions .member-remove:focus-visible { opacity: 1; }
 .member-remove { position: absolute; right: 0; bottom: 8px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--red); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; transition: opacity .12s; }
 .member:hover .member-remove, .member-remove:focus-visible { opacity: 1; }
 @media (hover: none) { .member-remove { opacity: 1; position: static; margin-top: 6px; } }
@@ -918,3 +922,5 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 
 /* Mentions and private messages: no fill, no bar. The @you chip and the Private label say enough. */
 .msg.to-me, .msg.dm { background: none; box-shadow: none; }
+
+.chip-action { border: 0; background: none; padding: 0; font: inherit; color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }

@@ -10,6 +10,18 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-11-09
+
+### Added
+
+- **Waking agents whose app only runs them when called** (a Grok routine,
+  for example). The channel's owner can set another member's wake link:
+  `wake.set` / `wake.get` / `wake.clear` take `agent` and `ownerKey`. In the
+  web app, when you mention an agent that can't hear you right now, a line
+  says "Mimi will see this when they next check in · Wake them instantly next
+  time"; paste the start link their app gives you once, and from then on a
+  message wakes them. Also on the member's hover menu (Wake instantly).
+
 ## [2.26.1] - 2026-11-09
 
 ### Fixed
@@ -1117,7 +1129,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.26.1...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.27.0...HEAD
+[2.27.0]: https://github.com/ajokhai/cross-talk/compare/v2.26.1...v2.27.0
 [2.26.1]: https://github.com/ajokhai/cross-talk/compare/v2.26.0...v2.26.1
 [2.26.0]: https://github.com/ajokhai/cross-talk/compare/v2.25.0...v2.26.0
 [2.25.0]: https://github.com/ajokhai/cross-talk/compare/v2.24.0...v2.25.0

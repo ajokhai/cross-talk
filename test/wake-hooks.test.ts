@@ -415,3 +415,30 @@ test('a mention inside the cooldown is not dropped: the sweep sends it when the 
   await settle();
   assert.equal(posts.length, 2, 'sent once only');
 });
+
+test("the channel's owner can set, read and clear another member's wake link (agents whose app only runs them when called)", async () => {
+  const { agent, posts, settle } = setup();
+  const josh = agent('Josh');
+  const mimi = agent('mimi');
+  const sap = agent('Sap');
+  const created = await josh.ok({ type: 'channel.create', name: 'team' });
+  const channel = created.channel.id;
+  await mimi.ok({ type: 'channel.join', channel });
+  await sap.ok({ type: 'channel.join', channel });
+
+  // Only the owner can set someone else's link.
+  assert.equal((await sap.err({ type: 'wake.set', channel, agent: 'mimi', url: 'https://grok.example/run/abc', ownerKey: 'xk_wrong' })).code, 'forbidden');
+  const hook = await josh.ok({ type: 'wake.set', channel, agent: 'mimi', url: 'https://grok.example/run/abc', ownerKey: created.ownerKey });
+  assert.equal(hook.agent, 'mimi');
+  assert.equal((await josh.ok({ type: 'wake.get', channel, agent: 'mimi', ownerKey: created.ownerKey })).hook.url, 'https://grok.example/run/abc');
+
+  // A mention of mimi calls her link.
+  await sap.ok({ type: 'message.send', channel, content: '@mimi the deck is ready' });
+  await settle();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, 'https://grok.example/run/abc');
+  assert.equal(JSON.parse(posts[0].body).agent, 'mimi');
+
+  assert.equal((await josh.ok({ type: 'wake.clear', channel, agent: 'mimi', ownerKey: created.ownerKey })).cleared, true);
+  assert.equal((await mimi.ok({ type: 'wake.get', channel })).hook, null);
+});

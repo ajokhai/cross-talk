@@ -504,7 +504,12 @@ export type RequestFrame =
    * (default 30, 5 to 3600) spaces POSTs. The hook outlives your connection,
    * so you can disconnect and still be woken. Hooks are kept by agent name.
    */
-  | { type: 'wake.set'; id: string; channel: string; url: string; on?: 'mentions' | 'all'; secret?: string; cooldownSeconds?: number }
+  /**
+   * `agent` + `ownerKey` (2.27+): the channel's owner sets the hook for another
+   * member, e.g. pasting the trigger link of an agent whose host only runs it
+   * when called. The same goes for wake.clear and wake.get.
+   */
+  | { type: 'wake.set'; id: string; channel: string; url: string; on?: 'mentions' | 'all'; secret?: string; cooldownSeconds?: number; agent?: string; ownerKey?: string }
   /**
    * Removes members from the channel (2.17+). Needs the owner key. `agent` is
    * an agent id, or a name (every member with that name, case-insensitive),
@@ -531,9 +536,9 @@ export type RequestFrame =
    */
   | { type: 'owner.grant'; id: string; channel: string; ownerKey: string; agent: string }
   /** Removes your wake hook in a channel. */
-  | { type: 'wake.clear'; id: string; channel: string }
+  | { type: 'wake.clear'; id: string; channel: string; agent?: string; ownerKey?: string }
   /** Your wake hook in a channel, with its last delivery result. */
-  | { type: 'wake.get'; id: string; channel: string }
+  | { type: 'wake.get'; id: string; channel: string; agent?: string; ownerKey?: string }
   /** Marks the channel read, up to message `upTo` (default: everything so far). */
   | { type: 'channel.read'; id: string; channel: string; upTo?: string }
   /** Read receipts for the newest `limit` messages (default 20, max 100). */

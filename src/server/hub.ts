@@ -738,15 +738,16 @@ export class MeshHub {
         this.requireOwner(channel, f.ownerKey);
         return { channel: channel.id, bans: [...channel.bans.values()].map(({ ips, ...b }) => ({ ...b, ids: [...b.ids], ipCount: ips.length })) };
       }
-      case 'wake.set': return this.setWake(conn, f.channel, f.url, f.on, f.secret, f.cooldownSeconds);
+      case 'wake.set': return this.setWake(conn, f.channel, f.url, f.on, f.secret, f.cooldownSeconds, f.agent, f.ownerKey);
       case 'wake.clear': {
         const channel = this.memberChannel(conn, f.channel);
-        const cleared = channel.wakes.delete(conn.agent!.name.toLowerCase());
+        const cleared = channel.wakes.delete(this.wakeTarget(conn, channel, f.agent, f.ownerKey).toLowerCase());
         if (cleared) this.changes++;
         return { channel: channel.id, cleared };
       }
       case 'wake.get': {
-        const hook = this.memberChannel(conn, f.channel).wakes.get(conn.agent!.name.toLowerCase());
+        const channel = this.memberChannel(conn, f.channel);
+        const hook = channel.wakes.get(this.wakeTarget(conn, channel, f.agent, f.ownerKey).toLowerCase());
         return { hook: hook ? this.wakeView(hook) : null };
       }
       default: return fail('bad_request', `Unknown request type "${(f as { type: string }).type}"`);
@@ -1483,8 +1484,20 @@ export class MeshHub {
   // Wake hooks
   // -------------------------------------------------------------------------
 
-  private setWake(conn: Connection, address: unknown, url: unknown, on: unknown, secret: unknown, cooldown: unknown): WakeHook {
+  /** Whose wake hook a request is about: your own, or (owner key) another member's, by name or id. */
+  private wakeTarget(conn: Connection, channel: Channel, agent: unknown, ownerKey: unknown): string {
+    if (agent === undefined || agent === null || agent === '') return conn.agent!.name;
+    this.requireOwner(channel, ownerKey);
+    const key = cleanText(agent, 128).toLowerCase();
+    const member = [...channel.members].map(id => this.agents.get(id)).find(c => c?.agent && (c.agent.id === key || c.agent.name.toLowerCase() === key));
+    if (!member?.agent) return fail('not_found', `${agent} isn't in this channel`);
+    if (member.invite) fail('forbidden', 'Agents that joined with a remote invite cannot have wake hooks');
+    return member.agent.name;
+  }
+
+  private setWake(conn: Connection, address: unknown, url: unknown, on: unknown, secret: unknown, cooldown: unknown, agent?: unknown, ownerKey?: unknown): WakeHook {
     const channel = this.memberChannel(conn, address);
+    const target = this.wakeTarget(conn, channel, agent, ownerKey);
     if (this.opts.webhooks === 'off') fail('forbidden', 'Wake hooks are switched off on this hub');
     if (conn.invite) fail('forbidden', 'Agents that joined with a remote invite cannot register wake hooks');
     if (typeof url !== 'string' || url.length > 2048) fail('bad_request', 'url must be a string of at most 2048 characters');
@@ -1511,7 +1524,7 @@ export class MeshHub {
     }
     const hook: WakeState = {
       channel: channel.id,
-      agent: conn.agent!.name,
+      agent: target,
       url: parsed.toString(),
       on: (on as 'mentions' | 'all' | undefined) ?? 'mentions',
       cooldownSeconds,
@@ -1520,7 +1533,7 @@ export class MeshHub {
       secret: secret as string | undefined,
       pending: 0
     };
-    channel.wakes.set(conn.agent!.name.toLowerCase(), hook);
+    channel.wakes.set(target.toLowerCase(), hook);
     this.changes++;
     return this.wakeView(hook);
   }
