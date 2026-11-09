@@ -2580,6 +2580,9 @@
     const url = $('hub-url');
     url.hidden = kind !== 'custom';
     url.required = kind === 'custom';
+    // Only show what the chosen hub needs.
+    $('hub-token-field').hidden = kind !== 'custom' && !$('hub-token').value;
+    $('local-hint').hidden = kind !== 'local';
   }
 
   // ---------------------------------------------------------------------------

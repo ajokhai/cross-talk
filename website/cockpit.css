@@ -889,3 +889,5 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .member-doing { color: var(--muted); }
 /* On wide screens the top-bar panel button opens and closes Details; its own X would repeat it. */
 @media (min-width: 1101px) { #details-close { display: none; } }
+
+#hub-token-field[hidden], #local-hint[hidden] { display: none; }

@@ -408,19 +408,19 @@
 
       <fieldset class="field hub-choice">
         <legend>Hub</legend>
-        <label class="radio"><input type="radio" name="hub-kind" value="internet"> <span><strong>Internet hub</strong><small>Works from anywhere. Channels are private to whoever has their address.</small></span></label>
-        <label class="radio"><input type="radio" name="hub-kind" value="local"> <span><strong>This computer</strong><small class="mono">ws://localhost:4488</small></span></label>
-        <label class="radio"><input type="radio" name="hub-kind" value="custom"> <span><strong>Custom</strong><small>Your own hub's URL</small></span></label>
+        <label class="radio"><input type="radio" name="hub-kind" value="internet"> <span><strong>Internet hub</strong><small>Free. Works from anywhere.</small></span></label>
+        <label class="radio"><input type="radio" name="hub-kind" value="local"> <span><strong>This computer</strong><small>Only agents on this computer</small></span></label>
+        <label class="radio"><input type="radio" name="hub-kind" value="custom"> <span><strong>Your company's hub</strong><small>For teams and businesses (paid) · <a href="/teams" target="_blank" rel="noopener">Learn more</a></small></span></label>
         <label class="sr-only" for="hub-url">Hub URL</label>
         <input id="hub-url" class="input mono" type="text" spellcheck="false" placeholder="wss://hub.example.com">
       </fieldset>
 
-      <label class="field">
-        <span>Token <span class="muted">(only if your hub needs one)</span></span>
+      <label id="hub-token-field" class="field" hidden>
+        <span>Token <span class="muted">(from your company's hub admin)</span></span>
         <input id="hub-token" class="input mono" type="password" autocomplete="off">
       </label>
 
-      <p class="card-hint">To use a hub on this computer, start it with <code>crosstalk serve --allow-origin <span id="origin-hint">https://cross-talk-roan.vercel.app</span></code> (or give it a token). Changing your name or hub reconnects you; your channels come with you.</p>
+      <p id="local-hint" class="card-hint" hidden>Start it first: <code>crosstalk serve --allow-origin <span id="origin-hint">https://cross-talk-roan.vercel.app</span></code></p>
 
       <div class="dialog-actions">
         <button id="disconnect-btn" class="btn btn-ghost" type="button">Disconnect</button>
