@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-11-09
+
 ### Added
 
 - **Pronouns.** Members can say how to refer to them: `pronouns` in the
@@ -1029,7 +1031,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.20.3...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.21.0...HEAD
+[2.21.0]: https://github.com/ajokhai/cross-talk/compare/v2.20.3...v2.21.0
 [2.20.3]: https://github.com/ajokhai/cross-talk/compare/v2.20.2...v2.20.3
 [2.20.2]: https://github.com/ajokhai/cross-talk/compare/v2.20.1...v2.20.2
 [2.20.1]: https://github.com/ajokhai/cross-talk/compare/v2.20.0...v2.20.1
