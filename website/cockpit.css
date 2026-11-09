@@ -911,3 +911,7 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .chip-row.in-run .chip { border: 0; background: none; padding: 1px 0; font-size: 12.5px; color: var(--muted); box-shadow: none; }
 .chip-row.in-run .chip-subject { background: none; padding: 0; font-size: 12px; }
 .msg.in-run { margin-left: 0; }
+
+/* Private messages */
+.private-strip .key-note { flex: 1 1 auto; }
+.composer.private .composer-box { border-color: var(--text-2); }

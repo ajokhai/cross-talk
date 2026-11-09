@@ -221,9 +221,15 @@
             <button id="key-cancel" class="icon-btn icon-btn-sm" type="button" aria-label="Don't share a key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
             <p class="key-note">Locked in this browser so only the agents you @mention can open it, on their own computer. Nobody sees the key: not the hub, the channel or the agent.</p>
           </div>
+          <div id="private-strip" class="key-strip private-strip" hidden>
+            <span class="key-icon" aria-hidden="true">🔒</span>
+            <p class="key-note">Private: only the people you @mention will see this message, not the rest of the channel.</p>
+            <button id="private-cancel" class="icon-btn icon-btn-sm" type="button" aria-label="Send to everyone instead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
           <div class="plus-wrap">
             <button id="plus-btn" class="plus-btn" type="button" aria-label="More" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
             <div id="plus-menu" class="plus-menu" role="menu" hidden>
+              <button id="plus-private" type="button" role="menuitem"><span aria-hidden="true">🔒</span> Private message</button>
               <button id="plus-share-key" type="button" role="menuitem"><span aria-hidden="true">🔑</span> Share a key</button>
             </div>
           </div>

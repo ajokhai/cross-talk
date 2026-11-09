@@ -889,7 +889,9 @@
           try { onUsage(m.from && m.from.id, JSON.parse(m.content)); } catch { /* not for us */ }
           return;
         }
-        const address = state.selected || state.joined.keys().next().value;
+        // Shown in the channel it's about (sent with metadata.channel), else where you're looking.
+        const about = m && m.metadata && typeof m.metadata.channel === 'string' && state.joined.has(m.metadata.channel) ? m.metadata.channel : null;
+        const address = about || state.selected || state.joined.keys().next().value;
         const ch = m && address && state.joined.get(address);
         if (!ch) return;
         pushTimeline(ch, { kind: 'dm', message: m, timestamp: m.timestamp || Date.now() });
@@ -2158,7 +2160,7 @@
         nameEl,
         mine ? el('span', { class: 'pill', text: 'you' }) : null,
         from.remote ? el('span', { class: 'pill', title: 'Joined from outside the hub\'s machine', text: 'remote' }) : null,
-        isDm ? el('span', { class: 'pill pill-dm', text: 'Direct message to you' }) : null,
+        isDm ? el('span', { class: 'pill pill-dm', title: 'Nobody else in the channel sees this', text: mine ? `Private · only ${m.to ? personName(ch, m.to) : 'they'} ${m.to ? 'sees' : 'see'} this` : 'Private · only you see this' }) : null,
         time),
       rich(m.content, { names: mentionNames(ch, m) }),
       raw ? el('code', { class: 'msg-shorthand', title: 'XDialect shorthand', text: raw }) : null));
@@ -3024,7 +3026,25 @@
     document.addEventListener('click', (e) => {
       if (!plusMenu.hidden && !e.target.closest('#plus-menu, #plus-btn')) { plusMenu.hidden = true; $('plus-btn').setAttribute('aria-expanded', 'false'); }
     });
+    $('plus-private').addEventListener('click', () => {
+      plusMenu.hidden = true;
+      $('plus-btn').setAttribute('aria-expanded', 'false');
+      closeKeyStrip();
+      $('private-strip').hidden = false;
+      composer.classList.add('private');
+      if (!/@\S/.test(input.value)) input.value = `@${input.value.trim() ? ` ${input.value.trim()}` : ''}`;
+      input.placeholder = '@mention who should see it';
+      input.focus();
+      updateSendState();
+    });
+    const closePrivate = () => {
+      $('private-strip').hidden = true;
+      composer.classList.remove('private');
+      input.placeholder = 'Message the channel';
+    };
+    $('private-cancel').addEventListener('click', closePrivate);
     $('plus-share-key').addEventListener('click', () => {
+      closePrivate();
       plusMenu.hidden = true;
       $('plus-btn').setAttribute('aria-expanded', 'false');
       $('key-strip').hidden = false;
@@ -3080,12 +3100,26 @@
       const content = input.value.trim();
       const address = state.selected;
       const sharing = !$('key-strip').hidden;
+      const privately = !$('private-strip').hidden;
       if (!content || !address || composerBusy) return;
       composerBusy = true;
       updateSendState();
       try {
         hideNotice();
-        if (sharing) {
+        if (privately) {
+          const ch = state.joined.get(address);
+          const to = mentionedMembers(ch, content);
+          if (!to.length) throw new Error('@mention who should see it.');
+          for (const m of to) {
+            const sent = await request('dm.send', { to: m.id, content, replyExpected: true, metadata: { channel: address } });
+            // The hub doesn't echo your own messages: show it here, marked private.
+            const msg = sent && sent.id ? sent : { id: `local-${Date.now()}`, from: state.me, content, timestamp: Date.now() };
+            if (!msg.to) msg.to = { id: m.id, name: m.name };
+            pushTimeline(ch, { kind: 'dm', message: msg, timestamp: msg.timestamp || Date.now() });
+          }
+          renderIfSelected(address, true);
+          closePrivate();
+        } else if (sharing) {
           try {
             await shareKeyFromComposer(address, content);
           } catch (err) {

@@ -772,12 +772,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'crosstalk_dm',
-    description: 'Send a private message to one agent (by id or name) who shares a channel with you. Set replyExpected=false for acknowledgements so you do not start an ack loop.',
+    description: 'Send a private message: only the recipient sees it, not the rest of the channel. Use it to tell your user something only they should see (anything personal, a concern about another agent, something sensitive), or for a one-to-one with an agent. Your user sees it in the channel it is about, marked private. Set replyExpected=false for acknowledgements so you do not start an ack loop.',
     inputSchema: {
       type: 'object',
       properties: {
-        to: { type: 'string', description: 'Agent id (ag_...) or name' },
+        to: { type: 'string', description: 'Name or id of a member (your user, or an agent) who shares a channel with you' },
         message: { type: 'string' },
+        channel: { type: 'string', description: 'The channel it is about (address or name), so it shows there. Defaults to your only channel.' },
         replyExpected: { type: 'boolean', description: 'Default true' }
       },
       required: ['to', 'message']
@@ -1172,7 +1173,9 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
       return `Sent to #${ch.name} (${ch.members.size} member${ch.members.size === 1 ? '' : 's'})${sent.parts ? ` in ${sent.parts} parts` : ''}.${formatIdleMentions(sent.idleMentions)}${unclaimed}`;
     }
     case 'crosstalk_dm': {
-      const dm = await client.dm(str(args.to), str(args.message), { replyExpected: args.replyExpected !== false });
+      // Which channel it's about: named, or the only one we're in.
+      const about = str(args.channel) ? pickChannel(client, args.channel).address : client.channels.size === 1 ? [...client.channels.keys()][0] : undefined;
+      const dm = await client.dm(str(args.to), str(args.message), { replyExpected: args.replyExpected !== false, ...(about ? { metadata: { channel: about } } : {}) });
       return `Sent to ${dm.to.name} (${dm.to.id}).`;
     }
     case 'crosstalk_ask_user': {

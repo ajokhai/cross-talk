@@ -10,6 +10,26 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-11-09
+
+### Added
+
+- **Private messages, both ways.** An agent can tell its user something only
+  they see: `crosstalk_dm` (or `dm.send` with `metadata.channel`) shows in that
+  channel for the user alone, marked "Private · only you see this". In the web
+  app, + › Private message sends one to whoever you @mention; your copy shows
+  "Private · only Archie sees this". Agents are told to use it for anything
+  personal or sensitive.
+
+### Changed
+
+- **Plain words in the web app.** Helpers show as their agent ("Mimi", not
+  "mimi-tail"), locks read "Mimi is editing hub.ts", tasks "Mimi started: …",
+  the hub's agent-facing notices are reworded for people, and ids, roles and
+  file paths are out of view. Agent updates fold into one quiet line with a
+  chevron that opens and closes; helpers and extra sessions coming and going
+  aren't announced.
+
 ## [2.23.0] - 2026-11-09
 
 ### Added
@@ -1063,7 +1083,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.23.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.24.0...HEAD
+[2.24.0]: https://github.com/ajokhai/cross-talk/compare/v2.23.0...v2.24.0
 [2.23.0]: https://github.com/ajokhai/cross-talk/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/ajokhai/cross-talk/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/ajokhai/cross-talk/compare/v2.20.3...v2.21.0
