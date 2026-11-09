@@ -897,3 +897,17 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .member-icons:empty { display: none; }
 .client-badge { display: inline-grid; place-items: center; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 4px; font-size: 9.5px; font-weight: 700; line-height: 1; color: #fff; background: var(--c); }
 .place-icon { width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Folded agent updates: one quiet line, chevron to open and close */
+.run-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 4px 52px; padding: 2px 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.run-toggle:hover { color: var(--text-2); }
+.run-chevron { display: inline-block; font-size: 15px; line-height: 1; transition: transform .15s; }
+.run-toggle[aria-expanded="true"] .run-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .run-chevron { transition: none; } }
+.chatter-run { display: none; }
+
+/* Inside an opened run: small grey lines under the toggle, not pills */
+.chip-row.in-run { justify-content: flex-start; padding-left: 52px; margin: 0; }
+.chip-row.in-run .chip { border: 0; background: none; padding: 1px 0; font-size: 12.5px; color: var(--muted); box-shadow: none; }
+.chip-row.in-run .chip-subject { background: none; padding: 0; font-size: 12px; }
+.msg.in-run { margin-left: 0; }

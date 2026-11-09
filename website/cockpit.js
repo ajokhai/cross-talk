@@ -2047,24 +2047,40 @@
     return !mentionsMe(m);
   }
 
-  function renderEntry(ch, entry, prev) {
-    // A run you opened with Show stays open; the rest stay folded.
-    const opened = ch.openRuns && ch.openRuns.has(entry);
-    if (state.ui.hideChatter && isChatter(ch, entry) && !opened) {
-      // One line for a run of chatter: only where the run starts.
-      if (prev && isChatter(ch, prev) && !(ch.openRuns && ch.openRuns.has(prev))) return [];
-      const run = ch.timeline.slice(ch.timeline.indexOf(entry));
+  /** The first entry of the run of agent updates `entry` belongs to. */
+  function runStart(ch, entry) {
+    let i = ch.timeline.indexOf(entry);
+    while (i > 0 && isChatter(ch, ch.timeline[i - 1])) i--;
+    return ch.timeline[i];
+  }
+
+  /**
+   * Agent updates fold into one quiet line of text with a chevron, like a
+   * collapsed step in a chat app: click to open the run in place, again to close.
+   */
+  function renderEntry(ch, entry, prev, inRun) {
+    if (!inRun && state.ui.hideChatter && isChatter(ch, entry)) {
+      const first = runStart(ch, entry);
+      const open = !!(ch.openRuns && ch.openRuns.has(first));
+      // The day divider belongs above the toggle, so the run's own rows never draw one.
+      const newDay = entry === first && (!prev || new Date(prev.timestamp).toDateString() !== new Date(entry.timestamp).toDateString());
+      const body = open ? renderEntry(ch, entry, newDay ? entry : prev, true).map((n) => { n.classList.add('in-run'); return n; }) : [];
+      if (entry !== first) return body;
+      const day = newDay ? [el('div', { class: 'day-sep', role: 'separator' }, el('span', { text: dayLabel(entry.timestamp) }))] : [];
+      const run = ch.timeline.slice(ch.timeline.indexOf(first));
       const n = run.findIndex((e) => !isChatter(ch, e));
       const count = n < 0 ? run.length : n;
       const names = [...new Set(run.slice(0, count).map((e) => e.message && e.message.from && e.message.from.id !== 'hub' && displayName(e.message.from.name)).filter(Boolean))];
-      const openRun = () => {
-        ch.openRuns = ch.openRuns || new WeakSet();
-        for (const e of run.slice(0, count)) ch.openRuns.add(e);
+      const toggle = () => {
+        ch.openRuns = ch.openRuns || new Set();
+        if (ch.openRuns.has(first)) ch.openRuns.delete(first); else ch.openRuns.add(first);
         $('messages')._rendered = null;
         renderMessages();
       };
-      return [el('button', { type: 'button', class: 'chatter-run', title: 'Show these updates', onclick: openRun },
-        `${count} agent update${count === 1 ? '' : 's'}`, el('span', { class: 'muted', text: names.length ? ` · ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}` : '' }), el('span', { class: 'chatter-show', text: ' · Show' }))];
+      const head = el('button', { type: 'button', class: 'run-toggle', 'aria-expanded': String(open), onclick: toggle },
+        `${count} agent update${count === 1 ? '' : 's'}${names.length ? ` · ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}` : ''}`,
+        el('span', { class: 'run-chevron', 'aria-hidden': 'true', text: '›' }));
+      return [...day, head, ...body];
     }
     const out = [];
     if (!prev || new Date(prev.timestamp).toDateString() !== new Date(entry.timestamp).toDateString()) {
