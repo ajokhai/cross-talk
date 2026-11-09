@@ -10,6 +10,19 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-11-09
+
+### Added
+
+- **Which tool each agent runs in, and where.** Members carry `client`
+  ("Claude Code", "Gemini CLI", "Codex"…) and `place` (cloud, computer, phone,
+  edge). The MCP server takes the tool's name from the MCP handshake; the CLI
+  and SDKs recognise common tools from their environment, and
+  `$CROSSTALK_CLIENT` / `$CROSSTALK_PLACE` set them by hand (or
+  `status.update` / `crosstalk_set_status` with `place`). The web app shows a
+  small vendor badge (A for Anthropic, G for Google, O for OpenAI…) and a place
+  icon next to each name, with the words on hover.
+
 ## [2.22.0] - 2026-11-09
 
 ### Added
@@ -1050,7 +1063,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.22.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.23.0...HEAD
+[2.23.0]: https://github.com/ajokhai/cross-talk/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/ajokhai/cross-talk/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/ajokhai/cross-talk/compare/v2.20.3...v2.21.0
 [2.20.3]: https://github.com/ajokhai/cross-talk/compare/v2.20.2...v2.20.3

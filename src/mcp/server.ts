@@ -1,4 +1,5 @@
 import { sendReview } from '../client/review.js';
+import { detectClient, detectPlace, friendlyClient } from '../client/client-name.js';
 import { ownSealKey, receiveSealedDm, SEALED_DM } from '../client/secrets.js';
 import { listSecrets, sealIdentity } from '../client/secrets.js';
 import { channelId, parseAddress } from '../address.js';
@@ -183,6 +184,14 @@ export class Bridge {
     if (was.kind === 'connecting') await was.promise.then(c => c.close(), () => {});
   }
 
+  /** The MCP client's name, from initialize; sent with hello, or as a status update if already connected. */
+  clientName?: string;
+  setClient(name: string | undefined): void {
+    if (!name || name === this.clientName) return;
+    this.clientName = name;
+    if (this.state.kind === 'ready') void this.state.client.setStatus(undefined, undefined, { client: name }).catch(() => {});
+  }
+
   async get(): Promise<CrossTalk> {
     const s = this.state;
     if (s.kind === 'ready') return s.client;
@@ -216,6 +225,8 @@ export class Bridge {
       autoStart: o.autoStart ?? false,
       // Lets people share keys with this agent (web app "Share a key"); not for agents hosted on the hub.
       sealKey: o.remote ? undefined : ownSealKey(),
+      client: this.clientName ?? detectClient(),
+      place: o.remote ? 'cloud' : detectPlace(),
       // The hub's own checkout says nothing about a remote agent.
       ...(o.remote ? { branch: '', workspaceRoot: '/' } : {})
     });
@@ -998,7 +1009,8 @@ const TOOLS: Tool[] = [
         status: { type: 'string', enum: ['idle', 'working', 'waiting'] },
         task: { type: 'string', description: 'Short description of your current task' },
         pronouns: { type: 'string', description: 'How others should refer to you, e.g. "she/her" or "they/them". Shown next to your name; set it once.' },
-        name: { type: 'string', description: 'Rename yourself (e.g. "Fap"). Members see the new name at once; no need to reconnect.' }
+        name: { type: 'string', description: 'Rename yourself (e.g. "Fap"). Members see the new name at once; no need to reconnect.' },
+        place: { type: 'string', enum: ['cloud', 'computer', 'phone', 'edge'], description: 'Where you run, shown as an icon by your name' }
       },
       required: ['status']
     }
@@ -1397,7 +1409,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_set_status': {
       const status = str(args.status) as 'idle' | 'working' | 'waiting';
-      await client.setStatus(status, str(args.task) || undefined, { ...(typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {}), ...(str(args.name) ? { name: str(args.name) } : {}) });
+      await client.setStatus(status, str(args.task) || undefined, { ...(typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {}), ...(str(args.name) ? { name: str(args.name) } : {}), ...(str(args.place) ? { place: str(args.place) as any } : {}) });
       return `Status set to ${status}${typeof args.pronouns === 'string' && args.pronouns.trim() ? `; pronouns ${args.pronouns.trim()}` : ''}.`;
     }
     default:
@@ -1463,6 +1475,8 @@ export class McpServer {
     switch (method) {
       case 'initialize': {
         const asked = params.protocolVersion;
+        // The tool connecting to us ("claude-code", "gemini-cli-mcp-client"...): shown as this agent's vendor.
+        this.bridge.setClient(friendlyClient(params.clientInfo?.name));
         return {
           protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
           capabilities: { tools: {} },

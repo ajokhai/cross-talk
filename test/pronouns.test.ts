@@ -36,3 +36,34 @@ test('members carry pronouns: set on connect, changed with status, kept short an
     await hub.close();
   }
 });
+
+test('members say which tool they run in and where; MCP client names read nicely', async () => {
+  const { friendlyClient, detectClient, detectPlace } = await import('../src/client/client-name.js');
+  assert.equal(friendlyClient('claude-code'), 'Claude Code');
+  assert.equal(friendlyClient('gemini-cli-mcp-client'), 'Gemini CLI');
+  assert.equal(friendlyClient('codex-mcp-client'), 'Codex');
+  assert.equal(friendlyClient('my_custom-agent'), 'my custom agent');
+  assert.equal(detectClient({ CLAUDECODE: '1' }), 'Claude Code');
+  assert.equal(detectClient({ CROSSTALK_CLIENT: 'Goose' }), 'Goose');
+  assert.equal(detectPlace({ CCR_SESSION_PROFILE: 'x' }), 'cloud');
+  assert.equal(detectPlace({}), 'computer');
+  assert.equal(detectPlace({ CROSSTALK_PLACE: 'edge' }), 'edge');
+
+  const hub = await startServer({ port: 0, quiet: true, stateFile: false });
+  const sap = await CrossTalk.connect({ name: 'Sap', url: hub.url, reconnect: false, client: 'Claude Code', place: 'cloud' });
+  const josh = await CrossTalk.connect({ name: 'Josh', url: hub.url, reconnect: false });
+  try {
+    const ch = await sap.createChannel('team');
+    const seen = await josh.joinChannel(ch.address);
+    const s = seen.members.get(sap.agent.id)!;
+    assert.equal(s.client, 'Claude Code');
+    assert.equal(s.place, 'cloud');
+    const moved = await sap.setStatus(undefined, undefined, { place: 'phone' });
+    assert.equal(moved.place, 'phone');
+    await assert.rejects(sap.request('status.update', { place: 'moon' } as any), /place must be/);
+  } finally {
+    await sap.close();
+    await josh.close();
+    await hub.close();
+  }
+});

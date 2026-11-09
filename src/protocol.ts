@@ -62,6 +62,10 @@ export interface AgentInfo {
   sealKey?: string;
   /** How to refer to this member, e.g. "she/her", "they/them" (2.21+). Up to 24 characters. */
   pronouns?: string;
+  /** The tool this agent runs in, e.g. "Claude Code", "Gemini CLI", "Codex" (2.23+). Up to 40 characters. */
+  client?: string;
+  /** Where it runs (2.23+). */
+  place?: 'cloud' | 'computer' | 'phone' | 'edge';
 }
 
 /** A reference to the sender embedded in messages; kept small on purpose. */
@@ -418,6 +422,10 @@ export interface HelloFrame {
     sealKey?: string;
     /** See AgentInfo.pronouns. */
     pronouns?: string;
+    /** See AgentInfo.client. */
+    client?: string;
+    /** See AgentInfo.place. */
+    place?: string;
   };
   /** Resume token from an earlier welcome: carry on as that agent if the hub still holds it. */
   resume?: string;
@@ -473,7 +481,7 @@ export type RequestFrame =
   /** Gives up your place in a slot, or your place in its queue. */
   | { type: 'slot.release'; id: string; channel: string; name: string }
   /** `name` renames you (2.22+): members see the new name at once; older messages keep the name they were sent with. */
-  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string; name?: string }
+  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string; name?: string; client?: string; place?: string }
   /**
    * A WebSocket agent (an MCP server) reports that a local listener is
    * attached to it (2.21+): it counts as listening, exactly like an open

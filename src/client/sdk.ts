@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { detectClient, detectPlace, type AgentPlace } from './client-name.js';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -93,6 +94,10 @@ export interface ConnectOptions {
   sealKey?: string;
   /** How to refer to this agent, e.g. "she/her" (2.21+). Defaults to $CROSSTALK_PRONOUNS. */
   pronouns?: string;
+  /** The tool this agent runs in, e.g. "Claude Code" (2.23+). Defaults to $CROSSTALK_CLIENT, or what the environment shows. */
+  client?: string;
+  /** Where it runs: cloud, computer, phone or edge (2.23+). Defaults to $CROSSTALK_PLACE, or what the environment shows. */
+  place?: AgentPlace;
 }
 
 export class CrossTalkError extends Error {
@@ -486,7 +491,7 @@ export class CrossTalk extends EventEmitter {
   }
   private ws?: WebSocket;
   private readonly pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
-  private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask' | 'sealKey' | 'pronouns'>> & Pick<ConnectOptions, 'branch' | 'currentTask' | 'sealKey' | 'pronouns'>;
+  private readonly options: Required<Omit<ConnectOptions, 'branch' | 'currentTask' | 'sealKey' | 'pronouns' | 'client' | 'place'>> & Pick<ConnectOptions, 'branch' | 'currentTask' | 'sealKey' | 'pronouns' | 'client' | 'place'>;
   /**
    * connecting ──welcome──▶ open ──socket drops──▶ reconnecting ──welcome──▶ open
    *      │                    │                        │
@@ -525,7 +530,9 @@ export class CrossTalk extends EventEmitter {
       branch: options.branch ?? git(['rev-parse', '--abbrev-ref', 'HEAD']),
       currentTask: options.currentTask,
       sealKey: options.sealKey,
-      pronouns: options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || undefined)
+      pronouns: options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || undefined),
+      client: options.client ?? detectClient(),
+      place: options.place ?? detectPlace()
     };
   }
 
@@ -594,7 +601,9 @@ export class CrossTalk extends EventEmitter {
             branch: this.options.branch,
             currentTask: this.options.currentTask,
             sealKey: this.options.sealKey,
-            pronouns: this.options.pronouns
+            pronouns: this.options.pronouns,
+            client: this.options.client,
+            place: this.options.place
           },
           resume: this.resumeToken
         }));
@@ -932,8 +941,9 @@ export class CrossTalk extends EventEmitter {
     return this.request('dm.send', { to, content, ...options });
   }
 
-  async setStatus(status: AgentStatus, currentTask?: string, options: { pronouns?: string; name?: string } = {}): Promise<AgentInfo> {
-    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}), ...(options.name ? { name: options.name } : {}) });
+  async setStatus(status: AgentStatus | undefined, currentTask?: string, options: { pronouns?: string; name?: string; client?: string; place?: AgentPlace } = {}): Promise<AgentInfo> {
+    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}), ...(options.name ? { name: options.name } : {}), ...(options.client ? { client: options.client } : {}), ...(options.place ? { place: options.place } : {}) });
+    if (options.client) (this.options as { client?: string }).client = options.client;
     // Reconnects keep the new name.
     if (options.name) (this.options as { name: string }).name = this.agent.name;
     if (options.pronouns !== undefined) this.options.pronouns = options.pronouns || undefined;

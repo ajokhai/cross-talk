@@ -166,6 +166,50 @@
     return `${Math.floor(m / 60)}h ${m % 60}m left`;
   }
 
+  // ---- Where a member runs, and the tool it runs in: small icons, the words on hover.
+  const PLACE_ICON = {
+    cloud: 'M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.2 4.5 4.5 0 0 0 7 18Z',
+    computer: 'M4 6h16v10H4zM2 19h20',
+    phone: 'M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1ZM11 18h2',
+    edge: 'M7 7h10v10H7zM10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3',
+  };
+  const PLACE_WORDS = { cloud: 'Runs in the cloud', computer: 'Runs on a computer', phone: 'On a phone', edge: 'On an edge device' };
+  function placeIcon(place) {
+    if (!PLACE_ICON[place]) return null;
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'place-icon');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', PLACE_WORDS[place]);
+    const title = document.createElementNS(ns, 'title');
+    title.textContent = PLACE_WORDS[place];
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', PLACE_ICON[place]);
+    svg.append(title, path);
+    return svg;
+  }
+  /** The vendor behind a tool, for its badge: initial, colour and name. */
+  const VENDORS = [
+    [/claude|anthropic/, 'A', 'var(--a-claude)', 'Anthropic'],
+    [/gemini|google|antigravity/, 'G', 'var(--a-gemini)', 'Google'],
+    [/codex|chatgpt|openai/, 'O', 'var(--a-codex)', 'OpenAI'],
+    [/cursor/, 'Cu', 'var(--a-violet)', 'Cursor'],
+    [/windsurf|codeium/, 'W', 'var(--a-teal)', 'Windsurf'],
+    [/vs code|copilot/, 'MS', 'var(--a-teal)', 'Microsoft'],
+  ];
+  /** A small badge for the vendor of the tool an agent runs in; the tool and vendor on hover. */
+  function clientBadge(client) {
+    if (!client || /crosstalk/i.test(client)) return null;
+    const n = client.toLowerCase();
+    const v = VENDORS.find(([re]) => re.test(n));
+    const [mark, colour, vendor] = v ? [v[1], v[2], v[3]] : [client.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 1).toUpperCase(), 'var(--muted)', ''];
+    const label = vendor && !n.includes(vendor.toLowerCase()) ? `${client} (${vendor})` : client;
+    const node = el('span', { class: 'client-badge', title: label, 'aria-label': `Runs in ${label}`, text: mark });
+    node.style.setProperty('--c', colour);
+    return node;
+  }
+
   /** Names read as names: "fap" shows as "Fap". Only the first letter, and only if it's lowercase. */
   function displayName(name) {
     const n = String(name || '');
@@ -406,7 +450,7 @@
         protocol: PROTOCOL_VERSION,
         // A named person takes part; an anonymous tab is an observer.
         agent: name
-          ? { name, role: 'person', environment: 'web', currentTask: 'In the cockpit', ...(state.config.pronouns ? { pronouns: state.config.pronouns } : {}) }
+          ? { name, role: 'person', environment: 'web', currentTask: 'In the cockpit', place: matchMedia('(pointer: coarse) and (max-width: 820px)').matches ? 'phone' : 'computer', ...(state.config.pronouns ? { pronouns: state.config.pronouns } : {}) }
           : { name: `cockpit-${suffix}`, role: 'observer', environment: 'web', currentTask: 'Watching conversations' },
         resume: resuming && state.resumeToken ? state.resumeToken : handover,
       });
@@ -1581,6 +1625,7 @@
           el('div', { class: 'member-name' },
             el('span', { class: 'member-label', text: isMe ? `${displayName(m.name)} (you)` : displayName(m.name) }),
             m.pronouns ? el('span', { class: 'member-pronouns', text: m.pronouns }) : null,
+            el('span', { class: 'member-icons' }, clientBadge(m.client), placeIcon(m.place)),
             tag ? el('span', { class: 'pill mono', title: `Agent id ${m.id}: another member has the same name`, text: tag }) : null,
             m.remote ? el('span', { class: 'pill', title: m.via ? `Joined with remote invite "${m.via}"` : 'Joined from outside the hub\'s machine', text: 'remote' }) : null),
           // The dot on the avatar says whether they're here; a line only when there's more to say.

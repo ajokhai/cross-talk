@@ -891,3 +891,9 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 @media (min-width: 1101px) { #details-close { display: none; } }
 
 #hub-token-field[hidden], #local-hint[hidden] { display: none; }
+
+/* Vendor and place, as icons */
+.member-icons { display: inline-flex; align-items: center; gap: 5px; margin-left: 2px; }
+.member-icons:empty { display: none; }
+.client-badge { display: inline-grid; place-items: center; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 4px; font-size: 9.5px; font-weight: 700; line-height: 1; color: #fff; background: var(--c); }
+.place-icon { width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

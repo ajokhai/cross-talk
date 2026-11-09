@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { detectClient, detectPlace } from './client-name.js';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -103,6 +104,8 @@ export class HttpAgent {
       environment: 'terminal',
       sealKey: this.options.sealKey,
       pronouns: this.options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || undefined),
+      client: detectClient(),
+      place: detectPlace(),
       // After a hub restart: carry on as the restored agent, not as a duplicate of it.
       resume: this.resumeToken
     });

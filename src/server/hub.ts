@@ -374,6 +374,8 @@ const cleanText = (value: unknown, max: number): string =>
  * Transport-agnostic: callers hand it a `Peer` per connection and feed it
  * decoded frames. See `server/index.ts` for the WebSocket and HTTP bindings.
  */
+const isPlace = (v: unknown): v is NonNullable<AgentInfo['place']> => v === 'cloud' || v === 'computer' || v === 'phone' || v === 'edge';
+
 /** Pronouns as a member gives them ("she/her", "they/them"): short plain text, or nothing. */
 function cleanPronouns(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -524,6 +526,9 @@ export class MeshHub {
     if (typeof raw.sealKey === 'string' && /^xs_[A-Za-z0-9_-]{43}$/.test(raw.sealKey)) agent.sealKey = raw.sealKey;
     const pronouns = cleanPronouns(raw.pronouns);
     if (pronouns) agent.pronouns = pronouns;
+    const client = cleanText(raw.client, 40);
+    if (client) agent.client = client;
+    if (isPlace(raw.place)) agent.place = raw.place;
     if (invite) {
       agent.remote = true;
       agent.via = invite.label;
@@ -702,7 +707,7 @@ export class MeshHub {
       case 'lock.wait': return this.waitLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'slot.acquire': return this.acquireSlot(conn, f.channel, f.name, f.capacity, f.ttlSeconds);
       case 'slot.release': return this.releaseSlot(conn, f.channel, f.name);
-      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns, f.name);
+      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns, f.name, f.client, f.place);
       case 'listener.report': {
         if (typeof f.open !== 'boolean') fail('bad_request', 'open must be true or false');
         if (f.open) this.pollStarted(conn);
@@ -1938,7 +1943,7 @@ export class MeshHub {
     }
   }
 
-  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown, name?: unknown): AgentInfo {
+  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown, name?: unknown, client?: unknown, place?: unknown): AgentInfo {
     const agent = conn.agent!;
     if (status !== undefined) {
       if (status !== 'idle' && status !== 'working' && status !== 'waiting') {
@@ -1951,6 +1956,14 @@ export class MeshHub {
       const next = cleanText(name, 64);
       if (!next) fail('bad_request', 'name can\'t be empty');
       agent.name = next;
+    }
+    if (client !== undefined) {
+      const c = cleanText(client, 40);
+      if (c) agent.client = c; else delete agent.client;
+    }
+    if (place !== undefined) {
+      if (!isPlace(place)) fail('bad_request', 'place must be cloud, computer, phone or edge');
+      agent.place = place as AgentInfo['place'];
     }
     if (pronouns !== undefined) {
       const p = cleanPronouns(pronouns);
