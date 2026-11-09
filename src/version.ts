@@ -91,7 +91,7 @@ export function cachedLatest(home?: string): string | undefined {
  * redirect of the public releases/latest page: no API token, nothing sent but
  * the request itself. Never throws; undefined when off, offline or unknown.
  */
-export async function latestRelease(options: { home?: string; now?: number; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; force?: boolean } = {}): Promise<string | undefined> {
+export async function latestRelease(options: { home?: string; now?: number; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; force?: boolean; strict?: boolean } = {}): Promise<string | undefined> {
   const env = options.env ?? process.env;
   if (!updateCheckEnabled(env)) return undefined;
   const now = options.now ?? Date.now();
@@ -116,7 +116,8 @@ export async function latestRelease(options: { home?: string; now?: number; env?
   } catch {
     // Unwritable home: we'll just ask again next time.
   }
-  return latest ?? cachedLatest(options.home);
+  // strict: only a fresh answer counts (crosstalk update must not trust last week's).
+  return options.strict ? latest : latest ?? cachedLatest(options.home);
 }
 
 /** The newer of the hub's version and the latest release, for updateNotice(). */

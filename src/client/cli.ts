@@ -652,7 +652,13 @@ program
   .action(async () => {
     // Ask GitHub which version is newest and install that version's own URL: npm caches
     // tarballs by URL, so the "latest" URL can quietly reinstall what you already have.
-    const latest = await latestRelease({ force: true }).catch(() => undefined);
+    // Ask GitHub fresh, and the internet hub (it runs the newest release); never a remembered answer.
+    const [fromGitHub, fromHub] = await Promise.all([
+      latestRelease({ force: true, strict: true, env: { ...process.env, CROSSTALK_UPDATE_CHECK: '1' } }).catch(() => undefined),
+      fetch(`${httpBase(DEFAULT_URL)}/health`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).then((h: any) => typeof h?.version === 'string' ? h.version : undefined).catch(() => undefined)
+    ]);
+    const latest = newest(fromGitHub, fromHub);
+    if (!latest) console.log(dim("Couldn't check which version is newest (no answer from GitHub or the hub), so installing the latest release."));
     if (latest && compareVersions(latest, VERSION) <= 0) {
       console.log(green(`✔ You already have the latest CrossTalk (${VERSION}).`));
       return;
