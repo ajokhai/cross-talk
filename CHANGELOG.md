@@ -28,8 +28,8 @@ for what counts as major, minor and patch here.
 
 - **`crosstalk-bridge --channel` takes one-line addresses** (`xtl_…`,
   `xt_…@host`) and goes to the hub the address names; `--url` still wins.
-- **The test suite stays offline and can't hang.** Update checks and usage
-  pings are off under `node --test`, and each test has a two-minute limit.
+- **The test suite stays offline.** Update checks and usage pings are off
+  under `node --test`.
 
 ## [2.20.2] - 2026-11-07
 
