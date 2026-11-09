@@ -716,6 +716,7 @@
         const already = [...ch.members.values()].some((o) => o.id !== frame.agent.id && o.name.toLowerCase() === frame.agent.name.toLowerCase());
         ch.members.set(frame.agent.id, frame.agent);
         if (!known && !already && !helperFor(ch, frame.agent)) addActivity(ch, 'join', `${displayName(frame.agent.name)} joined`);
+        if (!known) void carryWakes(ch);
         syncMemberCount(ch);
         renderIfSelected(frame.channel, true);
         return;
@@ -1048,6 +1049,7 @@
     state.joined.set(address, ch);
     rememberChannel(snap.channel);
     loadKnocks(address);
+    void carryWakes(ch);
     if (focus) select(address);
     else render();
   }
@@ -1401,8 +1403,15 @@
   }
 
   /** Shows an error notice; an optional command is rendered as copyable code. */
+  /** A good-news notice: same place, calm colours (the red one is for problems). */
+  function showDone(text) {
+    showNotice(text);
+    $('notice').classList.add('notice-ok');
+  }
+
   function showNotice(text, command) {
     const n = $('notice');
+    n.classList.remove('notice-ok');
     const body = el('div', { class: 'notice-body' }, el('span', { text }));
     if (command) {
       const code = el('code', { class: 'notice-cmd', text: command });
@@ -2635,7 +2644,7 @@
     }
     const n = a.values.size;
     $('allow-dialog').close();
-    showNotice(n ? `Updated ${n} allowance${n === 1 ? '' : 's'} on ${a.agent.name}. Guests see what they have left under each reply.` : 'Nothing changed.');
+    showDone(n ? `Updated ${n} allowance${n === 1 ? '' : 's'} on ${a.agent.name}. Guests see what they have left under each reply.` : 'Nothing changed.');
   }
 
   async function removeMember(button, ch, m) {
@@ -2648,7 +2657,7 @@
       for (const who of [m, ...helpers]) {
         await request('member.kick', { channel: ch.info.id, ownerKey: ownerKey(ch.info.id), agent: who.id, ban, reason: ban ? 'Removed by the owner' : undefined });
       }
-      showNotice(`Removed ${m.name}${ban ? ' and stopped them rejoining' : ''}.`);
+      showDone(`Removed ${m.name}${ban ? ' and stopped them rejoining' : ''}.`);
     });
   }
 
@@ -2670,20 +2679,47 @@
     } catch { $('wake-state').textContent = ''; }
     $('wake-url').focus();
   }
+  // Wake links are set once per agent: remember where each one was set ("hub|name" -> channel)
+  // and carry it into any other channel you own where that agent turns up.
+  const STORE_WAKES = 'crosstalk.cockpit.wakes';
+  const wakeSources = () => { try { return JSON.parse(load(STORE_WAKES) || '{}') || {}; } catch { return {}; } };
+  function rememberWake(name, channel) {
+    const all = wakeSources();
+    if (channel) all[`${state.hub}|${name.toLowerCase()}`] = channel; else delete all[`${state.hub}|${name.toLowerCase()}`];
+    save(STORE_WAKES, JSON.stringify(all));
+  }
+  async function carryWakes(ch) {
+    if (!ch || !ownerKey(ch.info.id)) return;
+    const all = wakeSources();
+    for (const m of ch.members.values()) {
+      if (m.role === 'person' || m.remote || helperFor(ch, m)) continue;
+      const from = all[`${state.hub}|${m.name.toLowerCase()}`];
+      if (!from || from === ch.info.id || !ownerKey(from)) continue;
+      try {
+        const had = await request('wake.get', { channel: ch.info.id, agent: m.id, ownerKey: ownerKey(ch.info.id) });
+        if (had && had.hook) continue;
+        await request('wake.copy', { channel: from, ownerKey: ownerKey(from), to: ch.info.id, toOwnerKey: ownerKey(ch.info.id), agent: m.id });
+      } catch { /* not in that channel any more, or an older hub: the hint will offer setup */ }
+    }
+  }
+
   async function saveWake(clear) {
     const { ch, m } = wakeFor || {};
     if (!ch) return;
     const base = { channel: ch.info.id, agent: m.id, ownerKey: ownerKey(ch.info.id) };
-    if (clear) await request('wake.clear', base);
+    if (clear) { await request('wake.clear', base); rememberWake(m.name, null); }
     else {
       const url = $('wake-url').value.trim();
       if (!/^https:\/\//i.test(url)) throw new Error('Paste the full link, starting with https://');
       const key = $('wake-key').value.trim();
       await request('wake.set', { ...base, url, ...(key ? { authorization: key } : {}) });
+      rememberWake(m.name, ch.info.id);
+      // And every other channel you own where they already are.
+      for (const other of state.joined.values()) if (other !== ch) void carryWakes(other);
       $('wake-key').value = '';
     }
     $('wake-dialog').close();
-    showNotice(clear ? `${displayName(m.name)} won't be woken instantly any more.` : `Done: ${displayName(m.name)} is woken the moment someone mentions them or messages them privately.`);
+    showDone(clear ? `${displayName(m.name)} won't be woken instantly any more.` : `Done: ${displayName(m.name)} is woken the moment someone mentions them or messages them privately.`);
   }
 
   /** Who the Share a key dialog is for. */
@@ -2730,7 +2766,7 @@
     }
     await request('dm.send', { to: member.id, content: `xsecret ${name} ${sealed}`, replyExpected: false });
     $('share-key-dialog').close();
-    showNotice(`Sent ${name} to ${member.name}, sealed so only its computer can open it. It uses the key by name: crosstalk run --secret ${name} -- <command>.`);
+    showDone(`Sent ${name} to ${member.name}, sealed so only its computer can open it. It uses the key by name: crosstalk run --secret ${name} -- <command>.`);
   }
 
   // ---------------------------------------------------------------------------

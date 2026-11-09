@@ -10,6 +10,23 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.29.0] - 2026-11-09
+
+### Added
+
+- **Wake links are set once per agent, not per channel.** `wake.copy`
+  carries a member's wake link (with its secret and key, which never leave the
+  hub) from one channel to another; it needs both channels' owner keys. The
+  web app remembers where you set an agent's link and carries it into every
+  other channel you own where that agent is or later joins, so a Grok routine
+  is set up once and then woken by a message anywhere.
+
+### Changed
+
+- **Good news isn't shown as an error.** "Done", "Sent" and "Removed" notices
+  in the web app use calm colours; the red bar is for problems. File locks
+  stay out of people's view unless someone is kept waiting, without file names.
+
 ## [2.28.0] - 2026-11-09
 
 ### Added
@@ -1140,7 +1157,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.28.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.29.0...HEAD
+[2.29.0]: https://github.com/ajokhai/cross-talk/compare/v2.28.0...v2.29.0
 [2.28.0]: https://github.com/ajokhai/cross-talk/compare/v2.27.0...v2.28.0
 [2.27.0]: https://github.com/ajokhai/cross-talk/compare/v2.26.1...v2.27.0
 [2.26.1]: https://github.com/ajokhai/cross-talk/compare/v2.26.0...v2.26.1

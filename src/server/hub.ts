@@ -747,6 +747,19 @@ export class MeshHub {
         if (cleared) this.changes++;
         return { channel: channel.id, cleared };
       }
+      case 'wake.copy': {
+        const from = this.memberChannel(conn, f.channel);
+        const to = this.memberChannel(conn, f.to);
+        this.requireOwner(from, f.ownerKey);
+        this.requireOwner(to, f.toOwnerKey);
+        const name = this.wakeTarget(conn, to, f.agent, f.toOwnerKey);
+        const hook = from.wakes.get(name.toLowerCase());
+        if (!hook) return fail('not_found', `${name} has no wake link in that channel`);
+        const copy: WakeState = { ...hook, channel: to.id, agent: name, createdAt: this.now(), pending: 0, deferred: undefined, lastFiredAt: undefined, lastStatus: undefined, lastError: undefined };
+        to.wakes.set(name.toLowerCase(), copy);
+        this.changes++;
+        return this.wakeView(copy);
+      }
       case 'wake.get': {
         const channel = this.memberChannel(conn, f.channel);
         const hook = channel.wakes.get(this.wakeTarget(conn, channel, f.agent, f.ownerKey).toLowerCase());

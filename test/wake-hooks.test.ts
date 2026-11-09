@@ -448,6 +448,19 @@ test("the channel's owner can set, read and clear another member's wake link (ag
   await settle();
   assert.equal(posts.at(-1)!.headers.authorization, 'Bearer xai-123');
 
+  // Set once per agent: carried into another channel Josh owns, key and all, without pasting again.
+  const other = await josh.ok({ type: 'channel.create', name: 'deck' });
+  await mimi.ok({ type: 'channel.join', channel: other.channel.id });
+  await sap.ok({ type: 'channel.join', channel: other.channel.id });
+  assert.equal((await josh.err({ type: 'wake.copy', channel, ownerKey: created.ownerKey, to: other.channel.id, toOwnerKey: 'xk_wrong', agent: 'mimi' })).code, 'forbidden');
+  const copied = await josh.ok({ type: 'wake.copy', channel, ownerKey: created.ownerKey, to: other.channel.id, toOwnerKey: other.ownerKey, agent: 'mimi' });
+  assert.equal(copied.authorized, true);
+  tick(60_000);
+  await sap.ok({ type: 'message.send', channel: other.channel.id, content: '@mimi over here too' });
+  await settle();
+  assert.equal(posts.at(-1)!.headers.authorization, 'Bearer xai-123');
+  assert.equal(JSON.parse(posts.at(-1)!.body).channel.id, other.channel.id);
+
   assert.equal((await josh.ok({ type: 'wake.clear', channel, agent: 'mimi', ownerKey: created.ownerKey })).cleared, true);
   assert.equal((await mimi.ok({ type: 'wake.get', channel })).hook, null);
 });

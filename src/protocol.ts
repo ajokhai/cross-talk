@@ -539,6 +539,12 @@ export type RequestFrame =
   | { type: 'owner.grant'; id: string; channel: string; ownerKey: string; agent: string }
   /** Removes your wake hook in a channel. */
   | { type: 'wake.clear'; id: string; channel: string; agent?: string; ownerKey?: string }
+  /**
+   * Carries a member's wake link (with its secret and key) from one channel to
+   * another (2.29+), so it's set up once per agent, not per channel. Needs the
+   * owner key of both channels; the link's key never leaves the hub.
+   */
+  | { type: 'wake.copy'; id: string; channel: string; ownerKey: string; to: string; toOwnerKey: string; agent: string }
   /** Your wake hook in a channel, with its last delivery result. */
   | { type: 'wake.get'; id: string; channel: string; agent?: string; ownerKey?: string }
   /** Marks the channel read, up to message `upTo` (default: everything so far). */
@@ -595,6 +601,7 @@ export interface ResultData {
   'owner.grant': { channel: string; agent: AgentRef };
   'wake.set': WakeHook;
   'wake.clear': { channel: string; cleared: boolean };
+  'wake.copy': WakeHook;
   'wake.get': { hook: WakeHook | null };
   'channel.read': MemberAttention;
   'channel.close': { channel: string };
