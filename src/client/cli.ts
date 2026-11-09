@@ -1826,7 +1826,8 @@ program
     }
     try {
       const id = atAddress(target, opts);
-      const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'supervisor', environment: 'terminal' });
+      // 'wakes <agent>' tells the web app whose helper this is, so it shows on that agent instead of as a teammate.
+      const ct = await CrossTalk.connect({ name: opts.name, url: opts.url, role: 'supervisor', environment: 'terminal', currentTask: `wakes ${opts.agent}` });
       // The supervisor is a member too: in a channel that approves new members, the host lets it in once.
       const ch = await joinAsMember(ct, id, { log: line => console.log(`${time(Date.now())} ${line}`) });
       new WakeSupervisor(ch, ct, {

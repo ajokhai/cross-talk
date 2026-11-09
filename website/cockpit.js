@@ -1444,7 +1444,12 @@
       const twin = [...ch.members.values()].some((o) => o.id !== member.id && o.name === member.name && (ch.attention.get(o.id) || { connected: true }).connected);
       return { state: 'offline', text: twin ? 'Earlier session of the same agent; the hub drops it soon' : 'Disconnected; the hub is holding their place' };
     }
-    if (a.listening === false) return { state: 'away', text: 'Connected but not listening for new messages' };
+    if (a.listening === false) {
+      // A wake helper watching for them counts: they're woken when @mentioned.
+      const helper = helpersOf(ch, member).find((h) => h.role === 'supervisor' && (ch.attention.get(h.id) || { connected: true }).connected !== false);
+      if (helper) return { state: 'online', text: 'Woken by its helper when @mentioned' };
+      return { state: 'away', text: 'Connected but not listening for new messages' };
+    }
     if (a.idle) return { state: 'idle', text: `Hasn't read the channel in a while${a.unread ? ` (${a.unread} unread)` : ''}` };
     return { state: 'online', text: a.listening ? 'Listening' : 'Reading the channel' };
   }
@@ -1452,7 +1457,27 @@
   /** Me first, then who is connected, then held places; by name within each. */
   function sortedMembers(ch) {
     const rank = (m) => (state.me && m.id === state.me.id ? 0 : (ch.attention.get(m.id) || { connected: true }).connected ? 1 : 2);
-    return [...ch.members.values()].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    return [...ch.members.values()].filter((m) => !helperFor(ch, m)).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }
+
+  /**
+   * Helpers aren't teammates: a wake supervisor (crosstalk wake, role
+   * 'supervisor', status "wakes <agent>") and a read-only viewer (crosstalk
+   * tail, role 'observer'). Returns the member a helper belongs to, matched by
+   * its status or by the -wake/-tail name it defaults to; a helper whose agent
+   * isn't here is still a helper (returns true).
+   */
+  function helperFor(ch, m) {
+    if (m.role !== 'supervisor' && m.role !== 'observer') return null;
+    const named = (/^wakes (\S+)/i.exec(m.currentTask || '') || [])[1] || m.name.replace(/-(wake|tail)$/i, '');
+    return [...ch.members.values()].find((o) => o.id !== m.id && o.role !== 'supervisor' && o.role !== 'observer' && o.name.toLowerCase() === named.toLowerCase()) || true;
+  }
+  function helpersOf(ch, member) {
+    return [...ch.members.values()].filter((m) => helperFor(ch, m) === member);
+  }
+  /** Members that are teammates (people and agents), not helpers. */
+  function teamCount(ch) {
+    return [...ch.members.values()].filter((m) => !helperFor(ch, m)).length;
   }
 
   /** A short tag that tells apart members with the same name: the end of their agent id. */
@@ -1478,7 +1503,8 @@
       $('channel-title').textContent = label(info);
       const parts = [info.topic || (info.visibility === 'public' ? 'Public channel' : 'Private channel')];
       if (info.approval) parts.push('approval on');
-      parts.push(info.maxMembers ? `${ch.members.size}/${info.maxMembers} members` : `${ch.members.size} member${ch.members.size === 1 ? '' : 's'}`);
+      const team = teamCount(ch);
+      parts.push(`${team} member${team === 1 ? '' : 's'}`);
       $('channel-topic').textContent = parts.join(' · ');
       $('channel-topic').title = info.approval ? 'New members wait until the owner lets them in' : '';
       $('address-code').textContent = info.id;
@@ -1516,6 +1542,7 @@
             m.remote ? el('span', { class: 'pill', title: m.via ? `Joined with remote invite "${m.via}"` : 'Joined from outside the hub\'s machine', text: 'remote' }) : null),
           el('div', { class: 'member-sub', text: [m.role, m.environment, m.branch && `⎇ ${m.branch}`].filter(Boolean).join(' · ') }),
           m.currentTask ? el('div', { class: 'member-task', text: m.currentTask }) : null,
+          ...helpersOf(ch, m).map((h) => el('div', { class: 'member-helper', title: `${h.name} (${h.id})`, text: h.role === 'supervisor' ? `+ wake helper (${h.name}): pokes ${m.name} when @mentioned` : `+ read-only viewer (${h.name})` })),
           el('div', { class: 'member-presence', dataset: { state: p.state } },
             el('span', { class: 'dot', dataset: { state: p.state }, 'aria-hidden': 'true' }),
             p.text,
@@ -1524,7 +1551,7 @@
         !isMe && m.sealKey && !m.remote ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `Send ${m.name} a key it can use but never see`, onclick: () => openShareKey(m), text: 'Share a key' }) : null,
         el('span', { class: 'badge-status', dataset: { status: m.status || 'idle' }, text: m.status || 'idle' }));
     }));
-    $('member-count').textContent = ch ? (ch.info.maxMembers ? `${members.length}/${ch.info.maxMembers}` : String(members.length)) : '';
+    $('member-count').textContent = ch ? String(members.length) : '';
     $('member-empty').hidden = members.length > 0;
     $('member-empty').textContent = ch ? 'Nobody here.' : state.status === 'connected' ? 'Open a channel to see who is in it.' : 'Not connected.';
 

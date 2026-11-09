@@ -807,3 +807,6 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .allow-used { display: block; height: 100%; width: var(--w, 0%); background: var(--a-claude); }
 .allow-plan-input { display: inline-flex; align-items: center; gap: 6px; }
 .allow-plan-input .input { width: 110px; }
+
+/* A helper (wake supervisor, read-only viewer) shown on its agent's row */
+.member-helper { font-size: 12px; color: var(--muted); }

@@ -10,6 +10,16 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Helpers no longer look like extra teammates in the web app.** A wake
+  helper (`crosstalk wake`) and a read-only viewer (`crosstalk tail`) each
+  joined as their own member, so an agent seemed to appear twice. They now
+  show on their agent's row ("+ wake helper: pokes mimi when @mentioned")
+  and aren't counted as members; an agent with a wake helper shows as
+  reachable rather than "not listening". `crosstalk wake` sets its status
+  to "wakes <agent>" so it's matched whatever it's named.
+
 ## [2.20.3] - 2026-11-07
 
 ### Added
