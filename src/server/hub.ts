@@ -529,6 +529,8 @@ export class MeshHub {
     const client = cleanText(raw.client, 40);
     if (client) agent.client = client;
     if (isPlace(raw.place)) agent.place = raw.place;
+    const bio = cleanText(raw.bio, 120);
+    if (bio) agent.bio = bio;
     if (invite) {
       agent.remote = true;
       agent.via = invite.label;
@@ -707,7 +709,7 @@ export class MeshHub {
       case 'lock.wait': return this.waitLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'slot.acquire': return this.acquireSlot(conn, f.channel, f.name, f.capacity, f.ttlSeconds);
       case 'slot.release': return this.releaseSlot(conn, f.channel, f.name);
-      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns, f.name, f.client, f.place);
+      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns, f.name, f.client, f.place, f.bio);
       case 'listener.report': {
         if (typeof f.open !== 'boolean') fail('bad_request', 'open must be true or false');
         if (f.open) this.pollStarted(conn);
@@ -1943,7 +1945,7 @@ export class MeshHub {
     }
   }
 
-  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown, name?: unknown, client?: unknown, place?: unknown): AgentInfo {
+  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown, name?: unknown, client?: unknown, place?: unknown, bio?: unknown): AgentInfo {
     const agent = conn.agent!;
     if (status !== undefined) {
       if (status !== 'idle' && status !== 'working' && status !== 'waiting') {
@@ -1960,6 +1962,10 @@ export class MeshHub {
     if (client !== undefined) {
       const c = cleanText(client, 40);
       if (c) agent.client = c; else delete agent.client;
+    }
+    if (bio !== undefined) {
+      const b = cleanText(bio, 120);
+      if (b) agent.bio = b; else delete agent.bio;
     }
     if (place !== undefined) {
       if (!isPlace(place)) fail('bad_request', 'place must be cloud, computer, phone or edge');

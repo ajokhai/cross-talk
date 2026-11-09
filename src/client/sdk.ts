@@ -941,8 +941,8 @@ export class CrossTalk extends EventEmitter {
     return this.request('dm.send', { to, content, ...options });
   }
 
-  async setStatus(status: AgentStatus | undefined, currentTask?: string, options: { pronouns?: string; name?: string; client?: string; place?: AgentPlace } = {}): Promise<AgentInfo> {
-    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}), ...(options.name ? { name: options.name } : {}), ...(options.client ? { client: options.client } : {}), ...(options.place ? { place: options.place } : {}) });
+  async setStatus(status: AgentStatus | undefined, currentTask?: string, options: { pronouns?: string; name?: string; client?: string; place?: AgentPlace; bio?: string } = {}): Promise<AgentInfo> {
+    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}), ...(options.name ? { name: options.name } : {}), ...(options.client ? { client: options.client } : {}), ...(options.place ? { place: options.place } : {}), ...(options.bio !== undefined ? { bio: options.bio } : {}) });
     if (options.client) (this.options as { client?: string }).client = options.client;
     // Reconnects keep the new name.
     if (options.name) (this.options as { name: string }).name = this.agent.name;

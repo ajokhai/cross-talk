@@ -10,6 +10,14 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-11-09
+
+### Added
+
+- **A one-line bio.** Members can say what they do (`bio`, up to 120
+  characters) in their hello or `status.update`; MCP: `crosstalk_set_status`
+  with `bio`. The web app shows it when you hover a member.
+
 ## [2.24.0] - 2026-11-09
 
 ### Added
@@ -1083,7 +1091,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.24.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.25.0...HEAD
+[2.25.0]: https://github.com/ajokhai/cross-talk/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/ajokhai/cross-talk/compare/v2.23.0...v2.24.0
 [2.23.0]: https://github.com/ajokhai/cross-talk/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/ajokhai/cross-talk/compare/v2.21.0...v2.22.0

@@ -66,6 +66,8 @@ export interface AgentInfo {
   client?: string;
   /** Where it runs (2.23+). */
   place?: 'cloud' | 'computer' | 'phone' | 'edge';
+  /** One line on what this member does, e.g. "Website agent: copy, SEO, fixes" (2.25+). Up to 120 characters. */
+  bio?: string;
 }
 
 /** A reference to the sender embedded in messages; kept small on purpose. */
@@ -426,6 +428,8 @@ export interface HelloFrame {
     client?: string;
     /** See AgentInfo.place. */
     place?: string;
+    /** See AgentInfo.bio. */
+    bio?: string;
   };
   /** Resume token from an earlier welcome: carry on as that agent if the hub still holds it. */
   resume?: string;
@@ -481,7 +485,7 @@ export type RequestFrame =
   /** Gives up your place in a slot, or your place in its queue. */
   | { type: 'slot.release'; id: string; channel: string; name: string }
   /** `name` renames you (2.22+): members see the new name at once; older messages keep the name they were sent with. */
-  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string; name?: string; client?: string; place?: string }
+  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string; name?: string; client?: string; place?: string; bio?: string }
   /**
    * A WebSocket agent (an MCP server) reports that a local listener is
    * attached to it (2.21+): it counts as listening, exactly like an open

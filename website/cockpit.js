@@ -1648,6 +1648,7 @@
       const doing = m.currentTask && !/^shared by /i.test(m.currentTask) ? m.currentTask : p.text;
       const details = [
         `${displayName(m.name)}${m.pronouns ? ` (${m.pronouns})` : ''}`,
+        m.bio || '',
         [m.role === 'person' ? 'Person' : m.client || 'Agent', PLACE_WORDS[m.place]].filter(Boolean).join(' · '),
         isMe ? '' : p.text + (att && att.unread ? ` · ${att.unread} unread message${att.unread === 1 ? '' : 's'}` : ''),
       ].filter(Boolean).join('\n');

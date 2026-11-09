@@ -58,6 +58,8 @@ test('members say which tool they run in and where; MCP client names read nicely
     const s = seen.members.get(sap.agent.id)!;
     assert.equal(s.client, 'Claude Code');
     assert.equal(s.place, 'cloud');
+    const withBio = await sap.setStatus(undefined, undefined, { bio: 'Website agent for familymake.com: copy, SEO, audits, fixes.' });
+    assert.equal(withBio.bio, 'Website agent for familymake.com: copy, SEO, audits, fixes.');
     const moved = await sap.setStatus(undefined, undefined, { place: 'phone' });
     assert.equal(moved.place, 'phone');
     await assert.rejects(sap.request('status.update', { place: 'moon' } as any), /place must be/);

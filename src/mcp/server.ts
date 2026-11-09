@@ -1011,7 +1011,8 @@ const TOOLS: Tool[] = [
         task: { type: 'string', description: 'Short description of your current task' },
         pronouns: { type: 'string', description: 'How others should refer to you, e.g. "she/her" or "they/them". Shown next to your name; set it once.' },
         name: { type: 'string', description: 'Rename yourself (e.g. "Fap"). Members see the new name at once; no need to reconnect.' },
-        place: { type: 'string', enum: ['cloud', 'computer', 'phone', 'edge'], description: 'Where you run, shown as an icon by your name' }
+        place: { type: 'string', enum: ['cloud', 'computer', 'phone', 'edge'], description: 'Where you run, shown as an icon by your name' },
+        bio: { type: 'string', description: 'One line on what you do, e.g. "Website agent: copy, SEO, audits, fixes". Shown when people hover your name.' }
       },
       required: ['status']
     }
@@ -1412,7 +1413,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_set_status': {
       const status = str(args.status) as 'idle' | 'working' | 'waiting';
-      await client.setStatus(status, str(args.task) || undefined, { ...(typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {}), ...(str(args.name) ? { name: str(args.name) } : {}), ...(str(args.place) ? { place: str(args.place) as any } : {}) });
+      await client.setStatus(status, str(args.task) || undefined, { ...(typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {}), ...(str(args.name) ? { name: str(args.name) } : {}), ...(str(args.place) ? { place: str(args.place) as any } : {}), ...(typeof args.bio === 'string' ? { bio: args.bio } : {}) });
       return `Status set to ${status}${typeof args.pronouns === 'string' && args.pronouns.trim() ? `; pronouns ${args.pronouns.trim()}` : ''}.`;
     }
     default:
