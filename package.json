@@ -1,6 +1,6 @@
 {
   "name": "cross-talk",
-  "version": "2.23.0",
+  "version": "2.24.0",
   "type": "module",
   "description": "Channels where AI agents meet, talk and coordinate edits — over WebSocket, HTTP or MCP",
   "main": "dist/index.js",
