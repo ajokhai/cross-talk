@@ -123,6 +123,8 @@ interface BanState extends Omit<ChannelBan, 'ipCount'> {
 
 interface WakeState extends WakeHook {
   secret?: string;
+  /** Sent as the Authorization header (2.28+), e.g. a host's trigger key. Kept here only. */
+  authorization?: string;
   /** Messages since the hook last fired. */
   pending: number;
   /**
@@ -738,7 +740,7 @@ export class MeshHub {
         this.requireOwner(channel, f.ownerKey);
         return { channel: channel.id, bans: [...channel.bans.values()].map(({ ips, ...b }) => ({ ...b, ids: [...b.ids], ipCount: ips.length })) };
       }
-      case 'wake.set': return this.setWake(conn, f.channel, f.url, f.on, f.secret, f.cooldownSeconds, f.agent, f.ownerKey);
+      case 'wake.set': return this.setWake(conn, f.channel, f.url, f.on, f.secret, f.cooldownSeconds, f.agent, f.ownerKey, f.authorization);
       case 'wake.clear': {
         const channel = this.memberChannel(conn, f.channel);
         const cleared = channel.wakes.delete(this.wakeTarget(conn, channel, f.agent, f.ownerKey).toLowerCase());
@@ -1495,7 +1497,7 @@ export class MeshHub {
     return member.agent.name;
   }
 
-  private setWake(conn: Connection, address: unknown, url: unknown, on: unknown, secret: unknown, cooldown: unknown, agent?: unknown, ownerKey?: unknown): WakeHook {
+  private setWake(conn: Connection, address: unknown, url: unknown, on: unknown, secret: unknown, cooldown: unknown, agent?: unknown, ownerKey?: unknown, authorization?: unknown): WakeHook {
     const channel = this.memberChannel(conn, address);
     const target = this.wakeTarget(conn, channel, agent, ownerKey);
     if (this.opts.webhooks === 'off') fail('forbidden', 'Wake hooks are switched off on this hub');
@@ -1518,6 +1520,13 @@ export class MeshHub {
     if (secret !== undefined && (typeof secret !== 'string' || secret.length < 8 || secret.length > 256)) {
       fail('bad_request', 'secret must be 8 to 256 characters');
     }
+    let auth: string | undefined;
+    if (authorization !== undefined && authorization !== '') {
+      if (typeof authorization !== 'string' || authorization.length > 4096 || /[\r\n]/.test(authorization)) fail('bad_request', 'authorization must be one line of at most 4096 characters');
+      const a = (authorization as string).trim();
+      // A bare key gets the usual scheme; "Bearer …" / "Basic …" are kept as given.
+      auth = /^[A-Za-z][A-Za-z0-9-]*\s+\S/.test(a) ? a : `Bearer ${a}`;
+    }
     const cooldownSeconds = cooldown === undefined ? 30 : Math.round(Number(cooldown));
     if (!Number.isFinite(cooldownSeconds) || cooldownSeconds < 5 || cooldownSeconds > 3600) {
       fail('bad_request', 'cooldownSeconds must be between 5 and 3600');
@@ -1529,8 +1538,10 @@ export class MeshHub {
       on: (on as 'mentions' | 'all' | undefined) ?? 'mentions',
       cooldownSeconds,
       signed: typeof secret === 'string',
+      authorized: !!auth,
       createdAt: this.now(),
       secret: secret as string | undefined,
+      authorization: auth,
       pending: 0
     };
     channel.wakes.set(target.toLowerCase(), hook);
@@ -1539,7 +1550,7 @@ export class MeshHub {
   }
 
   private wakeView(hook: WakeState): WakeHook {
-    const { secret: _secret, pending: _pending, deferred: _deferred, ...view } = hook;
+    const { secret: _secret, authorization: _authorization, pending: _pending, deferred: _deferred, ...view } = hook;
     return { ...view };
   }
 
@@ -1622,6 +1633,7 @@ export class MeshHub {
     const body = JSON.stringify(payload);
     const headers: Record<string, string> = { 'content-type': 'application/json', 'user-agent': `crosstalk-hub/${SERVER_VERSION}` };
     if (hook.secret) headers['x-crosstalk-signature'] = 'sha256=' + crypto.createHmac('sha256', hook.secret).update(body).digest('hex');
+    if (hook.authorization) headers.authorization = hook.authorization;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
     timer.unref?.();

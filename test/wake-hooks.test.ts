@@ -417,7 +417,7 @@ test('a mention inside the cooldown is not dropped: the sweep sends it when the 
 });
 
 test("the channel's owner can set, read and clear another member's wake link (agents whose app only runs them when called)", async () => {
-  const { agent, posts, settle } = setup();
+  const { agent, posts, settle, tick } = setup();
   const josh = agent('Josh');
   const mimi = agent('mimi');
   const sap = agent('Sap');
@@ -438,6 +438,15 @@ test("the channel's owner can set, read and clear another member's wake link (ag
   assert.equal(posts.length, 1);
   assert.equal(posts[0].url, 'https://grok.example/run/abc');
   assert.equal(JSON.parse(posts[0].body).agent, 'mimi');
+
+  // A host that also needs a key: sent as Authorization, never shown back.
+  const keyed = await josh.ok({ type: 'wake.set', channel, agent: 'mimi', url: 'https://grok.example/run/abc', ownerKey: created.ownerKey, authorization: 'xai-123' });
+  assert.equal(keyed.authorized, true);
+  assert.ok(!JSON.stringify(keyed).includes('xai-123'));
+  tick(60_000);
+  await sap.ok({ type: 'message.send', channel, content: '@mimi again' });
+  await settle();
+  assert.equal(posts.at(-1)!.headers.authorization, 'Bearer xai-123');
 
   assert.equal((await josh.ok({ type: 'wake.clear', channel, agent: 'mimi', ownerKey: created.ownerKey })).cleared, true);
   assert.equal((await mimi.ok({ type: 'wake.get', channel })).hook, null);

@@ -324,6 +324,8 @@ export interface WakeHook {
   cooldownSeconds: number;
   /** True when a secret was set: each POST then carries X-CrossTalk-Signature: sha256=<hex HMAC of the body>. */
   signed: boolean;
+  /** True when an Authorization value was set (2.28+): sent with each POST, never shown again. */
+  authorized?: boolean;
   createdAt: number;
   lastFiredAt?: number;
   /** HTTP status of the last POST, or 0 when it failed to connect or timed out. */
@@ -509,7 +511,7 @@ export type RequestFrame =
    * member, e.g. pasting the trigger link of an agent whose host only runs it
    * when called. The same goes for wake.clear and wake.get.
    */
-  | { type: 'wake.set'; id: string; channel: string; url: string; on?: 'mentions' | 'all'; secret?: string; cooldownSeconds?: number; agent?: string; ownerKey?: string }
+  | { type: 'wake.set'; id: string; channel: string; url: string; on?: 'mentions' | 'all'; secret?: string; cooldownSeconds?: number; agent?: string; ownerKey?: string; authorization?: string }
   /**
    * Removes members from the channel (2.17+). Needs the owner key. `agent` is
    * an agent id, or a name (every member with that name, case-insensitive),

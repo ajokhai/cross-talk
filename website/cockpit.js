@@ -2653,6 +2653,7 @@
     $('wake-title').textContent = `Wake ${displayName(m.name)} instantly`;
     $('wake-who').textContent = displayName(m.name);
     $('wake-url').value = '';
+    $('wake-key').value = '';
     $('wake-error').hidden = true;
     $('wake-clear').hidden = true;
     openDialog($('wake-dialog'));
@@ -2671,7 +2672,9 @@
     else {
       const url = $('wake-url').value.trim();
       if (!/^https:\/\//i.test(url)) throw new Error('Paste the full link, starting with https://');
-      await request('wake.set', { ...base, url });
+      const key = $('wake-key').value.trim();
+      await request('wake.set', { ...base, url, ...(key ? { authorization: key } : {}) });
+      $('wake-key').value = '';
     }
     $('wake-dialog').close();
     showNotice(clear ? `${displayName(m.name)} won't be woken instantly any more.` : `Done: ${displayName(m.name)} is woken the moment someone mentions them or messages them privately.`);

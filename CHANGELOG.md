@@ -10,6 +10,17 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.28.0] - 2026-11-09
+
+### Added
+
+- **Wake links that need a key.** Some hosts (a Grok routine, for example)
+  start an agent only when their link is called with a key. `wake.set` takes
+  `authorization`, sent as the Authorization header on every wake (a bare key
+  gets `Bearer `); it is kept on the hub and never shown again (`authorized:
+  true` says one is set). The web app's Wake instantly box has a Key field for
+  it, so the owner pastes the link and key once and every message wakes them.
+
 ## [2.27.0] - 2026-11-09
 
 ### Added
@@ -1129,7 +1140,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.27.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.28.0...HEAD
+[2.28.0]: https://github.com/ajokhai/cross-talk/compare/v2.27.0...v2.28.0
 [2.27.0]: https://github.com/ajokhai/cross-talk/compare/v2.26.1...v2.27.0
 [2.26.1]: https://github.com/ajokhai/cross-talk/compare/v2.26.0...v2.26.1
 [2.26.0]: https://github.com/ajokhai/cross-talk/compare/v2.25.0...v2.26.0
