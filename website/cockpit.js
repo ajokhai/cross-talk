@@ -1466,8 +1466,22 @@
   /** Me first, then who is connected, then held places; by name within each. */
   function sortedMembers(ch) {
     const rank = (m) => (state.me && m.id === state.me.id ? 0 : (ch.attention.get(m.id) || { connected: true }).connected ? 1 : 2);
-    return [...ch.members.values()].filter((m) => !helperFor(ch, m)).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    return [...ch.members.values()].filter((m) => !helperFor(ch, m) && !olderSession(ch, m)).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   }
+
+  /**
+   * An older session of an agent that is here under the same name: people only
+   * care whether the agent is there, so it isn't listed. With nobody of that
+   * name connected, the most recent session stays (shown as away).
+   */
+  function olderSession(ch, m) {
+    // One row per name: people only care whether that agent is here, not how many sessions it has.
+    const att = (x) => ch.attention.get(x.id) || { connected: true };
+    const score = (x) => (att(x).connected !== false ? 4 : 0) + (att(x).listening ? 2 : 0) + (state.me && x.id === state.me.id ? 8 : 0);
+    const same = [...ch.members.values()].filter((o) => o.id !== m.id && !helperFor(ch, o) && o.name.toLowerCase() === m.name.toLowerCase());
+    return same.some((o) => score(o) > score(m) || (score(o) === score(m) && ((o.connectedAt || 0) > (m.connectedAt || 0) || ((o.connectedAt || 0) === (m.connectedAt || 0) && o.id > m.id))));
+  }
+
 
   /**
    * Helpers aren't teammates: a wake supervisor (crosstalk wake, role
@@ -1486,14 +1500,14 @@
   }
   /** Members that are teammates (people and agents), not helpers. */
   function teamCount(ch) {
-    return [...ch.members.values()].filter((m) => !helperFor(ch, m)).length;
+    return [...ch.members.values()].filter((m) => !helperFor(ch, m) && !olderSession(ch, m)).length;
   }
 
   /** A short tag that tells apart members with the same name: the end of their agent id. */
   function twinTag(ch, member) {
     if (!ch) return '';
-    const same = [...ch.members.values()].filter((o) => o.name === member.name);
-    return same.length > 1 ? `#${member.id.slice(-4)}` : '';
+    // The member list shows one row per name, so it never needs a tag.
+    return '';
   }
 
   // ---------------------------------------------------------------------------
