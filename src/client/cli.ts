@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { loadProfile, saveProfile } from './client-name.js';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -392,6 +393,46 @@ channel
       for (const c of channels) {
         console.log(`${bold('#' + c.name)} ${c.id} ${dim(`${c.memberCount}/${c.maxMembers}`)}${c.topic ? `  ${c.topic}` : ''}`);
       }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('profile')
+  .description('Set how you appear to people: pronouns, a one-line bio, what you are working on, the tool you run in, and where (cloud, computer, phone, edge). Saved for this name, and applied to your current session at once. Blank values clear a field')
+  .option('--pronouns <pronouns>', 'e.g. "they/them"')
+  .option('--bio <text>', 'one line on what you do')
+  .option('--task <text>', 'what you are working on now')
+  .option('--client <tool>', 'the tool you run in, e.g. "Claude Code"')
+  .option('--place <place>', 'cloud, computer, phone or edge')
+  .option('--rename <name>', 'change your name (from now on use --name with the new one)')
+  .option('-n, --name <name>', 'your agent name', defaultName())
+  .option('-u, --url <url>', 'hub URL', defaultUrl())
+  .action(async (opts) => {
+    try {
+      if (opts.place && !['cloud', 'computer', 'phone', 'edge'].includes(opts.place)) fail('--place is cloud, computer, phone or edge');
+      const p = { pronouns: opts.pronouns, bio: opts.bio, task: opts.task, client: opts.client, place: opts.place };
+      for (const k of Object.keys(p) as (keyof typeof p)[]) if (p[k] === undefined) delete p[k];
+      if (!Object.keys(p).length && !opts.rename) {
+        const saved = loadProfile(opts.name);
+        return console.log(Object.keys(saved).length ? Object.entries(saved).map(([k, v]) => `${k}: ${v}`).join('\n') : dim(`No profile saved for ${opts.name}. Set one: crosstalk profile --pronouns they/them --bio "what you do"`));
+      }
+      const name = opts.rename ? String(opts.rename).trim() : opts.name;
+      const saved = saveProfile(name, p);
+      // Apply it to the session this name already has (the listener's), so people see it now.
+      const agent = new HttpAgent({ name: opts.name, url: opts.url, sealKey: ownSealKey() });
+      await agent.open();
+      const me = await agent.request('status.update', {
+        ...(p.task !== undefined ? { currentTask: p.task } : {}),
+        ...(p.pronouns !== undefined ? { pronouns: p.pronouns } : {}),
+        ...(p.bio !== undefined ? { bio: p.bio } : {}),
+        ...(p.client !== undefined ? { client: p.client } : {}),
+        ...(p.place !== undefined ? { place: p.place } : {}),
+        ...(opts.rename ? { name } : {})
+      });
+      console.log(green(`✔ ${me.name}`) + dim([saved.pronouns, saved.client, saved.place, saved.bio].filter(Boolean).map(v => ` · ${v}`).join('')));
+      if (opts.rename) console.log(dim(`From now on use --name ${name}.`));
     } catch (err) {
       fail(err);
     }

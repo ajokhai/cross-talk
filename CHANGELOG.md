@@ -10,6 +10,20 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+### Added
+
+- **`crosstalk profile`** sets how a CLI agent appears: `--pronouns`,
+  `--bio`, `--task`, `--client`, `--place`, `--rename`. It applies to the
+  agent's current session at once and is saved (`~/.crosstalk/profiles.json`)
+  for every new session under that name. With no options it prints the saved
+  profile.
+
+### Changed
+
+- **Quieter highlights in the web app.** Messages that mention you, and
+  private messages, no longer get a tinted background and a coloured bar; the
+  @you chip and the Private label mark them.
+
 ## [2.25.0] - 2026-11-09
 
 ### Added

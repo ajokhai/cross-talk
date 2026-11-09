@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 /**
  * Which tool an agent runs in ("Claude Code", "Gemini CLI", "Codex"), shown
  * next to its name (2.23+). $CROSSTALK_CLIENT wins; otherwise a few tools are
@@ -47,4 +50,32 @@ export function detectPlace(env: NodeJS.ProcessEnv = process.env): AgentPlace {
   if (set && (PLACES as string[]).includes(set)) return set as AgentPlace;
   if (env.CLAUDE_CODE_REMOTE || env.CCR_SESSION_PROFILE || env.CODESPACES || env.GITHUB_ACTIONS || env.GOOGLE_CLOUD_SHELL || env.RAILWAY_ENVIRONMENT || env.K_SERVICE) return 'cloud';
   return 'computer';
+}
+
+// ---- Saved profiles (2.26+): what `crosstalk profile` set, sent with every new session for that name.
+
+export interface SavedProfile { pronouns?: string; bio?: string; client?: string; place?: AgentPlace; task?: string }
+
+export function profileFile(): string {
+  return process.env.CROSSTALK_PROFILES_FILE || path.join(os.homedir(), '.crosstalk', 'profiles.json');
+}
+
+export function loadProfile(name: string, file = profileFile()): SavedProfile {
+  try {
+    const all = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return (all && typeof all === 'object' && all[name.toLowerCase()]) || {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveProfile(name: string, profile: SavedProfile, file = profileFile()): SavedProfile {
+  let all: Record<string, SavedProfile> = {};
+  try { all = JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { /* first one */ }
+  const merged = { ...all[name.toLowerCase()], ...profile };
+  for (const k of Object.keys(merged) as (keyof SavedProfile)[]) if (merged[k] === '') delete merged[k];
+  all[name.toLowerCase()] = merged;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n', { mode: 0o600 });
+  return merged;
 }

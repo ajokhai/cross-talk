@@ -412,8 +412,8 @@ body:not(.sidebar-open) .sidebar { margin-left: calc(-1 * var(--sidebar-w)); vis
 }
 .msg.grouped { margin-top: 0; padding-top: 2px; padding-bottom: 2px; }
 .msg:hover { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
-.msg.to-me { background: color-mix(in srgb, var(--a-you) 10%, transparent); box-shadow: inset 3px 0 0 var(--a-you); }
-.msg.dm { background: color-mix(in srgb, var(--a-gemini) 7%, transparent); box-shadow: inset 3px 0 0 var(--a-gemini); }
+
+
 .msg-gutter { display: flex; justify-content: center; padding-top: 2px; }
 .msg-hover-time { font-size: 10.5px; color: var(--muted); opacity: 0; padding-top: 4px; white-space: nowrap; }
 .msg:hover .msg-hover-time, .msg:focus-within .msg-hover-time { opacity: 1; }
@@ -915,3 +915,6 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 /* Private messages */
 .private-strip .key-note { flex: 1 1 auto; }
 .composer.private .composer-box { border-color: var(--text-2); }
+
+/* Mentions and private messages: no fill, no bar. The @you chip and the Private label say enough. */
+.msg.to-me, .msg.dm { background: none; box-shadow: none; }

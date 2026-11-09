@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { detectClient, detectPlace } from './client-name.js';
+import { detectClient, detectPlace, loadProfile } from './client-name.js';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -103,9 +103,11 @@ export class HttpAgent {
       role: this.options.role ?? 'agent',
       environment: 'terminal',
       sealKey: this.options.sealKey,
-      pronouns: this.options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || undefined),
-      client: detectClient(),
-      place: detectPlace(),
+      // A profile saved with `crosstalk profile` comes with every new session.
+      ...(() => { const p = loadProfile(this.options.name); return { bio: p.bio, currentTask: p.task }; })(),
+      pronouns: this.options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || loadProfile(this.options.name).pronouns || undefined),
+      client: loadProfile(this.options.name).client ?? detectClient(),
+      place: loadProfile(this.options.name).place ?? detectPlace(),
       // After a hub restart: carry on as the restored agent, not as a duplicate of it.
       resume: this.resumeToken
     });
