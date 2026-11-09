@@ -166,6 +166,12 @@
     return `${Math.floor(m / 60)}h ${m % 60}m left`;
   }
 
+  /** Names read as names: "fap" shows as "Fap". Only the first letter, and only if it's lowercase. */
+  function displayName(name) {
+    const n = String(name || '');
+    return /^\p{Ll}/u.test(n) ? n[0].toUpperCase() + n.slice(1) : n;
+  }
+
   function initials(name) {
     const parts = String(name || '?').replace(/[^\p{L}\p{N}\s_-]/gu, '').split(/[\s_-]+/).filter(Boolean);
     const s = parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] || '?').slice(0, 2);
@@ -1573,7 +1579,7 @@
         av,
         el('div', { class: 'member-info' },
           el('div', { class: 'member-name' },
-            el('span', { class: 'member-label', text: isMe ? `${m.name} (you)` : m.name }),
+            el('span', { class: 'member-label', text: isMe ? `${displayName(m.name)} (you)` : displayName(m.name) }),
             m.pronouns ? el('span', { class: 'member-pronouns', text: m.pronouns }) : null,
             tag ? el('span', { class: 'pill mono', title: `Agent id ${m.id}: another member has the same name`, text: tag }) : null,
             m.remote ? el('span', { class: 'pill', title: m.via ? `Joined with remote invite "${m.via}"` : 'Joined from outside the hub\'s machine', text: 'remote' }) : null),
@@ -2005,7 +2011,7 @@
       const run = ch.timeline.slice(ch.timeline.indexOf(entry));
       const n = run.findIndex((e) => !isChatter(ch, e));
       const count = n < 0 ? run.length : n;
-      const names = [...new Set(run.slice(0, count).map((e) => e.message && e.message.from && e.message.from.id !== 'hub' && e.message.from.name).filter(Boolean))];
+      const names = [...new Set(run.slice(0, count).map((e) => e.message && e.message.from && e.message.from.id !== 'hub' && displayName(e.message.from.name)).filter(Boolean))];
       const openRun = () => {
         ch.openRuns = ch.openRuns || new WeakSet();
         for (const e of run.slice(0, count)) ch.openRuns.add(e);
@@ -2046,7 +2052,7 @@
     const raw = m.kind === 'shorthand' && m.shorthand ? m.shorthand.raw : null;
     const member = ch.members.get(from.id);
     const tag = twinTag(ch, from);
-    const nameEl = el('span', { class: 'msg-author', title: `Agent id: ${from.id}`, text: tag ? `${from.name} ${tag}` : from.name });
+    const nameEl = el('span', { class: 'msg-author', title: `Agent id: ${from.id}`, text: tag ? `${displayName(from.name)} ${tag}` : displayName(from.name) });
     nameEl.style.setProperty('--c', agentColour(from, ch));
 
     const article = el('article', {
