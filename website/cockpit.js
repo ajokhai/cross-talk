@@ -210,6 +210,33 @@
     return node;
   }
 
+  /**
+   * The name a person should see for a member: a helper ("mimi-tail",
+   * "mimi-wake") shows as its agent ("Mimi"); everyone else by their name.
+   */
+  function personName(ch, ref) {
+    if (!ref) return 'Someone';
+    const m = (ch && ch.members.get(ref.id)) || ref;
+    const owner = ch && m.role ? helperFor(ch, m) : null;
+    if (owner && owner !== true) return displayName(owner.name);
+    return displayName(String(m.name || 'Someone').replace(/-(wake|tail)$/i, ''));
+  }
+  /** Just the file name, not its path: "src/server/hub.ts" -> "hub.ts". */
+  const fileName = (path) => String(path || '').split('/').filter(Boolean).pop() || path;
+  /** Hub notices are written for agents; say the same thing in plain words for people. */
+  function plainNotice(text) {
+    const t = String(text || '');
+    let m = /^(.+?) has not been listening for \d+\+ minutes?/.exec(t);
+    if (m) return `${displayName(m[1])} may not see new messages for a while`;
+    m = /^(.+?) is listening again\.?$/.exec(t);
+    if (m) return `${displayName(m[1])} is back`;
+    if (/^CrossTalk hub updated/.test(t)) return 'CrossTalk was updated';
+    m = /^(.+?) made (.+?) an owner of this channel\.?$/.exec(t);
+    if (m) return `${displayName(m[1])} made ${displayName(m[2])} an owner of this channel`;
+    // Anything else: keep it, minus code-ish detail in parentheses.
+    return t.replace(/\s*\([^)]*(GET|POST|\/v1\/|_)[^)]*\)/g, '');
+  }
+
   /** Names read as names: "fap" shows as "Fap". Only the first letter, and only if it's lowercase. */
   function displayName(name) {
     const n = String(name || '');
@@ -720,7 +747,7 @@
         const ch = lock && state.joined.get(lock.channel);
         if (!ch) return;
         ch.locks.set(lock.file, lock);
-        addActivity(ch, 'lock', `${lock.holder.name} locked`, lock.file, lock.reason);
+        addActivity(ch, 'lock', `${personName(ch, lock.holder)} is editing`, fileName(lock.file));
         renderIfSelected(lock.channel, true);
         return;
       }
@@ -728,10 +755,9 @@
         const ch = state.joined.get(frame.channel);
         if (!ch) return;
         ch.locks.delete(frame.file);
-        const who = frame.by ? frame.by.name : 'Someone';
-        if (frame.reason === 'expired') addActivity(ch, 'unlock', 'Lock expired on', frame.file);
-        else if (frame.reason === 'disconnected') addActivity(ch, 'unlock', `${who} disconnected; unlocked`, frame.file);
-        else addActivity(ch, 'unlock', `${who} released`, frame.file);
+        const who = personName(ch, frame.by);
+        if (frame.reason === 'expired') addActivity(ch, 'unlock', 'Nobody is editing', fileName(frame.file));
+        else addActivity(ch, 'unlock', `${who} finished editing`, fileName(frame.file));
         renderIfSelected(frame.channel, true);
         return;
       }
@@ -739,7 +765,7 @@
         const lock = frame.lock;
         const ch = lock && state.joined.get(lock.channel);
         if (!ch) return;
-        addActivity(ch, 'wait', `${frame.requester ? frame.requester.name : 'Someone'} is waiting on`, lock.file, frame.reason);
+        addActivity(ch, 'wait', `${personName(ch, frame.requester)} is waiting to edit`, fileName(lock.file));
         renderIfSelected(lock.channel, true);
         return;
       }
@@ -750,12 +776,12 @@
         const prev = ch.claims.get(c.id);
         if (c.status === 'active' || c.status === 'stalled') ch.claims.set(c.id, c);
         else ch.claims.delete(c.id);
-        const who = c.owner ? c.owner.name : 'Someone';
-        if (c.status === 'active' && !prev) addActivity(ch, 'claim', `${who} claimed`, c.task);
-        else if (c.status === 'active') addActivity(ch, 'claim', `${who} is back on`, c.task);
-        else if (c.status === 'stalled') addActivity(ch, 'stall', `${who} went quiet on`, c.task, 'claim stalled');
-        else if (c.status === 'done') addActivity(ch, 'answer', `${who} finished`, c.task);
-        else addActivity(ch, 'leave', `${who} dropped`, c.task);
+        const who = personName(ch, c.owner);
+        if (c.status === 'active' && !prev) addActivity(ch, 'claim', `${who} started: ${c.task}`);
+        else if (c.status === 'active') addActivity(ch, 'claim', `${who} is back on: ${c.task}`);
+        else if (c.status === 'stalled') addActivity(ch, 'stall', `${who} hasn't given an update on: ${c.task}`);
+        else if (c.status === 'done') addActivity(ch, 'answer', `${who} finished: ${c.task}`);
+        else addActivity(ch, 'leave', `${who} stopped: ${c.task}`);
         renderIfSelected(c.channel, true);
         return;
       }
@@ -774,7 +800,7 @@
         if (!ch) return;
         ch.questions.set(q.id, q);
         const mine = !!ownerKey(q.channel);
-        addActivity(ch, 'question', `${q.from.name} asked ${mine ? 'you' : 'the owner'}`, null, q.question);
+        addActivity(ch, 'question', `${personName(ch, q.from)} asked ${mine ? 'you' : 'the owner'}`, null, q.question);
         if (mine) bumpAttention(ch, true);
         renderIfSelected(q.channel, true);
         return;
@@ -784,7 +810,7 @@
         const ch = q && state.joined.get(q.channel);
         if (!ch) return;
         ch.questions.delete(q.id);
-        if (q.status === 'answered') addActivity(ch, 'answer', `${ownerKey(q.channel) ? 'You' : 'The owner'} answered ${q.from.name}`, null, q.answer);
+        if (q.status === 'answered') addActivity(ch, 'answer', `${ownerKey(q.channel) ? 'You' : 'The owner'} answered ${personName(ch, q.from)}`, null, q.answer);
         renderIfSelected(q.channel, true);
         return;
       }
@@ -797,10 +823,10 @@
         else ch.knocks.delete(k.agent.id);
         const mine = !!ownerKey(frame.channel);
         if (k.status === 'waiting') {
-          addActivity(ch, 'join', `${k.agent.name} is waiting to be let in`, null, mine ? 'Admit or deny them in Details' : 'Only the owner can let them in');
+          addActivity(ch, 'join', `${displayName(k.agent.name)} is waiting to be let in`, null, mine ? 'Let them in from Details' : 'The owner can let them in');
           if (mine) bumpAttention(ch, true);
-        } else if (k.status === 'admitted') addActivity(ch, 'join', `${k.agent.name} was let in`);
-        else if (k.status === 'denied') addActivity(ch, 'leave', `${k.agent.name} was turned away`);
+        } else if (k.status === 'admitted') addActivity(ch, 'join', `${displayName(k.agent.name)} was let in`);
+        else if (k.status === 'denied') addActivity(ch, 'leave', `${displayName(k.agent.name)} was turned away`);
         renderIfSelected(frame.channel, true);
         return;
       }
@@ -838,8 +864,8 @@
         if (!ch) return;
         const approvalChanged = !!frame.channel.approval !== !!(ch.info && ch.info.approval);
         ch.info = frame.channel;
-        if (approvalChanged) addActivity(ch, 'config', frame.channel.approval ? 'New members now need the owner\'s approval' : 'Anyone with the address can join again');
-        else addActivity(ch, 'config', `Questions for the owner are now ${frame.channel.questions}`);
+        if (approvalChanged) addActivity(ch, 'config', frame.channel.approval ? 'New people now wait for the owner to let them in' : 'Anyone with the invite can join again');
+        else addActivity(ch, 'config', frame.channel.questions === 'off' ? 'Agents won\'t ask the owner questions' : 'Agents can ask the owner questions');
         renderIfSelected(frame.channel.id, true);
         renderChannels();
         return;
@@ -1510,16 +1536,16 @@
     if (!a.connected) {
       // The same name connected again: this is the older session, waiting to expire.
       const twin = [...ch.members.values()].some((o) => o.id !== member.id && o.name === member.name && (ch.attention.get(o.id) || { connected: true }).connected);
-      return { state: 'offline', text: twin ? 'Earlier session of the same agent; the hub drops it soon' : 'Disconnected; the hub is holding their place' };
+      return { state: 'offline', text: 'Away' };
     }
     if (a.listening === false) {
       // A wake helper watching for them counts: they're woken when @mentioned.
       const helper = helpersOf(ch, member).find((h) => h.role === 'supervisor' && (ch.attention.get(h.id) || { connected: true }).connected !== false);
       if (helper) return { state: 'online', text: 'Woken by its helper when @mentioned' };
-      return { state: 'away', text: 'Connected but not listening for new messages' };
+      return { state: 'away', text: 'May not see new messages for a while' };
     }
-    if (a.idle) return { state: 'idle', text: `Hasn't read the channel in a while${a.unread ? ` (${a.unread} unread)` : ''}` };
-    return { state: 'online', text: a.listening ? 'Listening' : 'Reading the channel' };
+    if (a.idle) return { state: 'idle', text: 'Hasn\'t caught up yet' };
+    return { state: 'online', text: 'Here' };
   }
 
   /** Me first, then who is connected, then held places; by name within each. */
@@ -1619,10 +1645,9 @@
       const tag = twinTag(ch, m);
       const doing = m.currentTask && !/^shared by /i.test(m.currentTask) ? m.currentTask : p.text;
       const details = [
-        `${m.name}${m.pronouns ? ` (${m.pronouns})` : ''} · ${m.id}`,
-        [m.role, m.environment, m.branch && `branch ${m.branch}`].filter(Boolean).join(' · '),
-        p.text + (att && att.unread && !isMe ? ` · ${att.unread} unread` : ''),
-        ...helpers.map((h) => (h.role === 'supervisor' ? `Wake helper: ${h.name}` : `Read-only viewer: ${h.name}`)),
+        `${displayName(m.name)}${m.pronouns ? ` (${m.pronouns})` : ''}`,
+        [m.role === 'person' ? 'Person' : m.client || 'Agent', PLACE_WORDS[m.place]].filter(Boolean).join(' · '),
+        isMe ? '' : p.text + (att && att.unread ? ` · ${att.unread} unread message${att.unread === 1 ? '' : 's'}` : ''),
       ].filter(Boolean).join('\n');
       const busy = m.status === 'working' || m.status === 'waiting';
       return el('li', { class: 'member', title: details },
@@ -2100,7 +2125,7 @@
       const chip = el('div', { class: `chip chip-${isNotice ? 'notice' : entry.icon}` },
         icon(isNotice ? 'notice' : entry.icon),
         el('span', { class: 'chip-text' },
-          isNotice ? entry.message.content : entry.text,
+          isNotice ? plainNotice(entry.message.content) : entry.text,
           entry.subject ? ' ' : null,
           entry.subject ? el('code', { class: 'chip-subject', text: entry.subject }) : null,
           entry.detail ? el('span', { class: 'chip-detail', text: ` · ${entry.detail}` }) : null),
@@ -2119,7 +2144,7 @@
     const raw = m.kind === 'shorthand' && m.shorthand ? m.shorthand.raw : null;
     const member = ch.members.get(from.id);
     const tag = twinTag(ch, from);
-    const nameEl = el('span', { class: 'msg-author', title: `Agent id: ${from.id}`, text: tag ? `${displayName(from.name)} ${tag}` : displayName(from.name) });
+    const nameEl = el('span', { class: 'msg-author', text: tag ? `${personName(ch, from)} ${tag}` : personName(ch, from) });
     nameEl.style.setProperty('--c', agentColour(from, ch));
 
     const article = el('article', {
@@ -2127,11 +2152,11 @@
       dataset: { id: m.id || '' },
       'aria-label': `${from.name}, ${formatTime(entry.timestamp)}${isDm ? ', direct message' : ''}`,
     },
-    el('div', { class: 'msg-gutter' }, grouped ? el('time', { class: 'msg-hover-time', datetime: new Date(entry.timestamp).toISOString(), title: formatFull(entry.timestamp), text: formatTime(entry.timestamp) }) : avatar(from, ch, 'md')),
+    el('div', { class: 'msg-gutter' }, grouped ? el('time', { class: 'msg-hover-time', datetime: new Date(entry.timestamp).toISOString(), title: formatFull(entry.timestamp), text: formatTime(entry.timestamp) }) : avatar({ ...from, name: personName(ch, from) }, ch, 'md')),
     el('div', { class: 'msg-main' },
       grouped ? null : el('div', { class: 'msg-head' },
         nameEl,
-        mine ? el('span', { class: 'pill', text: 'you' }) : member && member.role && member.role !== 'agent' && member.role !== 'person' ? el('span', { class: 'pill', text: member.role }) : null,
+        mine ? el('span', { class: 'pill', text: 'you' }) : null,
         from.remote ? el('span', { class: 'pill', title: 'Joined from outside the hub\'s machine', text: 'remote' }) : null,
         isDm ? el('span', { class: 'pill pill-dm', text: 'Direct message to you' }) : null,
         time),
