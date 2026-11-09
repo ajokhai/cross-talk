@@ -747,25 +747,31 @@
         const ch = lock && state.joined.get(lock.channel);
         if (!ch) return;
         ch.locks.set(lock.file, lock);
-        addActivity(ch, 'lock', `${personName(ch, lock.holder)} is editing`, fileName(lock.file));
-        renderIfSelected(lock.channel, true);
+        // Locks are the agents' own bookkeeping: people hear about one only when someone is kept waiting.
+        renderIfSelected(lock.channel, false);
         return;
       }
       case 'lock.released': {
         const ch = state.joined.get(frame.channel);
         if (!ch) return;
         ch.locks.delete(frame.file);
-        const who = personName(ch, frame.by);
-        if (frame.reason === 'expired') addActivity(ch, 'unlock', 'Nobody is editing', fileName(frame.file));
-        else addActivity(ch, 'unlock', `${who} finished editing`, fileName(frame.file));
-        renderIfSelected(frame.channel, true);
+        // Only worth saying if someone was waiting for it (no file names: they can reveal a project's layout).
+        const waiting = ch.waitingOn && ch.waitingOn.get(frame.file);
+        if (waiting) {
+          ch.waitingOn.delete(frame.file);
+          addActivity(ch, 'unlock', `${personName(ch, frame.by)} finished, so ${waiting} can carry on`);
+        }
+        renderIfSelected(frame.channel, !!waiting);
         return;
       }
       case 'lock.contended': {
         const lock = frame.lock;
         const ch = lock && state.joined.get(lock.channel);
         if (!ch) return;
-        addActivity(ch, 'wait', `${personName(ch, frame.requester)} is waiting to edit`, fileName(lock.file));
+        const waiter = personName(ch, frame.requester);
+        ch.waitingOn = ch.waitingOn || new Map();
+        if (!ch.waitingOn.has(lock.file)) addActivity(ch, 'wait', `${waiter} is waiting for ${personName(ch, lock.holder)} to finish a file`);
+        ch.waitingOn.set(lock.file, waiter);
         renderIfSelected(lock.channel, true);
         return;
       }
