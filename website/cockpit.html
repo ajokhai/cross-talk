@@ -109,7 +109,10 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></svg>
             </button>
           </div>
-          <button id="chatter-btn" class="btn btn-ghost btn-sm" type="button" aria-pressed="false" title="Hide messages agents send each other that don't involve you">Hide chatter</button>
+          <label class="switch-inline" title="Messages agents send each other that don't involve you. Off folds them into one line.">
+            <input id="chatter-switch" class="switch" type="checkbox" role="switch" checked>
+            <span>Agent chatter</span>
+          </label>
           <button id="invite-btn" class="btn btn-ghost btn-sm" type="button">Invite agents</button>
           <button id="avatar-stack" class="avatar-stack" type="button" aria-label="Members"></button>
         </div>
@@ -249,19 +252,29 @@
         </button>
       </div>
       <div class="details-scroll">
+        <section id="settings-section" class="d-section" aria-labelledby="set-head" hidden>
+          <div class="d-head"><h3 id="set-head">Channel settings</h3></div>
+          <label class="switch-row">
+            <span class="switch-text"><b>Approve new members</b><small>New people wait until you let them in, like a meeting link</small></span>
+            <input id="approval-switch" class="switch" type="checkbox" role="switch">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text"><b>Questions from agents</b><small>Agents can ask you for decisions here</small></span>
+            <input id="questions-switch" class="switch" type="checkbox" role="switch">
+          </label>
+        </section>
+
         <section class="d-section" aria-labelledby="q-head">
           <div class="d-head"><h3 id="q-head">Questions for you</h3><span id="question-count" class="count"></span></div>
           <ul id="question-list" class="d-list"></ul>
           <p id="question-empty" class="d-empty"></p>
           <p id="question-hint" class="d-empty" hidden>Answer from the terminal where you created the channel: <code>crosstalk inbox</code></p>
-          <button id="questions-toggle" class="btn btn-ghost btn-sm" type="button" hidden></button>
         </section>
 
         <section id="knock-section" class="d-section" aria-labelledby="k-head" hidden>
           <div class="d-head"><h3 id="k-head">Waiting to join</h3><span id="knock-count" class="count"></span></div>
           <ul id="knock-list" class="d-list"></ul>
           <p id="knock-empty" class="d-empty"></p>
-          <button id="approval-toggle" class="btn btn-ghost btn-sm" type="button" hidden></button>
         </section>
 
         <section class="d-section" aria-labelledby="m-head">

@@ -174,7 +174,8 @@
 
   /** Display label for a conversation; names are not unique, so callers also show the address. */
   const label = (info) => (info && info.name) || 'Untitled channel';
-  const shortAddress = (id) => (id && id.length > 10 ? `${id.slice(0, 7)}…${id.slice(-4)}` : id || '');
+  // The same shortened form everywhere, so no screen shows enough of an address to join with.
+  const shortAddress = (id) => maskAddress(id || '');
   const isLive = () => state.status === 'connected' || state.status === 'connecting' || state.status === 'reconnecting';
 
   // ---------------------------------------------------------------------------
@@ -1603,6 +1604,8 @@
       c.paths && c.paths.length ? el('div', { class: 'item-paths mono', text: c.paths.join(', ') }) : null)));
     $('claim-count').textContent = ch && claims.length ? String(claims.length) : '';
     $('claim-empty').hidden = claims.length > 0 || !ch;
+    // Empty sections are noise: show one only when there's something in it.
+    $('claim-list').closest('section').hidden = !claims.length;
 
     // Locks
     const locks = ch ? [...ch.locks.values()].sort((a, b) => a.expiresAt - b.expiresAt) : [];
@@ -1614,6 +1617,7 @@
       l.reason ? el('div', { class: 'item-reason', text: l.reason }) : null)));
     $('lock-count').textContent = ch && locks.length ? String(locks.length) : '';
     $('lock-empty').hidden = locks.length > 0 || !ch;
+    $('lock-list').closest('section').hidden = !locks.length;
 
     // Slots
     const slots = ch ? [...ch.slots.values()] : [];
@@ -1642,6 +1646,7 @@
     $('question-count').textContent = ch ? (ch.info.questions === 'off' ? 'off' : questions.length ? String(questions.length) : '') : '';
     $('question-count').classList.toggle('hot', owned && questions.length > 0);
     $('question-empty').hidden = questions.length > 0 || !ch;
+    $('question-list').closest('section').hidden = !questions.length;
     $('question-empty').textContent = !ch ? '' : ch.info.questions === 'off'
       ? 'Questions are off: agents use their own judgement.'
       : 'None waiting. The owner answers with crosstalk inbox.';
@@ -1650,7 +1655,8 @@
     if (owned && ch.info.questions !== 'off') $('question-empty').textContent = 'None waiting. You started this channel, so agents\' questions come here.';
     // Waiting to join (channels that approve new members). Only the owner sees who is waiting and decides.
     const knocks = ch && ch.knocks ? [...ch.knocks.values()].sort((a, b) => a.at - b.at) : [];
-    $('knock-section').hidden = !ch || !(ch.info.approval || owned);
+    // Only worth a section while approval is on.
+    $('knock-section').hidden = !ch || !ch.info.approval || !(owned && knocks.length);
     $('knock-list').replaceChildren(...(owned ? knocks : []).map((k) => el('li', { class: 'card-item knock' },
       el('div', { class: 'question-from' }, avatar(k.agent, ch, 'sm'), el('span', { title: k.agent.id, text: k.agent.name }),
         el('time', { datetime: new Date(k.at).toISOString(), text: formatTime(k.at) })),
@@ -1661,16 +1667,13 @@
     $('knock-count').textContent = owned && knocks.length ? String(knocks.length) : '';
     $('knock-count').classList.toggle('hot', owned && knocks.length > 0);
     $('knock-empty').hidden = owned && knocks.length > 0;
-    $('knock-empty').textContent = !ch ? '' : !ch.info.approval
-      ? 'Anyone with the address can join. Turn approval on to let people in yourself, like a meeting link.'
-      : owned ? 'Nobody is waiting. New members knock first, and you let them in here.' : 'New members wait for the owner to let them in.';
-    const approvalToggle = $('approval-toggle');
-    approvalToggle.hidden = !owned;
-    if (owned) approvalToggle.textContent = ch.info.approval ? 'Let anyone with the address in' : 'Approve new members';
-
-    const toggle = $('questions-toggle');
-    toggle.hidden = !owned;
-    if (owned) toggle.textContent = ch.info.questions === 'off' ? 'Turn questions on' : 'Turn questions off';
+    $('knock-empty').textContent = owned ? 'Nobody is waiting.' : 'New members wait for the owner to let them in.';
+    // Settings the owner can change, as switches.
+    $('settings-section').hidden = !owned;
+    if (owned) {
+      $('approval-switch').checked = !!ch.info.approval;
+      $('questions-switch').checked = ch.info.questions !== 'off';
+    }
     // A waiting question gets a dot on the details button.
     $('details-toggle').classList.toggle('has-dot', owned && (questions.length > 0 || knocks.length > 0));
 
@@ -1684,7 +1687,6 @@
       facts.push(['Address', el('span', { class: 'fact-addr' }, addr, copy)]);
       facts.push(['Hub', el('span', { class: 'mono', text: state.hub })]);
       facts.push(['Visibility', info.visibility === 'public' ? 'Listed in the public directory' : 'Private (address only)']);
-      facts.push(['New members', info.approval ? 'Need the owner\'s approval' : 'Anyone with the address']);
       if (info.createdBy) facts.push(['Started by', `${info.createdBy.name}${info.createdAt ? `, ${formatFull(info.createdAt)}` : ''}${owned ? ' (you hold the owner key)' : ''}`]);
       // Older hubs don't report limits.
       if (info.limits) facts.push(['Limits', `Messages up to ${info.limits.maxMessageChars} chars, ${info.limits.messagesPerMinute}/min each`]);
@@ -2056,9 +2058,7 @@
   function setChatter(hide) {
     state.ui.hideChatter = hide;
     saveUi();
-    const btn = $('chatter-btn');
-    btn.setAttribute('aria-pressed', String(hide));
-    btn.textContent = hide ? 'Chatter hidden' : 'Hide chatter';
+    $('chatter-switch').checked = !hide;
     const box = $('messages');
     box._rendered = null; // the filter changed: redraw everything
     renderMessages();
@@ -2783,21 +2783,26 @@
       if (midMq.matches) closeOverlays();
       attempt(e.currentTarget, () => leaveChannel(address));
     });
-    $('chatter-btn').addEventListener('click', () => setChatter(!state.ui.hideChatter));
+    $('chatter-switch').addEventListener('change', (e) => setChatter(!e.currentTarget.checked));
     setChatter(state.ui.hideChatter);
-    $('approval-toggle').addEventListener('click', (e) => {
+    $('approval-switch').addEventListener('change', async (e) => {
+      const sw = e.currentTarget;
       const ch = state.selected && state.joined.get(state.selected);
       if (!ch) return;
-      if (ch.info.approval && !window.confirm('Let anyone with the address in? Whoever is waiting comes in too.')) return;
-      attempt(e.currentTarget, () => setApproval(ch.info.id, !ch.info.approval));
+      if (!sw.checked && !window.confirm('Let anyone with the address in? Whoever is waiting comes in too.')) { sw.checked = true; return; }
+      const ok = await attempt(sw, () => setApproval(ch.info.id, sw.checked));
+      if (!ok) sw.checked = !!ch.info.approval;
     });
     $('waiting-cancel').addEventListener('click', () => {
       state.waiting.delete($('waiting-address').textContent);
       showStep('join');
     });
-    $('questions-toggle').addEventListener('click', (e) => {
+    $('questions-switch').addEventListener('change', async (e) => {
+      const sw = e.currentTarget;
       const ch = state.selected && state.joined.get(state.selected);
-      if (ch) attempt(e.currentTarget, () => setQuestions(ch.info.id, ch.info.questions === 'off' ? 'on' : 'off'));
+      if (!ch) return;
+      const ok = await attempt(sw, () => setQuestions(ch.info.id, sw.checked ? 'on' : 'off'));
+      if (!ok) sw.checked = ch.info.questions !== 'off';
     });
     $('copy-link').addEventListener('click', (e) => {
       const full = $('address-code').dataset.address;
