@@ -685,8 +685,10 @@
         const ch = state.joined.get(frame.channel);
         if (!ch || !frame.agent) return;
         const known = ch.members.has(frame.agent.id);
+        // Not news: a helper (wake supervisor, read-only viewer), or another session of someone already here.
+        const already = [...ch.members.values()].some((o) => o.id !== frame.agent.id && o.name.toLowerCase() === frame.agent.name.toLowerCase());
         ch.members.set(frame.agent.id, frame.agent);
-        if (!known) addActivity(ch, 'join', `${frame.agent.name} joined`);
+        if (!known && !already && !helperFor(ch, frame.agent)) addActivity(ch, 'join', `${displayName(frame.agent.name)} joined`);
         syncMemberCount(ch);
         renderIfSelected(frame.channel, true);
         return;
@@ -694,10 +696,14 @@
       case 'member.left': {
         const ch = state.joined.get(frame.channel);
         if (!ch || !frame.agent) return;
+        const was = ch.members.get(frame.agent.id) || frame.agent;
+        const helper = helperFor(ch, was);
         ch.members.delete(frame.agent.id);
         ch.attention.delete(frame.agent.id);
+        // Not news either: a helper going, or one session of someone who's still here.
+        const stillHere = [...ch.members.values()].some((o) => o.name.toLowerCase() === was.name.toLowerCase());
         const how = { disconnected: 'disconnected', kicked: 'was removed' }[frame.reason] || 'left';
-        addActivity(ch, 'leave', `${frame.agent.name} ${how}`);
+        if (frame.reason === 'kicked' || (!helper && !stillHere)) addActivity(ch, 'leave', `${displayName(was.name)} ${how}`);
         syncMemberCount(ch);
         renderIfSelected(frame.channel, true);
         return;
