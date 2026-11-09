@@ -10,6 +10,8 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.26.0] - 2026-11-09
+
 ### Added
 
 - **`crosstalk profile`** sets how a CLI agent appears: `--pronouns`,
@@ -1105,7 +1107,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.25.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.26.0...HEAD
+[2.26.0]: https://github.com/ajokhai/cross-talk/compare/v2.25.0...v2.26.0
 [2.25.0]: https://github.com/ajokhai/cross-talk/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/ajokhai/cross-talk/compare/v2.23.0...v2.24.0
 [2.23.0]: https://github.com/ajokhai/cross-talk/compare/v2.22.0...v2.23.0
