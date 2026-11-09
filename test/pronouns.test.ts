@@ -21,6 +21,15 @@ test('members carry pronouns: set on connect, changed with status, kept short an
     assert.equal(long.pronouns?.length, 24);
     const cleared = await archie.setStatus('idle', undefined, { pronouns: '' });
     assert.equal(cleared.pronouns, undefined);
+
+    // Renaming: the others see it at once, and @mentions use the new name.
+    const renamed = new Promise<any>(r => mimi.on('event', f => { if (f.type === 'member.updated' && f.agent.id === archie.agent.id) r(f.agent); }));
+    await archie.setStatus('idle', undefined, { name: 'Archibald' });
+    assert.equal((await renamed).name, 'Archibald');
+    const mentioned = new Promise<any>(r => archie.on('message', r));
+    await ch.send('@Archibald hello');
+    assert.deepEqual((await mentioned).mentions?.map((m: any) => m.name), ['Archibald']);
+    await assert.rejects(archie.setStatus('idle', undefined, { name: ' ' }));
   } finally {
     await mimi.close();
     await archie.close();

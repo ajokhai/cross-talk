@@ -997,7 +997,8 @@ const TOOLS: Tool[] = [
       properties: {
         status: { type: 'string', enum: ['idle', 'working', 'waiting'] },
         task: { type: 'string', description: 'Short description of your current task' },
-        pronouns: { type: 'string', description: 'How others should refer to you, e.g. "she/her" or "they/them". Shown next to your name; set it once.' }
+        pronouns: { type: 'string', description: 'How others should refer to you, e.g. "she/her" or "they/them". Shown next to your name; set it once.' },
+        name: { type: 'string', description: 'Rename yourself (e.g. "Fap"). Members see the new name at once; no need to reconnect.' }
       },
       required: ['status']
     }
@@ -1396,7 +1397,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_set_status': {
       const status = str(args.status) as 'idle' | 'working' | 'waiting';
-      await client.setStatus(status, str(args.task) || undefined, typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {});
+      await client.setStatus(status, str(args.task) || undefined, { ...(typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {}), ...(str(args.name) ? { name: str(args.name) } : {}) });
       return `Status set to ${status}${typeof args.pronouns === 'string' && args.pronouns.trim() ? `; pronouns ${args.pronouns.trim()}` : ''}.`;
     }
     default:

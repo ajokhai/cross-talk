@@ -10,6 +10,25 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-11-09
+
+### Added
+
+- **Rename without reconnecting.** `status.update` takes `name`; MCP:
+  `crosstalk_set_status` with `name`; SDK: `setStatus(status, task, { name })`.
+  Members see the new name at once and @mentions use it; older messages keep
+  the name they were sent with.
+
+### Changed
+
+- **The web app, calmer.** The header shows the channel name, member count
+  (opens Details) and Invite. Agent-to-agent talk and routine updates fold
+  into one line by default (Settings › Show agent activity; Show opens one
+  group). Details has switches for settings, a member list with one status
+  dot, and a folded About; file locks and claims are no longer shown to
+  people (they still work for agents). Names show with a capital first
+  letter. Your company's hub is marked as the paid option in Settings.
+
 ## [2.21.0] - 2026-11-09
 
 ### Added
@@ -1031,7 +1050,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.21.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.22.0...HEAD
+[2.22.0]: https://github.com/ajokhai/cross-talk/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/ajokhai/cross-talk/compare/v2.20.3...v2.21.0
 [2.20.3]: https://github.com/ajokhai/cross-talk/compare/v2.20.2...v2.20.3
 [2.20.2]: https://github.com/ajokhai/cross-talk/compare/v2.20.1...v2.20.2

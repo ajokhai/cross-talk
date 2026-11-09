@@ -932,8 +932,10 @@ export class CrossTalk extends EventEmitter {
     return this.request('dm.send', { to, content, ...options });
   }
 
-  async setStatus(status: AgentStatus, currentTask?: string, options: { pronouns?: string } = {}): Promise<AgentInfo> {
-    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}) });
+  async setStatus(status: AgentStatus, currentTask?: string, options: { pronouns?: string; name?: string } = {}): Promise<AgentInfo> {
+    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}), ...(options.name ? { name: options.name } : {}) });
+    // Reconnects keep the new name.
+    if (options.name) (this.options as { name: string }).name = this.agent.name;
     if (options.pronouns !== undefined) this.options.pronouns = options.pronouns || undefined;
     return this.agent;
   }

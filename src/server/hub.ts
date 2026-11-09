@@ -702,7 +702,7 @@ export class MeshHub {
       case 'lock.wait': return this.waitLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'slot.acquire': return this.acquireSlot(conn, f.channel, f.name, f.capacity, f.ttlSeconds);
       case 'slot.release': return this.releaseSlot(conn, f.channel, f.name);
-      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns);
+      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns, f.name);
       case 'listener.report': {
         if (typeof f.open !== 'boolean') fail('bad_request', 'open must be true or false');
         if (f.open) this.pollStarted(conn);
@@ -1938,7 +1938,7 @@ export class MeshHub {
     }
   }
 
-  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown): AgentInfo {
+  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown, name?: unknown): AgentInfo {
     const agent = conn.agent!;
     if (status !== undefined) {
       if (status !== 'idle' && status !== 'working' && status !== 'waiting') {
@@ -1947,6 +1947,11 @@ export class MeshHub {
       agent.status = status as AgentInfo['status'];
     }
     if (currentTask !== undefined) agent.currentTask = cleanText(currentTask, 280);
+    if (name !== undefined) {
+      const next = cleanText(name, 64);
+      if (!next) fail('bad_request', 'name can\'t be empty');
+      agent.name = next;
+    }
     if (pronouns !== undefined) {
       const p = cleanPronouns(pronouns);
       if (p) agent.pronouns = p; else delete agent.pronouns;

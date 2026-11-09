@@ -472,7 +472,8 @@ export type RequestFrame =
   | { type: 'slot.acquire'; id: string; channel: string; name: string; capacity: number; ttlSeconds?: number }
   /** Gives up your place in a slot, or your place in its queue. */
   | { type: 'slot.release'; id: string; channel: string; name: string }
-  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string }
+  /** `name` renames you (2.22+): members see the new name at once; older messages keep the name they were sent with. */
+  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string; name?: string }
   /**
    * A WebSocket agent (an MCP server) reports that a local listener is
    * attached to it (2.21+): it counts as listening, exactly like an open
