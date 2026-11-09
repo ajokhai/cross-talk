@@ -1258,6 +1258,8 @@
     state.status = status;
     const pill = $('status-btn');
     pill.dataset.state = status;
+    // Connected is the normal case: say nothing. Show the pill only when something's off.
+    pill.classList.toggle('quiet', status === 'connected');
     $('hub-dot').dataset.state = status;
     $('conn-status-text').textContent = {
       connected: 'Connected',
@@ -1525,12 +1527,9 @@
     if (ch) {
       const info = ch.info;
       $('channel-title').textContent = label(info);
-      const parts = [info.topic || (info.visibility === 'public' ? 'Public channel' : 'Private channel')];
-      if (info.approval) parts.push('approval on');
       const team = teamCount(ch);
-      parts.push(`${team} member${team === 1 ? '' : 's'}`);
+      const parts = [info.topic, info.visibility === 'public' ? 'Public' : '', `${team} member${team === 1 ? '' : 's'}`].filter(Boolean);
       $('channel-topic').textContent = parts.join(' · ');
-      $('channel-topic').title = info.approval ? 'New members wait until the owner lets them in' : '';
       // Shortened on screen so a screenshot doesn't hand out the invite; Copy uses the full address.
       $('address-code').textContent = maskAddress(info.id);
       $('address-code').dataset.address = info.id;
@@ -1557,7 +1556,7 @@
       const isMe = state.me && m.id === state.me.id;
       const p = presence(ch, m);
       const att = ch.attention.get(m.id);
-      const av = avatar(m, ch, 'md');
+      const av = avatar(m, ch, 'sm');
       av.append(el('span', { class: 'presence', dataset: { state: p.state } }));
       // At a glance: name, pronouns, and one line of what they're doing. The rest is in the tooltip.
       const helpers = helpersOf(ch, m);
@@ -1578,10 +1577,10 @@
             m.pronouns ? el('span', { class: 'member-pronouns', text: m.pronouns }) : null,
             tag ? el('span', { class: 'pill mono', title: `Agent id ${m.id}: another member has the same name`, text: tag }) : null,
             m.remote ? el('span', { class: 'pill', title: m.via ? `Joined with remote invite "${m.via}"` : 'Joined from outside the hub\'s machine', text: 'remote' }) : null),
-          el('div', { class: 'member-doing', dataset: { state: p.state } },
-            el('span', { class: 'dot', dataset: { state: p.state }, 'aria-hidden': 'true' }),
-            isMe ? 'You' : doing,
-            helpers.some((h) => h.role === 'supervisor') ? el('span', { class: 'member-helper', text: ' · has a wake helper' }) : null),
+          // The dot on the avatar says whether they're here; a line only when there's more to say.
+          (!isMe && (m.currentTask && !/^shared by /i.test(m.currentTask) || p.state !== 'online'))
+            ? el('div', { class: 'member-doing', dataset: { state: p.state }, text: m.currentTask && !/^shared by /i.test(m.currentTask) ? m.currentTask : p.text })
+            : null,
           !isMe && sharedBy(m) && sameName(sharedBy(m), state.config.name) ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `How much of your plan each guest may use on ${m.name}`, onclick: () => openAllowances(m), text: 'Allowances' }) : null,
           // The owner can remove a member (and their helpers). Shown on hover, so the list stays quiet.
           !isMe && ownerKey(ch.info.id) ? el('button', { type: 'button', class: 'member-remove', title: `Remove ${m.name} from this channel`, onclick: (e) => removeMember(e.currentTarget, ch, m) }, 'Remove') : null),
@@ -1618,6 +1617,12 @@
     $('lock-count').textContent = ch && locks.length ? String(locks.length) : '';
     $('lock-empty').hidden = locks.length > 0 || !ch;
     $('lock-list').closest('section').hidden = !locks.length;
+    {
+      const work = (ch ? ch.claims.size : 0) + locks.length + (ch ? ch.slots.size : 0);
+      // Locks, claims and slots are the agents' own bookkeeping: nothing a person can act on here.
+      $('work-section').hidden = true;
+      $('work-count').textContent = work ? String(work) : '';
+    }
 
     // Slots
     const slots = ch ? [...ch.slots.values()] : [];
@@ -1668,8 +1673,9 @@
     $('knock-count').classList.toggle('hot', owned && knocks.length > 0);
     $('knock-empty').hidden = owned && knocks.length > 0;
     $('knock-empty').textContent = owned ? 'Nobody is waiting.' : 'New members wait for the owner to let them in.';
-    // Settings the owner can change, as switches.
-    $('settings-section').hidden = !owned;
+    // Settings: the chatter view is everyone's; the rest only the owner can change.
+    $('settings-section').hidden = !ch;
+    for (const id of ['approval-switch', 'questions-switch']) $(id).closest('.switch-row').hidden = !owned;
     if (owned) {
       $('approval-switch').checked = !!ch.info.approval;
       $('questions-switch').checked = ch.info.questions !== 'off';
@@ -1685,9 +1691,9 @@
       const copy = el('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'aria-label': 'Copy channel address', onclick: (e) => copyText(info.id, e.currentTarget) });
       copy.append(copyIcon());
       facts.push(['Address', el('span', { class: 'fact-addr' }, addr, copy)]);
-      facts.push(['Hub', el('span', { class: 'mono', text: state.hub })]);
-      facts.push(['Visibility', info.visibility === 'public' ? 'Listed in the public directory' : 'Private (address only)']);
-      if (info.createdBy) facts.push(['Started by', `${info.createdBy.name}${info.createdAt ? `, ${formatFull(info.createdAt)}` : ''}${owned ? ' (you hold the owner key)' : ''}`]);
+      facts.push(['Hub', state.hub === DEFAULT_URL ? 'CrossTalk internet hub' : el('span', { class: 'mono', text: state.hub })]);
+      if (info.visibility === 'public') facts.push(['Listed', 'In the public directory']);
+      if (info.createdBy) facts.push(['Started by', `${info.createdBy.name}${info.createdAt ? `, ${formatFull(info.createdAt)}` : ''}`]);
       // Older hubs don't report limits.
       if (info.limits) facts.push(['Limits', `Messages up to ${info.limits.maxMessageChars} chars, ${info.limits.messagesPerMinute}/min each`]);
     }
@@ -1975,7 +1981,11 @@
    * one quiet line you can open.
    */
   function isChatter(ch, entry) {
-    if (entry.kind !== 'message' || !entry.message || entry.message.kind === 'notice') return false;
+    // Routine updates (joins, leaves, locks, claims, settings) count too; questions for you don't.
+    if (entry.kind === 'activity') return !['question', 'answer'].includes(entry.icon);
+    if (entry.kind !== 'message' || !entry.message) return false;
+    // Hub notices ("X has not been listening…") are housekeeping, unless they're about you.
+    if (entry.message.kind === 'notice') return !mentionsMe(entry.message);
     const m = entry.message;
     const from = m.from || {};
     if (state.me && from.id === state.me.id) return false;
@@ -1991,9 +2001,9 @@
       const run = ch.timeline.slice(ch.timeline.indexOf(entry));
       const n = run.findIndex((e) => !isChatter(ch, e));
       const count = n < 0 ? run.length : n;
-      const names = [...new Set(run.slice(0, count).map((e) => e.message.from && e.message.from.name).filter(Boolean))];
-      return [el('button', { type: 'button', class: 'chatter-run', title: 'Show agent chatter', onclick: () => setChatter(false) },
-        `${count} message${count === 1 ? '' : 's'} between agents`, el('span', { class: 'muted', text: names.length ? ` · ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}` : '' }), el('span', { class: 'chatter-show', text: ' · Show' }))];
+      const names = [...new Set(run.slice(0, count).map((e) => e.message && e.message.from && e.message.from.id !== 'hub' && e.message.from.name).filter(Boolean))];
+      return [el('button', { type: 'button', class: 'chatter-run', title: 'Show agent activity', onclick: () => setChatter(false) },
+        `${count} agent update${count === 1 ? '' : 's'}`, el('span', { class: 'muted', text: names.length ? ` · ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}` : '' }), el('span', { class: 'chatter-show', text: ' · Show' }))];
     }
     const out = [];
     if (!prev || new Date(prev.timestamp).toDateString() !== new Date(entry.timestamp).toDateString()) {
@@ -2080,7 +2090,8 @@
     const same = box.dataset.channel === ch.info.id;
     const rendered = box._rendered;
     const appendOnly = same && rendered && rendered.first === ch.timeline[0] && rendered.order === (ch.order || 0) &&
-      rendered.count <= ch.timeline.length;
+      rendered.count <= ch.timeline.length &&
+      !(state.ui.hideChatter && ch.timeline.slice(rendered.count).some((e) => isChatter(ch, e)));
 
     if (appendOnly) {
       const nodes = [];
@@ -2586,7 +2597,7 @@
       details: ui.details === true,
       theme: THEMES.includes(ui.theme) ? ui.theme : 'system',
       selected: ui.selected && typeof ui.selected === 'object' ? ui.selected : {},
-      hideChatter: ui.hideChatter === true,
+      hideChatter: ui.hideChatter !== false,
     };
     state.hub = state.config.url;
     try {
@@ -2608,6 +2619,7 @@
       if (midMq.matches) closeOverlays(); else toggleDetails(false);
     });
     $('avatar-stack').addEventListener('click', () => toggleDetails(true));
+    $('channel-topic').addEventListener('click', () => toggleDetails(true));
     $('scrim').addEventListener('click', closeOverlays);
     $('theme-btn').addEventListener('click', () => {
       state.ui.theme = THEMES[(THEMES.indexOf(state.ui.theme) + 1) % THEMES.length];

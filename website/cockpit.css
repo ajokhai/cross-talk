@@ -858,3 +858,34 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .switch-text b { font-weight: 500; font-size: 14px; color: var(--text); }
 .switch-text small { font-size: 12px; color: var(--muted); }
 .switch-inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); white-space: nowrap; cursor: pointer; }
+.switch-row[hidden], .addr-chip[hidden] { display: none; }
+
+/* Calmer layout: the subtitle opens Details; secondary details fold away */
+.chan-topic-btn { display: block; padding: 0; border: 0; background: none; font: inherit; color: var(--muted); text-align: left; cursor: pointer; }
+.chan-topic-btn:hover { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
+.avatar-stack[hidden] { display: none; }
+.d-fold { border-top: 1px solid var(--border); padding: 12px 0; }
+.d-fold[hidden] { display: none; }
+.d-fold > summary { cursor: pointer; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.d-fold > summary::-webkit-details-marker { display: none; }
+.d-fold > summary::after { content: "+"; font-size: 15px; }
+.d-fold[open] > summary::after { content: "–"; }
+.d-fold > .d-section, .d-fold > .facts, .d-fold > .d-actions { margin-top: 12px; }
+.d-fold .d-section { border-top: 0; padding-top: 0; }
+
+/* Details, compact */
+.details-scroll .d-section { padding-top: 14px; padding-bottom: 14px; }
+.details-scroll .d-list { gap: 4px; }
+.details-scroll .member { padding: 4px 0; gap: 10px; }
+.details-scroll .member-name { font-size: 14px; }
+.details-scroll .member-doing { font-size: 12.5px; }
+.switch-row { padding: 8px 0; }
+.switch-text b { font-size: 13.5px; }
+.switch-text small { font-size: 11.5px; }
+
+/* Quiet when all is well */
+#status-btn.quiet { display: none; }
+.composer-hint > span:first-child { display: none; }
+.member-doing { color: var(--muted); }
+/* On wide screens the top-bar panel button opens and closes Details; its own X would repeat it. */
+@media (min-width: 1101px) { #details-close { display: none; } }

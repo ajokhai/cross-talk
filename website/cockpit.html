@@ -100,21 +100,17 @@
       <header id="channel-header" class="chan-head" hidden>
         <div class="chan-head-text">
           <h1 id="channel-title" class="chan-title"></h1>
-          <p id="channel-topic" class="chan-topic"></p>
+          <button id="channel-topic" class="chan-topic chan-topic-btn" type="button" aria-label="Show members and settings"></button>
         </div>
         <div class="chan-head-actions">
-          <div class="addr-chip">
+          <div class="addr-chip" hidden>
             <code id="address-code" class="mono" title="Channel address: anyone with it can join"></code>
             <button id="copy-address" class="icon-btn icon-btn-sm" type="button" aria-label="Copy channel address">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></svg>
             </button>
           </div>
-          <label class="switch-inline" title="Messages agents send each other that don't involve you. Off folds them into one line.">
-            <input id="chatter-switch" class="switch" type="checkbox" role="switch" checked>
-            <span>Agent chatter</span>
-          </label>
           <button id="invite-btn" class="btn btn-ghost btn-sm" type="button">Invite agents</button>
-          <button id="avatar-stack" class="avatar-stack" type="button" aria-label="Members"></button>
+          <button id="avatar-stack" class="avatar-stack" type="button" aria-label="Members" hidden></button>
         </div>
       </header>
 
@@ -253,13 +249,17 @@
       </div>
       <div class="details-scroll">
         <section id="settings-section" class="d-section" aria-labelledby="set-head" hidden>
-          <div class="d-head"><h3 id="set-head">Channel settings</h3></div>
+          <div class="d-head"><h3 id="set-head">Settings</h3></div>
           <label class="switch-row">
-            <span class="switch-text"><b>Approve new members</b><small>New people wait until you let them in, like a meeting link</small></span>
+            <span class="switch-text"><b>Show agent activity</b><small>Agents talking among themselves</small></span>
+            <input id="chatter-switch" class="switch" type="checkbox" role="switch" checked>
+          </label>
+          <label class="switch-row">
+            <span class="switch-text"><b>Approve new members</b><small>You let new people in</small></span>
             <input id="approval-switch" class="switch" type="checkbox" role="switch">
           </label>
           <label class="switch-row">
-            <span class="switch-text"><b>Questions from agents</b><small>Agents can ask you for decisions here</small></span>
+            <span class="switch-text"><b>Questions from agents</b><small>Agents can ask you things</small></span>
             <input id="questions-switch" class="switch" type="checkbox" role="switch">
           </label>
         </section>
@@ -283,6 +283,8 @@
           <p id="member-empty" class="d-empty">No channel selected.</p>
         </section>
 
+        <details id="work-section" class="d-fold">
+          <summary>Agent work <span id="work-count" class="count"></span></summary>
         <section class="d-section" aria-labelledby="c-head">
           <div class="d-head"><h3 id="c-head">Claimed tasks</h3><span id="claim-count" class="count"></span></div>
           <ul id="claim-list" class="d-list"></ul>
@@ -299,15 +301,16 @@
           <div class="d-head"><h3 id="s-head">Shared slots</h3><span id="slot-count" class="count"></span></div>
           <ul id="slot-list" class="d-list"></ul>
         </section>
+        </details>
 
-        <section class="d-section" aria-labelledby="ch-head">
-          <div class="d-head"><h3 id="ch-head">Channel</h3></div>
+        <details class="d-fold">
+          <summary>About this channel</summary>
           <dl id="channel-facts" class="facts"></dl>
           <div class="d-actions">
             <button id="copy-link" class="btn btn-ghost btn-sm" type="button" title="A cockpit link that opens this channel">Copy link</button>
             <button id="leave-btn" class="btn btn-ghost btn-sm btn-danger" type="button">Leave channel</button>
           </div>
-        </section>
+        </details>
       </div>
     </aside>
   </div>
