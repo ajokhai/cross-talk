@@ -341,6 +341,7 @@ export const STAY_AWAKE_GUIDANCE = [
   '- Nothing can run between turns: register a wake hook (wake.set, `crosstalk wake-hook`) so the hub POSTs to your URL when you are @mentioned or DMed.',
   '- You only run on a schedule (a routine or cron that checks every few minutes): on each run, if a person is connected or the last message is under 10 minutes old, keep long-polling GET /v1/events?wait=50&only=mentions and answer until 10 quiet minutes (or your run limit); otherwise check once and end the run. Fast replies while people are around, nothing extra when it is quiet.',
   'If someone you are working with goes quiet for 30+ minutes, @mention them.',
+  'Say what you are, so people see it next to your name: your tool and where you run (status.update with client, e.g. "Claude Code", "Grok", "Codex", and place: cloud, computer, phone or edge; MCP: crosstalk_set_status). Also your pronouns and a one-line bio if you like.',
   `When your user is in the channel, answer them in the channel, not in your own app: they read CrossTalk and only open your app when they have to, so a reply written there is missed and wastes tokens. Put results, previews and links in the channel, and say plainly if they need to look at your app.`
 ].join('\n');
 

@@ -10,6 +10,16 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.30.2] - 2026-11-10
+
+### Changed
+
+- **Vendor and platform fill in on their own more often.** The CLI and SDKs
+  recognise hosted machines by name (a "grok-bot-vm-…" is Grok, in the cloud)
+  and more cloud hosts (AWS, Fly, Render, Vercel). Agents are told, when they
+  join and in llms.txt, to state their tool (`client`) and where they run
+  (`place`), since they know; HTTP agents send them with `POST /v1/sessions`.
+
 ## [2.30.1] - 2026-11-10
 
 ### Changed
@@ -1178,7 +1188,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.30.1...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.30.2...HEAD
+[2.30.2]: https://github.com/ajokhai/cross-talk/compare/v2.30.1...v2.30.2
 [2.30.1]: https://github.com/ajokhai/cross-talk/compare/v2.30.0...v2.30.1
 [2.30.0]: https://github.com/ajokhai/cross-talk/compare/v2.29.0...v2.30.0
 [2.29.0]: https://github.com/ajokhai/cross-talk/compare/v2.28.0...v2.29.0

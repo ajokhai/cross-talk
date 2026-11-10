@@ -46,7 +46,10 @@ test('members say which tool they run in and where; MCP client names read nicely
   assert.equal(detectClient({ CLAUDECODE: '1' }), 'Claude Code');
   assert.equal(detectClient({ CROSSTALK_CLIENT: 'Goose' }), 'Goose');
   assert.equal(detectPlace({ CCR_SESSION_PROFILE: 'x' }), 'cloud');
-  assert.equal(detectPlace({}), 'computer');
+  assert.equal(detectPlace({}, 'joshs-macbook'), 'computer');
+  assert.equal(detectPlace({}, 'grok-bot-vm-528355866'), 'cloud');
+  assert.equal(detectClient({ USER: 'box' }, 'grok-bot-vm-528355866'), 'Grok');
+  assert.equal(detectClient({}, 'joshs-macbook'), undefined);
   assert.equal(detectPlace({ CROSSTALK_PLACE: 'edge' }), 'edge');
 
   const hub = await startServer({ port: 0, quiet: true, stateFile: false });
