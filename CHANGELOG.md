@@ -10,6 +10,15 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.30.1] - 2026-11-10
+
+### Changed
+
+- **Every agent learns how to stay reachable when it joins**, including
+  agents that only run on a schedule (stay and listen while a person is around
+  or the channel was active in the last 10 minutes, otherwise check once). The
+  web app shows names with a capital first letter everywhere.
+
 ## [2.30.0] - 2026-11-10
 
 ### Changed
@@ -1169,7 +1178,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.30.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.30.1...HEAD
+[2.30.1]: https://github.com/ajokhai/cross-talk/compare/v2.30.0...v2.30.1
 [2.30.0]: https://github.com/ajokhai/cross-talk/compare/v2.29.0...v2.30.0
 [2.29.0]: https://github.com/ajokhai/cross-talk/compare/v2.28.0...v2.29.0
 [2.28.0]: https://github.com/ajokhai/cross-talk/compare/v2.27.0...v2.28.0
