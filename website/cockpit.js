@@ -708,6 +708,9 @@
       case 'message':
         if (frame.message) addMessage(frame.message);
         return;
+      case 'message.deleted':
+        dropMessage(frame.channel, frame.message);
+        return;
       case 'member.joined': {
         const ch = state.joined.get(frame.channel);
         if (!ch || !frame.agent) return;
@@ -931,6 +934,29 @@
     const mine = state.me && message.from && message.from.id === state.me.id;
     if (!mine) bumpAttention(ch, mentionsMe(message), message);
     renderIfSelected(message.channel, true);
+    renderChannels();
+  }
+
+  const TOUCH = window.matchMedia('(hover: none)');
+  async function deleteMessage(button, ch, m) {
+    const preview = String(m.content || '').replace(/\s+/g, ' ').slice(0, 80);
+    if (!window.confirm(`Delete this message for everyone?\n\n"${preview}${m.content && m.content.length > 80 ? '\u2026' : ''}"\n\nIt is removed from the channel history too.`)) return;
+    await attempt(button, () => request('message.delete', { channel: ch.info.id, message: m.id, ...(ownerKey(ch.info.id) ? { ownerKey: ownerKey(ch.info.id) } : {}) }));
+  }
+
+  /** A message was deleted: drop it everywhere, including the sidebar preview. */
+  function dropMessage(address, id) {
+    const ch = state.joined.get(address);
+    if (!ch) return;
+    const before = ch.timeline.length;
+    ch.timeline = ch.timeline.filter((e) => !(e.message && e.message.id === id));
+    if (ch.timeline.length === before) return;
+    if (ch.lastMessage && ch.lastMessage.id === id) {
+      const rest = ch.timeline.filter((e) => e.kind === 'message' && e.message && !e.message.deleted);
+      ch.lastMessage = rest.length ? rest[rest.length - 1].message : null;
+    }
+    $('messages')._rendered = null;
+    renderIfSelected(address, true);
     renderChannels();
   }
 
@@ -2223,6 +2249,8 @@
       class: `msg${grouped ? ' grouped' : ''}${mine ? ' mine' : ''}${toMe ? ' to-me' : ''}${isDm ? ' dm' : ''}`,
       dataset: { id: m.id || '' },
       'aria-label': `${from.name}, ${formatTime(entry.timestamp)}${isDm ? ', direct message' : ''}`,
+      // No hover on phones: a tap shows the message's tools.
+      onclick: (e) => { if (TOUCH.matches && !e.target.closest('a, button')) e.currentTarget.classList.toggle('tools'); },
     },
     el('div', { class: 'msg-gutter' }, grouped ? el('time', { class: 'msg-hover-time', datetime: new Date(entry.timestamp).toISOString(), title: formatFull(entry.timestamp), text: formatTime(entry.timestamp) }) : avatar({ ...from, name: personName(ch, from) }, ch, 'md')),
     el('div', { class: 'msg-main' },
@@ -2233,7 +2261,11 @@
         isDm ? el('span', { class: 'pill pill-dm', title: 'Nobody else in the channel sees this', text: mine ? `Private · only ${m.to ? personName(ch, m.to) : 'they'} ${m.to ? 'sees' : 'see'} this` : 'Private · only you see this' }) : null,
         time),
       rich(m.content, { names: mentionNames(ch, m) }),
-      raw ? el('code', { class: 'msg-shorthand', title: 'XDialect shorthand', text: raw }) : null));
+      raw ? el('code', { class: 'msg-shorthand', title: 'XDialect shorthand', text: raw }) : null),
+    // The sender, or the owner, can delete a channel message (e.g. a pasted password).
+    !isDm && m.id && (mine || ownerKey(ch.info.id))
+      ? el('button', { type: 'button', class: 'msg-del', title: 'Delete this message for everyone', 'aria-label': `Delete message from ${from.name}`, onclick: (e) => deleteMessage(e.currentTarget, ch, m) }, 'Delete')
+      : null);
     out.push(article);
     return out;
   }

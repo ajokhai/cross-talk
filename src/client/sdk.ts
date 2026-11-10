@@ -118,7 +118,7 @@ function channelOf(f: ServerFrame): string | undefined {
     case 'question.asked': case 'question.closed': return f.question.channel;
     case 'claim.updated': return f.claim.channel;
     case 'channel.updated': return f.channel.id;
-    case 'member.joined': case 'member.left': case 'member.updated': case 'lock.released': case 'channel.closed': return f.channel;
+    case 'member.joined': case 'member.left': case 'member.updated': case 'lock.released': case 'channel.closed': case 'message.deleted': return f.channel;
   }
 }
 
@@ -197,6 +197,12 @@ export class Channel extends EventEmitter {
         if (this.messages.length > 500) this.messages.shift();
         this.emit('message', frame.message);
         break;
+      case 'message.deleted': {
+        const at = this.messages.findIndex(m => m.id === frame.message);
+        if (at >= 0) this.messages.splice(at, 1);
+        this.emit('message.deleted', frame);
+        break;
+      }
       case 'member.joined':
       case 'member.updated':
         this.members.set(frame.agent.id, frame.agent);
@@ -423,6 +429,11 @@ export class Channel extends EventEmitter {
    * Sets the channel's rules (2.31+): how agents here must work. Everyone is
    * shown them when they join and again when they change. Empty clears them.
    */
+  /** Delete a message (2.32+). Your own needs nothing more; anyone else's needs the owner key. */
+  async deleteMessage(messageId: string, ownerKey = this.ownerKey): Promise<void> {
+    await this.client.request('message.delete', { channel: this.address, message: messageId, ...(ownerKey ? { ownerKey } : {}) });
+  }
+
   async setRules(rules: string, ownerKey = this.ownerKey): Promise<ChannelInfo> {
     if (!ownerKey) throw new CrossTalkError('forbidden', "Changing settings needs this channel's owner key");
     this.info = await this.client.request('channel.configure', { channel: this.address, ownerKey, rules });
@@ -784,6 +795,7 @@ export class CrossTalk extends EventEmitter {
       this.safeEmit('owner', { channel: frame.channel, ownerKey: frame.ownerKey, by: frame.by });
     }
     if (frame.type === 'dm' || frame.type === 'message') this.queue(frame.message);
+    if (frame.type === 'message.deleted') this.unread = this.unread.filter(m => m.id !== frame.message);
     if (frame.type === 'question.closed') {
       this.closedQuestions.set(frame.question.id, frame.question);
       if (this.closedQuestions.size > 200) this.closedQuestions.delete(this.closedQuestions.keys().next().value!);

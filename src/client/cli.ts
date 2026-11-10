@@ -1257,6 +1257,19 @@ program
   });
 
 program
+  .command('delete <address> <message-id>')
+  .description('Delete a message in a channel you created, e.g. a password someone pasted. It disappears for everyone and from the history')
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, messageId: string, opts) => {
+    try {
+      await asOwner(address, opts.url, (ch, key) => ch.deleteMessage(messageId, key));
+      console.log(green('✔ Message deleted'));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('unban <address> <agent>')
   .description('Lift a ban in a channel you created (by name, agent id, or ip:<address>)')
   .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')

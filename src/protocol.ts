@@ -200,6 +200,8 @@ export interface ChannelMessage {
    * it was posted as. The result is the first part.
    */
   parts?: number;
+  /** 2.32+: the sender or the owner deleted it. Content, metadata and mentions are gone. */
+  deleted?: boolean;
   /** Present when kind === 'shorthand'. `content` holds the English expansion. */
   shorthand?: {
     raw: string;
@@ -467,6 +469,8 @@ export type RequestFrame =
    * `bad_request` and `details.maxMessageChars`.
    */
   | { type: 'message.send'; id: string; channel: string; content: string; text?: string; metadata?: Record<string, unknown>; split?: boolean }
+  /** 2.32+: delete a channel message. The sender can delete their own; anyone else needs the owner key. */
+  | { type: 'message.delete'; id: string; channel: string; message: string; ownerKey?: string }
   | { type: 'shorthand.send'; id: string; channel: string; shorthand: string }
   | { type: 'dm.send'; id: string; to: string; content: string; text?: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
   | { type: 'lock.acquire'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
@@ -581,6 +585,7 @@ export interface ResultData {
   'channel.list': { channels: ChannelInfo[]; cursor?: string };
   'channel.state': ChannelSnapshot;
   'message.send': ChannelMessage;
+  'message.delete': { channel: string; message: string };
   'shorthand.send': ChannelMessage;
   'dm.send': DirectMessage;
   'lock.acquire': FileLock;
@@ -663,6 +668,8 @@ export type ServerFrame =
   | { type: 'channel.owner'; channel: string; ownerKey: string; by: AgentRef }
   | { type: 'member.updated'; channel: string; agent: AgentInfo }
   | { type: 'message'; message: ChannelMessage }
+  /** 2.32+: a message was deleted. Drop it from anything you show or keep. */
+  | { type: 'message.deleted'; channel: string; message: string; by: AgentRef }
   | { type: 'dm'; message: DirectMessage }
   | { type: 'lock.acquired'; lock: FileLock }
   | { type: 'lock.released'; channel: string; file: string; by: AgentRef; reason: 'released' | 'expired' | 'disconnected' }

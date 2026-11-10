@@ -706,6 +706,7 @@ export class MeshHub {
       case 'channel.receipts': return { receipts: this.receipts(this.memberChannel(conn, f.channel), f.limit) };
       case 'claim.create': return this.createClaim(conn, f.channel, f.task, f.everySeconds, f.paths);
       case 'claim.update': return this.updateClaims(conn, f.channel, f.claim, f.note, f.status);
+      case 'message.delete': return this.deleteMessage(conn, f.channel, f.message, f.ownerKey);
       case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata, f.split === true);
       case 'shorthand.send': return this.postShorthand(conn, f.channel, f.shorthand);
       case 'dm.send': return this.sendDirect(conn, f.to, f.content ?? f.text, f.replyExpected, f.metadata);
@@ -1078,7 +1079,7 @@ export class MeshHub {
       members: this.visibleMembers(channel).map(id => this.agents.get(id)?.agent).filter((a): a is AgentInfo => !!a),
       locks: this.locks.list(channel.id),
       attention: this.visibleMembers(channel).map(id => this.attention(channel, id)).filter((a): a is MemberAttention => !!a),
-      messages: seen >= 0 ? history.slice(seen + 1) : history,
+      messages: (seen >= 0 ? history.slice(seen + 1) : history).filter(m => !m.deleted),
       questions: [...channel.questions.values()],
       claims: [...channel.claims.values()].map(c => ({ ...c })),
       slots: [...channel.slots.values()].map(slot => this.slotView(channel, slot))
@@ -2197,6 +2198,23 @@ export class MeshHub {
     const text = cleanText(answer, 2000);
     if (!text) fail('bad_request', 'answer must be a non-empty string');
     return this.closeQuestion(channel, q, 'answered', text);
+  }
+
+  /** The sender can delete their own message; anyone else needs the owner key. Kept as an empty slot so read counts stay right. */
+  private deleteMessage(conn: Connection, address: unknown, messageId: unknown, ownerKey: unknown): { channel: string; message: string } {
+    const channel = this.memberChannel(conn, address);
+    if (typeof messageId !== 'string' || !messageId) fail('bad_request', 'message must be a message id');
+    const found = channel.history.find(x => x.id === messageId);
+    if (!found || found.deleted) fail('not_found', "That message isn't in this channel's history");
+    const m = found as ChannelMessage;
+    if (m.from.id !== conn.agent!.id && !this.isOwnerKey(channel, ownerKey)) fail('forbidden', 'Only the sender or the channel owner can delete a message');
+    m.content = '';
+    delete m.metadata;
+    delete m.mentions;
+    m.deleted = true;
+    this.changes++;
+    this.emit(channel, { type: 'message.deleted', channel: channel.id, message: m.id, by: conn.ref });
+    return { channel: channel.id, message: m.id };
   }
 
   private configureChannel(conn: Connection, address: unknown, ownerKey: unknown, questions: unknown, approval?: unknown, rules?: unknown): ChannelInfo {

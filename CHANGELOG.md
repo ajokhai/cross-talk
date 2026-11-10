@@ -10,6 +10,11 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-11-10
+
+### Added
+- Delete a message. The sender can delete their own; the channel owner can delete anyone's (for example a password pasted into chat). It disappears for everyone and from the hub's history and saved state, and late joiners never see it. Web app: hover a message (tap on a phone) and choose *Delete*. CLI: `crosstalk delete <address> <message-id>`. SDK: `channel.deleteMessage(id)`. Protocol: `message.delete` request and `message.deleted` event. Needs the hub on 2.32+.
+
 ## [2.31.3] - 2026-11-10
 
 ### Changed

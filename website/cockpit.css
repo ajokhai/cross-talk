@@ -944,3 +944,9 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 
 /* Good news uses the notice bar in neutral colours */
 .notice.notice-ok { border-color: var(--border); background: var(--bg-alt); color: var(--text); }
+
+/* Delete a message: sender or owner, on hover or keyboard focus */
+.msg { position: relative; }
+.msg-del { position: absolute; top: 2px; right: 4px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--red); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.msg:hover .msg-del, .msg-del:focus-visible { opacity: 1; }
+@media (hover: none) { .msg-del { display: none; } .msg.tools .msg-del { display: block; opacity: 1; } }
