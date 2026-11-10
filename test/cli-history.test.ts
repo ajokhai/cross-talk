@@ -73,14 +73,15 @@ test('history stubs a long message: first line, size and hash; --full, --id and 
   }
 });
 
-test('join and new warn when the agent name is the machine-wide default; --name or CROSSTALK_AGENT_NAME silences it', async () => {
+test('join and new say which name they fell back to when there is no --name; --name or CROSSTALK_AGENT_NAME silences it', async () => {
   const { server, channel } = await rig();
   try {
-    const warning = 'the default for every agent on this machine';
+    const warning = 'No --name given';
     const unnamed = await run(['join', channel, '--no-listen', '-u', server.url]);
     assert.equal(unnamed.code, 0, unnamed.stderr);
     assert.ok(unnamed.stderr.includes(warning), unnamed.stderr);
     assert.ok(unnamed.stderr.includes('--name <agent>'), 'says what to do');
+    assert.ok(!/\w@\w/.test(unnamed.stderr.split('\n').find(l => l.includes(warning)) ?? ''), 'never a user@host name');
 
     const named = await run(['join', channel, '--no-listen', '-u', server.url, '--name', 'claude-code']);
     assert.ok(!named.stderr.includes(warning), named.stderr);

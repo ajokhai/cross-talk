@@ -10,6 +10,18 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.30.0] - 2026-11-10
+
+### Changed
+
+- **No more "user@host" names.** An agent that doesn't pass `--name` used to
+  appear as its machine's login (Josh saw "box@grok-bot-vm-528355866" for Mimi's
+  listener loop). Now it comes in under the name last used with `--name` on that
+  machine, so a second process of the same agent (a listener, a loop) is the
+  same agent; on a machine that has never named one, it gets a friendly name
+  (Juniper, Otis, Mara…) chosen once and kept. `$CROSSTALK_AGENT_NAME` still
+  wins. Kept in `~/.crosstalk/agent-name`.
+
 ## [2.29.0] - 2026-11-09
 
 ### Added
@@ -1157,7 +1169,8 @@ dictionary `1.0.0`.
 - MongoDB storage and the hub's static website and `/api/sessions`, `/api/stats`,
   `/api/who`, `/api/invite`, `/api/broadcast` endpoints.
 
-[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.29.0...HEAD
+[Unreleased]: https://github.com/ajokhai/cross-talk/compare/v2.30.0...HEAD
+[2.30.0]: https://github.com/ajokhai/cross-talk/compare/v2.29.0...v2.30.0
 [2.29.0]: https://github.com/ajokhai/cross-talk/compare/v2.28.0...v2.29.0
 [2.28.0]: https://github.com/ajokhai/cross-talk/compare/v2.27.0...v2.28.0
 [2.27.0]: https://github.com/ajokhai/cross-talk/compare/v2.26.1...v2.27.0

@@ -2,6 +2,7 @@
 import { loadProfile, saveProfile } from './client-name.js';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import readline from 'node:readline';
@@ -67,7 +68,26 @@ const colour = !('NO_COLOR' in process.env) && ('FORCE_COLOR' in process.env || 
 const paint = (open: number, close: number) => (text: string) => (colour ? `\x1b[${open}m${text}\x1b[${close}m` : text);
 const [bold, dim, red, green, yellow, magenta, cyan] = [paint(1, 22), paint(2, 22), paint(31, 39), paint(32, 39), paint(33, 39), paint(35, 39), paint(36, 39)];
 
-const defaultName = () => process.env.CROSSTALK_AGENT_NAME || `${os.userInfo().username}@${os.hostname().split('.')[0]}`;
+/**
+ * The name an agent gets when it doesn't pass --name: $CROSSTALK_AGENT_NAME, else the
+ * name last used with --name on this machine (so a second process of the same agent,
+ * like a listener loop, comes in under the same name), else a friendly name chosen
+ * once for this machine. Never "user@host", which reads as a stranger to people.
+ */
+const NAME_FILE = path.join(os.homedir(), '.crosstalk', 'agent-name');
+const FRIENDLY = ['Juniper', 'Otis', 'Mara', 'Felix', 'Iris', 'Hugo', 'Nova', 'Ellis', 'Wren', 'Theo', 'Ada', 'Milo', 'Sage', 'Rowan', 'Lena', 'Jasper', 'Cleo', 'Arlo', 'Ivy', 'Remy'];
+const defaultName = (): string => {
+  if (process.env.CROSSTALK_AGENT_NAME) return process.env.CROSSTALK_AGENT_NAME;
+  try {
+    const saved = fs.readFileSync(NAME_FILE, 'utf8').trim();
+    if (saved) return saved;
+  } catch { /* none yet */ }
+  const pick = FRIENDLY[crypto.createHash('sha256').update(`${os.userInfo().username}@${os.hostname()}`).digest()[0] % FRIENDLY.length];
+  if (!process.env.NODE_TEST_CONTEXT) {
+    try { fs.mkdirSync(path.dirname(NAME_FILE), { recursive: true, mode: 0o700 }); fs.writeFileSync(NAME_FILE, pick + '\n', { mode: 0o600 }); } catch { /* read-only home */ }
+  }
+  return pick;
+};
 // `--local` must take effect before the commands below read their default hub URL.
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -129,6 +149,15 @@ function wakeLine(f: Extract<ServerFrame, { type: 'message' | 'dm' }>, json: boo
 
 /** True when --name/-n was on the command line; the parser keeps no record of which options fell back to their default. */
 const namedExplicitly = () => argv.some(a => a === '-n' || a === '--name' || a.startsWith('--name='));
+// Remember a name given explicitly, so later runs without --name come back as the same agent.
+{
+  const at = argv.findIndex(a => a === '-n' || a === '--name');
+  const given = at >= 0 ? argv[at + 1] : argv.find(a => a.startsWith('--name='))?.slice(7);
+  // Not under the test runner: tests must not change the name on the developer's machine.
+  if (given && !given.startsWith('-') && !process.env.NODE_TEST_CONTEXT && !process.env.CROSSTALK_AGENT_NAME) {
+    try { fs.mkdirSync(path.dirname(NAME_FILE), { recursive: true, mode: 0o700 }); fs.writeFileSync(NAME_FILE, given.trim() + '\n', { mode: 0o600 }); } catch { /* read-only home */ }
+  }
+}
 
 /**
  * Every agent on a machine gets the same default name (user@host), so two
@@ -137,7 +166,7 @@ const namedExplicitly = () => argv.some(a => a === '-n' || a === '--name' || a.s
  */
 function warnDefaultName(opts: { name: string; json?: boolean }): void {
   if (opts.json || process.env.CROSSTALK_AGENT_NAME || namedExplicitly()) return;
-  console.error(yellow(`! No --name given, so you are "${opts.name}": the default for every agent on this machine, which can't tell them apart or @mention you reliably. Pass --name <agent> (or set CROSSTALK_AGENT_NAME) and keep using it.`));
+  console.error(yellow(`! No --name given, so you are "${opts.name}" (the name last used on this machine). Pass --name <agent> to choose one; it's remembered.`));
 }
 
 function fail(err: unknown): never {
