@@ -1722,10 +1722,9 @@
             ? el('div', { class: 'member-doing', dataset: { state: p.state }, text: m.currentTask && !/^shared by /i.test(m.currentTask) ? m.currentTask : p.text })
             : null,
           !isMe && sharedBy(m) && sameName(sharedBy(m), state.config.name) ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm member-share', title: `How much of your plan each guest may use on ${m.name}`, onclick: () => openAllowances(m), text: 'Allowances' }) : null,
-          // The owner can remove a member (and their helpers). Shown on hover, so the list stays quiet.
-          !isMe && ownerKey(ch.info.id) ? el('span', { class: 'member-actions' },
-            m.role !== 'person' && !m.remote ? el('button', { type: 'button', class: 'member-remove member-wake', title: `Wake ${displayName(m.name)} the moment someone mentions them`, onclick: () => openWake(ch, m) }, 'Wake instantly') : null,
-            el('button', { type: 'button', class: 'member-remove', title: `Remove ${displayName(m.name)} from this channel`, onclick: (e) => removeMember(e.currentTarget, ch, m) }, 'Remove')) : null),
+          null),
+        // One quiet button per member; the options live in its menu.
+        !isMe ? el('button', { type: 'button', class: 'member-more', 'aria-label': `Options for ${displayName(m.name)}`, 'aria-haspopup': 'menu', title: 'Options', onclick: (e) => { e.stopPropagation(); openMemberMenu(e.currentTarget, ch, m); } }, '\u22ef') : null,
         busy ? el('span', { class: 'badge-status', dataset: { status: m.status }, text: m.status }) : null);
     }));
     $('member-count').textContent = ch ? String(members.length) : '';
@@ -2674,12 +2673,70 @@
     showDone(n ? `Updated ${n} allowance${n === 1 ? '' : 's'} on ${a.agent.name}. Guests see what they have left under each reply.` : 'Nothing changed.');
   }
 
-  async function removeMember(button, ch, m) {
+  // ---- Member menu: one "..." button per member, options in a small popover.
+  let memberMenu = null;
+  function closeMemberMenu(focusBack) {
+    if (!memberMenu) return false;
+    const { node, button } = memberMenu;
+    memberMenu = null;
+    node.remove();
+    button.setAttribute('aria-expanded', 'false');
+    if (focusBack && button.isConnected) button.focus();
+    return true;
+  }
+  function openMemberMenu(button, ch, m) {
+    const same = memberMenu && memberMenu.button === button;
+    closeMemberMenu(false);
+    if (same) return;
+    const owner = !!ownerKey(ch.info.id);
+    const name = displayName(m.name);
+    const item = (text, fn, cls) => el('button', { type: 'button', role: 'menuitem', class: cls || null, onclick: () => { closeMemberMenu(false); fn(); } }, text);
+    const items = [
+      item(`Mention ${name}`, () => mentionMember(m)),
+      owner && m.role !== 'person' && !m.remote ? item('Wake instantly\u2026', () => openWake(ch, m)) : null,
+      owner ? el('hr', { role: 'separator' }) : null,
+      owner ? item('Remove from channel', () => removeMember(null, ch, m, false), 'danger') : null,
+      owner ? item('Remove and ban', () => removeMember(null, ch, m, true), 'danger') : null,
+    ].filter(Boolean);
+    const node = el('div', { class: 'member-menu', role: 'menu', 'aria-label': `Options for ${name}` }, ...items);
+    document.body.append(node);
+    const r = button.getBoundingClientRect();
+    const w = node.offsetWidth, h = node.offsetHeight;
+    const below = r.bottom + 4 + h < window.innerHeight;
+    node.style.top = `${Math.max(8, below ? r.bottom + 4 : r.top - 4 - h)}px`;
+    node.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
+    button.setAttribute('aria-expanded', 'true');
+    memberMenu = { node, button };
+    const buttons = () => [...node.querySelectorAll('[role="menuitem"]')];
+    node.addEventListener('keydown', (e) => {
+      const list = buttons(), i = list.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMemberMenu(true); }
+      else if (e.key === 'Tab') closeMemberMenu(false);
+    });
+    buttons()[0].focus();
+  }
+  function mentionMember(m) {
+    const input = $('composer-input');
+    const tag = `@${displayName(m.name)} `;
+    const v = input.value;
+    input.value = v + (v && !/\s$/.test(v) ? ' ' : '') + tag;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    autosize(); updateSendState();
+  }
+  document.addEventListener('pointerdown', (e) => { if (memberMenu && !memberMenu.node.contains(e.target) && e.target !== memberMenu.button) closeMemberMenu(false); });
+  window.addEventListener('resize', () => closeMemberMenu(false));
+  document.addEventListener('scroll', () => closeMemberMenu(false), true);
+
+  async function removeMember(button, ch, m, ban) {
     const helpers = helpersOf(ch, m);
-    const choice = window.prompt(`Remove ${m.name} from "${label(ch.info)}"?\n\nType "remove" to remove them (they can rejoin with the address), or "ban" to also stop them rejoining.${helpers.length ? `\nTheir helper${helpers.length > 1 ? 's' : ''} (${helpers.map((h) => h.name).join(', ')}) go too.` : ''}`, 'remove');
-    if (!choice) return;
-    const ban = /^ban$/i.test(choice.trim());
-    if (!ban && !/^remove$/i.test(choice.trim())) return;
+    const also = helpers.length ? `\n\nTheir helper${helpers.length > 1 ? 's' : ''} (${helpers.map((h) => h.name).join(', ')}) go too.` : '';
+    const ask = ban
+      ? `Remove ${m.name} from "${label(ch.info)}" and stop them rejoining?${also}`
+      : `Remove ${m.name} from "${label(ch.info)}"? They can rejoin with the address.${also}`;
+    if (!window.confirm(ask)) return;
     await attempt(button, async () => {
       for (const who of [m, ...helpers]) {
         await request('member.kick', { channel: ch.info.id, ownerKey: ownerKey(ch.info.id), agent: who.id, ban, reason: ban ? 'Removed by the owner' : undefined });
@@ -3139,7 +3196,7 @@
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('dialog[open]')) {
-        if (closeOverlays()) e.preventDefault();
+        if (closeMemberMenu(true) || closeOverlays()) e.preventDefault();
       }
     });
 

@@ -10,6 +10,11 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.31.3] - 2026-11-10
+
+### Changed
+- Web app member list: the hover buttons are gone. Each member has a quiet *...* button that opens a menu: *Mention*, *Wake instantly...*, *Remove from channel* and *Remove and ban*. Removing asks for a plain confirmation instead of typing "remove" or "ban".
+
 ## [2.31.2] - 2026-11-10
 
 ### Changed
