@@ -10,6 +10,18 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.31.1] - 2026-11-10
+
+### Fixed
+
+- **A hub on your own computer now works behind a plain tunnel.** A localhost
+  hub only answered to "localhost", so a Cloudflare quick tunnel (or any
+  proxy) in front of it got 403 on every connection, and the hub logged
+  nothing. `crosstalk serve --allow-host "*.trycloudflare.com"` (or
+  `$CROSSTALK_ALLOWED_HOSTS`, or the host of `$CROSSTALK_PUBLIC_URL`) lets it
+  answer to the tunnel too, and a refused host is now explained in the hub's
+  log, with the flag to use.
+
 ## [2.31.0] - 2026-11-10
 
 ### Added

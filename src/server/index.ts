@@ -57,6 +57,14 @@ export interface ServerOptions {
    */
   allowedOrigins?: string[];
   /**
+   * Host names a loopback hub also answers to (2.31.1+): the address of a
+   * tunnel in front of it, e.g. "something.trycloudflare.com". Without this a
+   * loopback hub only accepts loopback Host headers (which blocks DNS
+   * rebinding), so a plain tunnel gets 403. Defaults to $CROSSTALK_ALLOWED_HOSTS
+   * (comma-separated); the host of $CROSSTALK_PUBLIC_URL is always allowed.
+   */
+  allowedHosts?: string[];
+  /**
    * Behind a reverse proxy (Railway, Fly, nginx...), take the client address
    * from X-Real-IP / X-Forwarded-For instead of the socket, so per-address
    * limits and subnet rules apply to real clients rather than to the proxy.
@@ -267,6 +275,14 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
       .filter(Boolean)
   );
   const loopbackOnly = SubnetGuard.isLoopbackHost(host);
+  const hostName = (h: string): string => {
+    if (h.startsWith('*.')) return '*.' + hostName(h.slice(2));
+    try { return new URL(/:\/\//.test(h) ? h : `x://${h}`).hostname.toLowerCase(); } catch { return ''; }
+  };
+  const extraHosts = [...(options.allowedHosts ?? (process.env.CROSSTALK_ALLOWED_HOSTS ?? '').split(',')), process.env.CROSSTALK_PUBLIC_URL ?? '']
+    .map(h => hostName(h.trim())).filter(h => h && h !== '*.');
+  // "*.trycloudflare.com" matches any one name under it (a quick tunnel's address changes on each start).
+  const hostAllowed = (name: string) => extraHosts.some(h => h.startsWith('*.') ? name.endsWith(h.slice(1)) && name.length > h.length - 1 : name === h);
   const trustProxy = options.trustProxy ?? process.env.CROSSTALK_TRUST_PROXY === '1';
 
   /** The client's IP: from the proxy's headers when trusted, else the socket. */
@@ -312,11 +328,11 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
    * - a browser (any request with an Origin header) must be from an allowed origin,
    *   or present the token. Non-browser agents send no Origin.
    */
-  const admitted = (req: http.IncomingMessage, url: URL): 'ok' | 'subnet' | 'token' | 'origin' => {
+  const admitted = (req: http.IncomingMessage, url: URL): 'ok' | 'subnet' | 'token' | 'origin' | 'host' => {
     if (!SubnetGuard.isAllowed(clientIp(req), subnets)) return 'subnet';
     if (loopbackOnly) {
       const hostname = (req.headers.host ?? '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-      if (hostname && !SubnetGuard.isLoopbackHost(hostname)) return 'origin';
+      if (hostname && !SubnetGuard.isLoopbackHost(hostname) && !hostAllowed(hostname.toLowerCase())) return 'host';
     }
     const presented = presentedToken(req, url);
     const tokenOk = !!token && !!presented && safeEqual(presented, token);
@@ -324,6 +340,16 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     const origin = req.headers.origin;
     if (origin && !tokenOk && !origins.has(origin) && !sameLoopbackOrigin(origin, req)) return 'origin';
     return 'ok';
+  };
+
+  /** Says once per host why a tunnel or proxy is refused, so a 403 is never silent in the hub's log. */
+  const refusedHosts = new Set<string>();
+  const warnRefused = (why: string, req: http.IncomingMessage) => {
+    if (why !== 'host') return;
+    const name = (req.headers.host ?? '').replace(/:\d+$/, '');
+    if (refusedHosts.has(name) || refusedHosts.size > 20) return;
+    refusedHosts.add(name);
+    log(`refused a request for ${name}: this hub listens on ${host} and only answers to localhost. If that is your tunnel or proxy, restart with --allow-host ${name} (or run cloudflared with --http-host-header localhost:${boundPort}).`);
   };
 
   /**
@@ -533,7 +559,8 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
 
     const admission = admitted(req, url);
     if (admission !== 'ok') {
-      const message = { token: 'Missing or invalid token', subnet: 'Address not allowed', origin: 'Origin or host not allowed' }[admission];
+      warnRefused(admission, req);
+      const message = { token: 'Missing or invalid token', subnet: 'Address not allowed', origin: 'Origin not allowed', host: 'Host not allowed: this hub only answers on this machine (start it with --allow-host <tunnel host>, e.g. --allow-host "*.trycloudflare.com")' }[admission];
       json(res, admission === 'token' ? 401 : 403, { error: { code: 'unauthorized', message } });
       return;
     }
@@ -646,6 +673,7 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     const url = new URL(req.url ?? '/', 'http://hub.local');
     const admission = isInternal(req) ? 'ok' : admitted(req, url);
     if (admission !== 'ok') {
+      warnRefused(admission, req);
       socket.end(`HTTP/1.1 ${admission === 'token' ? '401 Unauthorized' : '403 Forbidden'}\r\nConnection: close\r\n\r\n`);
       return;
     }
