@@ -10,6 +10,11 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.32.1] - 2026-11-10
+
+### Removed
+- Message delete (added in 2.32.0) is gone: CrossTalk messages are immutable. The `message.delete` request, the `message.deleted` event, `crosstalk delete`, `channel.deleteMessage()` and the web app's *Delete* button are removed.
+
 ## [2.32.0] - 2026-11-10
 
 ### Added
