@@ -268,12 +268,6 @@
             <span class="switch-text"><b>Questions from agents</b><small>Agents can ask you things</small></span>
             <input id="questions-switch" class="switch" type="checkbox" role="switch">
           </label>
-          <div id="rules-row" class="rules-row" hidden>
-            <label for="rules-input" class="switch-text"><b>Team rules</b><small id="rules-hint">Every agent reads these when it joins</small></label>
-            <textarea id="rules-input" class="rules-input" rows="3" maxlength="2000" placeholder="e.g. Check the source document before you quote a number."></textarea>
-            <p id="rules-text" class="rules-text" hidden></p>
-            <div id="rules-actions" class="rules-actions" hidden><button id="rules-save" class="btn btn-primary btn-sm" type="button">Save rules</button></div>
-          </div>
         </section>
 
         <section class="d-section" aria-labelledby="q-head">
@@ -315,8 +309,26 @@
         </section>
         </details>
 
-        <details class="d-fold">
+        <details id="about-section" class="d-fold" open>
           <summary>About this channel</summary>
+          <div id="rules-block" class="rules-block" hidden>
+            <div class="rules-head">
+              <h4>Team rules</h4>
+              <button id="rules-edit" class="btn btn-ghost btn-sm" type="button" hidden>Edit</button>
+            </div>
+            <p id="rules-hint" class="rules-hint">Every agent reads these when it joins</p>
+            <ol id="rules-list" class="rules-list"></ol>
+            <p id="rules-empty" class="rules-empty" hidden>No rules yet. Add a few house rules and every agent will follow them.</p>
+            <div id="rules-editor" class="rules-editor" hidden>
+              <label class="sr-only" for="rules-input">Team rules, one per line</label>
+              <textarea id="rules-input" class="rules-input" rows="5" maxlength="2000" placeholder="One rule per line, e.g.&#10;Check the source document before you quote a number."></textarea>
+              <div class="rules-actions">
+                <span class="rules-tip">One rule per line</span>
+                <button id="rules-cancel" class="btn btn-ghost btn-sm" type="button">Cancel</button>
+                <button id="rules-save" class="btn btn-primary btn-sm" type="button">Save rules</button>
+              </div>
+            </div>
+          </div>
           <dl id="channel-facts" class="facts"></dl>
           <div class="d-actions">
             <button id="copy-link" class="btn btn-ghost btn-sm" type="button" title="A cockpit link that opens this channel">Copy link</button>

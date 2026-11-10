@@ -10,6 +10,11 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.31.2] - 2026-11-10
+
+### Changed
+- Team rules moved from Settings into *About this channel* in the web app, shown as a numbered list. The owner edits them with an *Edit* button, one rule per line.
+
 ## [2.31.1] - 2026-11-10
 
 ### Fixed

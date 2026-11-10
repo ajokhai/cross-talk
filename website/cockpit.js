@@ -1198,6 +1198,14 @@
     }).catch(() => { /* older hub */ });
   }
 
+  // Rules are free text. Show one per line; a single paragraph splits on sentences.
+  function splitRules(text) {
+    const strip = (r) => r.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s+/, '').trim();
+    let lines = String(text || '').split(/\n+/).map(strip).filter(Boolean);
+    if (lines.length === 1) lines = lines[0].split(/(?<=[.!?])\s+(?=[A-Z0-9"'\u201c])/).map((r) => r.trim()).filter(Boolean);
+    return lines;
+  }
+
   async function setRules(address, rules) {
     const info = await request('channel.configure', { channel: address, ownerKey: ownerKey(address), rules });
     const ch = state.joined.get(address);
@@ -1814,18 +1822,18 @@
       $('approval-switch').checked = !!ch.info.approval;
       $('questions-switch').checked = ch.info.questions !== 'off';
     }
-    // Team rules: the owner writes them; everyone else just reads them.
+    // Team rules live in About: a numbered list for everyone, an editor for the owner.
     const rules = (ch && ch.info.rules) || '';
-    $('rules-row').hidden = !ch || (!owned && !rules);
-    $('rules-input').hidden = !owned;
-    $('rules-text').hidden = owned;
-    $('rules-text').textContent = rules;
+    if (!owned || $('rules-editor').dataset.channel !== (ch && ch.info.id)) $('rules-editor').hidden = true;
+    const editing = !$('rules-editor').hidden;
+    $('rules-block').hidden = !ch || (!owned && !rules);
     $('rules-hint').textContent = owned ? 'Every agent reads these when it joins' : 'Set by the owner for every agent here';
-    if (owned && document.activeElement !== $('rules-input') && $('rules-input').dataset.channel !== ch.info.id + '|' + rules) {
-      $('rules-input').value = rules;
-      $('rules-input').dataset.channel = ch.info.id + '|' + rules;
-    }
-    if (owned) $('rules-actions').hidden = $('rules-input').value.trim() === rules;
+    const items = splitRules(rules);
+    $('rules-list').replaceChildren(...items.map((r) => el('li', { text: r })));
+    $('rules-list').hidden = editing || !items.length;
+    $('rules-empty').hidden = editing || !owned || items.length > 0;
+    $('rules-edit').hidden = !owned || editing;
+    $('rules-edit').textContent = rules ? 'Edit' : 'Add rules';
     // A waiting question gets a dot on the details button.
     $('details-toggle').classList.toggle('has-dot', owned && (questions.length > 0 || knocks.length > 0));
 
@@ -3060,15 +3068,25 @@
       const ok = await attempt(sw, () => setQuestions(ch.info.id, sw.checked ? 'on' : 'off'));
       if (!ok) sw.checked = ch.info.questions !== 'off';
     });
-    $('rules-input').addEventListener('input', () => {
+    const openRulesEditor = (on) => {
       const ch = state.selected && state.joined.get(state.selected);
-      $('rules-actions').hidden = !ch || $('rules-input').value.trim() === ((ch.info.rules) || '');
-    });
+      $('rules-editor').hidden = !on;
+      $('rules-editor').dataset.channel = (ch && ch.info.id) || '';
+      if (on) {
+        $('rules-input').value = splitRules(ch && ch.info.rules).join('\n');
+        $('rules-input').focus();
+        $('rules-input').setSelectionRange(0, 0);
+        $('rules-input').scrollTop = 0;
+      }
+      renderDetails();
+    };
+    $('rules-edit').addEventListener('click', () => openRulesEditor(true));
+    $('rules-cancel').addEventListener('click', () => openRulesEditor(false));
     $('rules-save').addEventListener('click', async (e) => {
       const ch = state.selected && state.joined.get(state.selected);
       if (!ch) return;
       const ok = await attempt(e.currentTarget, () => setRules(ch.info.id, $('rules-input').value));
-      if (ok) { $('rules-actions').hidden = true; $('rules-input').blur(); }
+      if (ok) openRulesEditor(false);
     });
     $('copy-link').addEventListener('click', (e) => {
       const full = $('address-code').dataset.address;

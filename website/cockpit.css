@@ -863,12 +863,20 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .switch-text small { font-size: 12px; color: var(--muted); }
 .switch-inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); white-space: nowrap; cursor: pointer; }
 .switch-row[hidden], .addr-chip[hidden] { display: none; }
-.rules-row { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border); }
-.rules-row[hidden], .rules-actions[hidden], .rules-text[hidden], .rules-input[hidden] { display: none; }
-.rules-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; line-height: 1.45; }
+.rules-block { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.rules-block[hidden], .rules-block [hidden] { display: none; }
+.rules-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rules-head h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.rules-hint { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.rules-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; counter-reset: rule; }
+.rules-list li { counter-increment: rule; display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; font-size: 13px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.rules-list li::before { content: counter(rule); display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); font-size: 11px; font-weight: 600; color: var(--muted); }
+.rules-empty { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+.rules-editor { margin-top: 12px; display: grid; gap: 8px; }
+.rules-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 150px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; }
 .rules-input:focus { outline: 2px solid var(--ring); outline-offset: -1px; border-color: transparent; }
-.rules-text { margin: 0; white-space: pre-wrap; font-size: 13px; line-height: 1.45; color: var(--text-2); }
-.rules-actions { display: flex; justify-content: flex-end; }
+.rules-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.rules-tip { margin-right: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
 
 /* Calmer layout: the subtitle opens Details; secondary details fold away */
 .chan-topic-btn { display: block; padding: 0; border: 0; background: none; font: inherit; color: var(--muted); text-align: left; cursor: pointer; }
@@ -881,6 +889,7 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .d-fold > summary::after { content: "+"; font-size: 15px; }
 .d-fold[open] > summary::after { content: "–"; }
 .d-fold > .d-section, .d-fold > .facts, .d-fold > .d-actions { margin-top: 12px; }
+.d-fold > .rules-block + .facts { margin-top: 16px; }
 .d-fold .d-section { border-top: 0; padding-top: 0; }
 
 /* Details, compact */
