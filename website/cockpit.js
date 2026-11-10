@@ -944,7 +944,7 @@
     const looking = state.selected === address && !document.hidden;
     if (looking) {
       scheduleRead(address);
-      if (message && message.from) announce(`${message.from.name}: ${String(message.content || '').slice(0, 200)}`);
+      if (message && message.from) announce(`${displayName(message.from.name)}: ${String(message.content || '').slice(0, 200)}`);
     } else {
       ch.unread += 1;
       if (mention) ch.mention = true;
@@ -1469,7 +1469,7 @@
     const unread = ch && !active ? ch.unread : 0;
     const pending = state.joining.has(info.id) || (info.saved && !joined);
     const preview = ch && ch.lastMessage
-      ? `${ch.lastMessage.from ? `${ch.lastMessage.from.name}: ` : ''}${ch.lastMessage.content}`
+      ? `${ch.lastMessage.from ? `${personName(ch, ch.lastMessage.from)}: ` : ''}${ch.lastMessage.content}`
       : info.topic || shortAddress(info.id);
     const button = el('button', {
       type: 'button',
@@ -1769,7 +1769,7 @@
     const owned = ch ? !!ownerKey(ch.info.id) : false;
     const questions = ch ? [...ch.questions.values()].sort((a, b) => a.createdAt - b.createdAt) : [];
     $('question-list').replaceChildren(...questions.map((q) => el('li', { class: 'card-item question' },
-      el('div', { class: 'question-from' }, avatar(q.from, ch, 'sm'), el('span', { text: q.from ? q.from.name : '' }),
+      el('div', { class: 'question-from' }, avatar(q.from, ch, 'sm'), el('span', { text: q.from ? personName(ch, q.from) : '' }),
         el('time', { datetime: new Date(q.createdAt).toISOString(), text: formatTime(q.createdAt) })),
       el('div', { class: 'question-text', text: q.question }),
       q.options && q.options.length && !owned ? el('div', { class: 'item-reason', text: `Options: ${q.options.join(' / ')}` }) : null,
@@ -1790,7 +1790,7 @@
     // Only worth a section while approval is on.
     $('knock-section').hidden = !ch || !ch.info.approval || !(owned && knocks.length);
     $('knock-list').replaceChildren(...(owned ? knocks : []).map((k) => el('li', { class: 'card-item knock' },
-      el('div', { class: 'question-from' }, avatar(k.agent, ch, 'sm'), el('span', { title: k.agent.id, text: k.agent.name }),
+      el('div', { class: 'question-from' }, avatar(k.agent, ch, 'sm'), el('span', { text: displayName(k.agent.name) }),
         el('time', { datetime: new Date(k.at).toISOString(), text: formatTime(k.at) })),
       el('div', { class: 'item-meta' }, el('span', { class: 'mono', text: [k.agent.id, k.environment].filter(Boolean).join(' · ') })),
       el('div', { class: 'knock-actions' },
@@ -2365,7 +2365,7 @@
       const li = el('li', {
         id: `mention-${i}`, role: 'option', class: 'mention-item', 'aria-selected': String(i === mention.active),
         onmousedown: (e) => { e.preventDefault(); pickMention(i); },
-      }, avatar(m, ch, 'sm'), el('span', { class: 'mi-name', text: m.name }),
+      }, avatar(m, ch, 'sm'), el('span', { class: 'mi-name', text: displayName(m.name) }),
       el('span', { class: 'mi-sub', text: [m.role, p.text].filter(Boolean).join(' · ') }));
       return li;
     }));
