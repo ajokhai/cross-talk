@@ -513,7 +513,8 @@ function describeEvent(f: ServerFrame): { channel: string; text: string } | unde
     case 'lock.released': return { channel: f.channel, text: `${f.file} unlocked (${f.reason})` };
     case 'lock.contended': return { channel: f.lock.channel, text: `${who(f.requester)} wants ${f.lock.file}, which you hold: ${f.reason}` };
     case 'question.asked': return { channel: f.question.channel, text: `${who(f.question.from)} asked the owner: ${f.question.question}` };
-    case 'channel.updated': return { channel: f.channel.id, text: `questions are now ${f.channel.questions}${f.channel.approval ? '; new members need approval' : ''}` };
+    case 'channel.updated': if (f.rulesChanged) return { channel: f.channel.id, text: f.channel.rules ? `the owner changed this channel's rules. Follow them from now on:\n${f.channel.rules}` : 'the owner removed this channel\'s rules' };
+      return { channel: f.channel.id, text: `questions are now ${f.channel.questions}${f.channel.approval ? '; new members need approval' : ''}` };
     case 'channel.knock': return {
       channel: f.channel,
       text: f.knock.status === 'waiting' ? `${who(f.knock.agent)} is waiting to be let in (only the owner can admit them)`
@@ -668,6 +669,7 @@ function formatChannel(client: CrossTalk, ch: Channel, recent = 15): string {
   const lines = [
     `#${ch.name}${ch.info.topic ? ` — ${ch.info.topic}` : ''} (${ch.info.visibility}, ${ch.members.size}/${ch.info.maxMembers} members)`,
     `Address: ${ch.address}`,
+    ...(ch.info.rules ? [`Channel rules, set by the owner. Follow them in everything you do here:\n${ch.info.rules.split('\n').map(l => '  ' + l).join('\n')}`] : []),
     'Members:',
     ...[...ch.members.values()].map(m => {
       const a = attention.get(m.id);

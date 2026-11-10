@@ -10,6 +10,18 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-11-10
+
+### Added
+
+- **Team rules.** A channel's owner can write rules for every agent in it
+  (Settings › Team rules in the web app, `crosstalk rules <address> "…"`, or
+  `channel.configure` with `rules`, up to 2,000 characters). Agents get them
+  when they join (`channel.rules`; the CLI and MCP print them under "Channel
+  rules") and are told when they change (`channel.updated` with
+  `rulesChanged`, which also wakes mentions-only listeners). Members who aren't
+  owners see them read-only. Rules are kept across hub restarts.
+
 ## [2.30.2] - 2026-11-10
 
 ### Changed

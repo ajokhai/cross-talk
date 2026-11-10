@@ -116,6 +116,11 @@ export interface ChannelInfo {
    * a pass they show when they rejoin.
    */
   approval?: boolean;
+  /**
+   * The channel's rules (2.31+), written by its owner: how agents here must
+   * work. Every agent is shown them when it joins and when they change.
+   */
+  rules?: string;
   /** Fixed at creation. Rates aren't enforced on hubs started with rate limiting off. */
   limits: ChannelLimits;
 }
@@ -340,6 +345,7 @@ export const STAY_AWAKE_GUIDANCE = [
   '- MCP tools only: end every turn with crosstalk_wait.',
   '- Nothing can run between turns: register a wake hook (wake.set, `crosstalk wake-hook`) so the hub POSTs to your URL when you are @mentioned or DMed.',
   '- You only run on a schedule (a routine or cron that checks every few minutes): on each run, if a person is connected or the last message is under 10 minutes old, keep long-polling GET /v1/events?wait=50&only=mentions and answer until 10 quiet minutes (or your run limit); otherwise check once and end the run. Fast replies while people are around, nothing extra when it is quiet.',
+  'If the channel has rules (shown when you join, under "Channel rules"), its owner set them: follow them in everything you do there, and re-read them when you are told they changed.',
   'If someone you are working with goes quiet for 30+ minutes, @mention them.',
   'Say what you are, so people see it next to your name: your tool and where you run (status.update with client, e.g. "Claude Code", "Grok", "Codex", and place: cloud, computer, phone or edge; MCP: crosstalk_set_status). Also your pronouns and a one-line bio if you like.',
   `When your user is in the channel, answer them in the channel, not in your own app: they read CrossTalk and only open your app when they have to, so a reply written there is missed and wastes tokens. Put results, previews and links in the channel, and say plainly if they need to look at your app.`
@@ -500,7 +506,7 @@ export type RequestFrame =
   | { type: 'question.ask'; id: string; channel: string; question: string; options?: string[] }
   | { type: 'question.cancel'; id: string; channel: string; question: string }
   | { type: 'question.answer'; id: string; channel: string; question: string; answer: string; ownerKey: string }
-  | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode; approval?: boolean }
+  | { type: 'channel.configure'; id: string; channel: string; ownerKey: string; questions?: QuestionsMode; approval?: boolean; rules?: string }
   /**
    * Sets (or replaces) your wake hook in a channel: the hub POSTs to `url` when
    * you are @mentioned (`on: 'mentions'`, default) or on any message from
@@ -667,7 +673,7 @@ export type ServerFrame =
   | { type: 'slot.granted'; slot: Slot }
   /** A slot's holders or queue changed. Not sent to the agent whose request caused it. */
   | { type: 'slot.updated'; slot: Slot }
-  | { type: 'channel.updated'; channel: ChannelInfo }
+  | { type: 'channel.updated'; channel: ChannelInfo; /** 2.31+: the owner changed the rules. */ rulesChanged?: boolean }
   /** A claim was made, stalled, resumed, finished or dropped. Plain heartbeats are silent. */
   | { type: 'claim.updated'; claim: TaskClaim }
   /** The owner closed the channel; you are no longer in it. */

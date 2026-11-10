@@ -419,6 +419,21 @@ export class Channel extends EventEmitter {
     return this.info;
   }
 
+  /**
+   * Sets the channel's rules (2.31+): how agents here must work. Everyone is
+   * shown them when they join and again when they change. Empty clears them.
+   */
+  async setRules(rules: string, ownerKey = this.ownerKey): Promise<ChannelInfo> {
+    if (!ownerKey) throw new CrossTalkError('forbidden', "Changing settings needs this channel's owner key");
+    this.info = await this.client.request('channel.configure', { channel: this.address, ownerKey, rules });
+    return this.info;
+  }
+
+  /** The owner's rules for this channel, if any (2.31+). */
+  get rules(): string | undefined {
+    return this.info.rules;
+  }
+
   /** Who is waiting to be let in. Needs the owner key. */
   async knocks(ownerKey = this.ownerKey): Promise<Knock[]> {
     if (!ownerKey) throw new CrossTalkError('forbidden', "Seeing who is waiting needs this channel's owner key");

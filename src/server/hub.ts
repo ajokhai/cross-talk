@@ -182,6 +182,8 @@ interface Channel {
   bans: Map<string, BanState>;
   /** Approve new members (2.20+): someone new knocks and the owner admits them. */
   approval: boolean;
+  /** Owner-written rules (2.31+); empty when none. */
+  rules?: string;
   /** Passes that let admitted members back in, by SHA-256 (hex) of the pass; the pass itself is never stored. */
   passes: Map<string, PassState>;
   /** Who is waiting to be let in, by agent id. In memory only. */
@@ -260,6 +262,7 @@ const RESTORED_ADDRESS = 'restored';
 const MAX_LOCK_WAITERS = 50;
 const MAX_SLOTS_PER_CHANNEL = 100;
 const MAX_SLOT_CAPACITY = 64;
+const MAX_RULES_CHARS = 2000;
 const SLOT_NAME = /^[A-Za-z0-9._:-]{1,64}$/;
 
 const lockKey = (channel: string, file: string) => `${channel}\u0000${file}`;
@@ -721,7 +724,7 @@ export class MeshHub {
       case 'question.ask': return this.askQuestion(conn, f.channel, f.question, f.options);
       case 'question.cancel': return this.cancelQuestion(conn, f.channel, f.question);
       case 'question.answer': return this.answerQuestion(conn, f.channel, f.question, f.answer, f.ownerKey);
-      case 'channel.configure': return this.configureChannel(conn, f.channel, f.ownerKey, f.questions, f.approval);
+      case 'channel.configure': return this.configureChannel(conn, f.channel, f.ownerKey, f.questions, f.approval, f.rules);
       case 'member.kick': return this.kickMember(conn, f.channel, f.ownerKey, f.agent, f.ban === true, f.ip === true, f.reason);
       case 'member.unban': {
         const channel = this.memberChannel(conn, f.channel);
@@ -1062,7 +1065,8 @@ export class MeshHub {
       maxMembers: this.opts.maxMembersPerChannel,
       questions: channel.questionsMode,
       limits: channel.limits,
-      approval: channel.approval
+      approval: channel.approval,
+      ...(channel.rules ? { rules: channel.rules } : {})
     };
   }
 
@@ -2195,9 +2199,20 @@ export class MeshHub {
     return this.closeQuestion(channel, q, 'answered', text);
   }
 
-  private configureChannel(conn: Connection, address: unknown, ownerKey: unknown, questions: unknown, approval?: unknown): ChannelInfo {
+  private configureChannel(conn: Connection, address: unknown, ownerKey: unknown, questions: unknown, approval?: unknown, rules?: unknown): ChannelInfo {
     const channel = this.memberChannel(conn, address);
     this.requireOwner(channel, ownerKey);
+    let rulesChanged = false;
+    if (rules !== undefined) {
+      if (typeof rules !== 'string') fail('bad_request', 'rules must be text');
+      const clean = (rules as string).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+      if (clean.length > MAX_RULES_CHARS) fail('bad_request', `Rules can be up to ${MAX_RULES_CHARS} characters`);
+      if ((channel.rules ?? '') !== clean) {
+        channel.rules = clean || undefined;
+        rulesChanged = true;
+        this.changes++;
+      }
+    }
     if (approval !== undefined) {
       if (typeof approval !== 'boolean') fail('bad_request', 'approval must be true or false');
       if (approval && !channel.approval) {
@@ -2221,7 +2236,7 @@ export class MeshHub {
       if (questions === 'off') for (const q of [...channel.questions.values()]) this.closeQuestion(channel, q, 'unattended');
     }
     const info = this.info(channel);
-    this.emit(channel, { type: 'channel.updated', channel: info });
+    this.emit(channel, { type: 'channel.updated', channel: info, ...(rulesChanged ? { rulesChanged: true } : {}) });
     return info;
   }
 
@@ -2533,6 +2548,7 @@ export class MeshHub {
         wakes: [...c.wakes.values()].map(({ pending: _pending, deferred: _deferred, ...hook }) => ({ ...hook })),
         bans: [...c.bans.values()].map(b => ({ ...b, ids: [...b.ids], ips: [...b.ips] })),
         approval: c.approval || undefined,
+        rules: c.rules || undefined,
         passes: c.passes.size ? [...c.passes].map(([hash, p]) => ({ hash, ...p, ids: [...p.ids] })) : undefined
       })),
       agents,
@@ -2647,6 +2663,8 @@ export interface PersistedChannel {
   bans?: (Omit<ChannelBan, 'ipCount'> & { ips?: string[] })[];
   /** Approve new members (2.20+). */
   approval?: boolean;
+  /** Owner-written rules (2.31+). */
+  rules?: string;
   /** Pass hashes (SHA-256 hex), never the passes themselves. */
   passes?: { hash: string; name: string; ids: string[]; at: number }[];
 }

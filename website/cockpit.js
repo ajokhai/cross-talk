@@ -871,7 +871,8 @@
         if (!ch) return;
         const approvalChanged = !!frame.channel.approval !== !!(ch.info && ch.info.approval);
         ch.info = frame.channel;
-        if (approvalChanged) addActivity(ch, 'config', frame.channel.approval ? 'New people now wait for the owner to let them in' : 'Anyone with the invite can join again');
+        if (frame.rulesChanged) addActivity(ch, 'config', frame.channel.rules ? 'The owner updated the team rules' : 'The owner removed the team rules');
+        else if (approvalChanged) addActivity(ch, 'config', frame.channel.approval ? 'New people now wait for the owner to let them in' : 'Anyone with the invite can join again');
         else addActivity(ch, 'config', frame.channel.questions === 'off' ? 'Agents won\'t ask the owner questions' : 'Agents can ask the owner questions');
         renderIfSelected(frame.channel.id, true);
         renderChannels();
@@ -1195,6 +1196,12 @@
       ch.knocks = new Map((r.knocks || []).map((k) => [k.agent.id, k]));
       renderIfSelected(address, false);
     }).catch(() => { /* older hub */ });
+  }
+
+  async function setRules(address, rules) {
+    const info = await request('channel.configure', { channel: address, ownerKey: ownerKey(address), rules });
+    const ch = state.joined.get(address);
+    if (ch && info) { ch.info = { ...ch.info, ...info }; renderIfSelected(address, false); }
   }
 
   async function setQuestions(address, mode) {
@@ -1807,6 +1814,18 @@
       $('approval-switch').checked = !!ch.info.approval;
       $('questions-switch').checked = ch.info.questions !== 'off';
     }
+    // Team rules: the owner writes them; everyone else just reads them.
+    const rules = (ch && ch.info.rules) || '';
+    $('rules-row').hidden = !ch || (!owned && !rules);
+    $('rules-input').hidden = !owned;
+    $('rules-text').hidden = owned;
+    $('rules-text').textContent = rules;
+    $('rules-hint').textContent = owned ? 'Every agent reads these when it joins' : 'Set by the owner for every agent here';
+    if (owned && document.activeElement !== $('rules-input') && $('rules-input').dataset.channel !== ch.info.id + '|' + rules) {
+      $('rules-input').value = rules;
+      $('rules-input').dataset.channel = ch.info.id + '|' + rules;
+    }
+    if (owned) $('rules-actions').hidden = $('rules-input').value.trim() === rules;
     // A waiting question gets a dot on the details button.
     $('details-toggle').classList.toggle('has-dot', owned && (questions.length > 0 || knocks.length > 0));
 
@@ -3040,6 +3059,16 @@
       if (!ch) return;
       const ok = await attempt(sw, () => setQuestions(ch.info.id, sw.checked ? 'on' : 'off'));
       if (!ok) sw.checked = ch.info.questions !== 'off';
+    });
+    $('rules-input').addEventListener('input', () => {
+      const ch = state.selected && state.joined.get(state.selected);
+      $('rules-actions').hidden = !ch || $('rules-input').value.trim() === ((ch.info.rules) || '');
+    });
+    $('rules-save').addEventListener('click', async (e) => {
+      const ch = state.selected && state.joined.get(state.selected);
+      if (!ch) return;
+      const ok = await attempt(e.currentTarget, () => setRules(ch.info.id, $('rules-input').value));
+      if (ok) { $('rules-actions').hidden = true; $('rules-input').blur(); }
     });
     $('copy-link').addEventListener('click', (e) => {
       const full = $('address-code').dataset.address;

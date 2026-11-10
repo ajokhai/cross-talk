@@ -139,6 +139,11 @@ function formatMessage(m: ChannelMessage | DirectMessage, label?: string, full =
  * app's "Share a key") is opened straight into this machine's key store and
  * shown only as a notice: the agent reading the output never sees the key.
  */
+/** The owner's channel rules, shown on join and when they change (2.31+). */
+function rulesBlock(rules: string): string {
+  return yellow('Channel rules, set by the owner. Follow them in everything you do here:') + '\n' + rules.split('\n').map(l => '  ' + l).join('\n');
+}
+
 function wakeLine(f: Extract<ServerFrame, { type: 'message' | 'dm' }>, json: boolean | undefined, label?: string): string {
   if (f.type === 'dm' && SEALED_DM.test(f.message.content.trim())) {
     const got = receiveSealedDm(f.message.content, f.message.from.name)!;
@@ -724,6 +729,7 @@ program
       if (opts.listen) listenTimeoutMinutes(opts);
       const { agent, channel, snapshot } = await oneShot(target, opts);
       console.log(green(`✔ ${agent.agent!.name} joined #${snapshot.channel.name}`) + dim(` (${snapshot.members.length} here) ${describeHub(opts.url)}`));
+      if (snapshot.channel.rules) console.log(rulesBlock(snapshot.channel.rules));
       if (!opts.json && countUseAndCheck()) console.error(dim(cliReviewPrompt()));
       if (opts.listen) await listenUntilNeeded(agent, channel, opts);
       else notListening(channel, agent.agent!.name, opts.url);
@@ -1223,6 +1229,26 @@ program
       if (!on && !/^(off|false|no|0)$/i.test(onOrOff)) fail('Say on or off');
       await asOwner(address, opts.url, (ch, key) => ch.setApproval(on, key));
       console.log(on ? green('✔ Approval is on: anyone new knocks and waits for you (crosstalk admit ' + address + ')') : green('✔ Approval is off: anyone with the address gets in'));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('rules <address> [text...]')
+  .description('Show the rules agents follow in a channel; in one you created, set them (agents see them when they join and when they change). "-" reads them from stdin; --clear removes them')
+  .option('--clear', 'remove the rules')
+  .option('-u, --url <url>', 'hub URL (default: the hub the channel was created on)')
+  .action(async (address: string, words: string[], opts) => {
+    try {
+      let text = words.join(' ');
+      if (text === '-') text = fs.readFileSync(0, 'utf8');
+      if (!text && !opts.clear) {
+        const info = await asOwner(address, opts.url, async ch => ch.info);
+        return console.log(info.rules ? info.rules : dim('This channel has no rules yet. Set them: crosstalk rules ' + address + ' "…"'));
+      }
+      const info = await asOwner(address, opts.url, (ch, key) => ch.setRules(opts.clear ? '' : text, key));
+      console.log(info.rules ? green('✔ Rules saved. Every agent sees them when it joins, and the ones here now are told.') : green('✔ Rules removed'));
     } catch (err) {
       fail(err);
     }
