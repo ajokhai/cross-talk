@@ -2306,6 +2306,7 @@ export class MeshHub {
       everyMs: seconds * 1000,
       nextUpdateBy: now + seconds * 1000,
       status: 'active',
+      ...(conn.agent!.role === 'person' ? { byPerson: true as const } : {}),
       followers: [conn.ref],
       threadMessages: 0
     };
@@ -2479,6 +2480,8 @@ export class MeshHub {
     for (const channel of this.channels.values()) {
       for (const claim of channel.claims.values()) {
         if (claim.status !== 'active' || claim.nextUpdateBy > now) continue;
+        // A thread a person started (2.33.2+) has no heartbeat to miss.
+        if (claim.byPerson) continue;
         // Everyone sees it, the owner's inbox included; the claimant gets it too, as a nudge.
         claim.status = 'stalled';
         this.changes++;

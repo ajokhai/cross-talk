@@ -2260,7 +2260,7 @@
   function updateThreadsButton(ch) {
     const btn = $('threads-btn');
     const n = ch ? threadsOf(ch).length : 0;
-    btn.hidden = !n;
+    btn.hidden = !ch;
     btn.textContent = n ? `Threads ${n}` : 'Threads';
     btn.setAttribute('aria-pressed', String(!!(state.thread && ch && state.thread.address === ch.info.id)));
   }
@@ -2288,13 +2288,15 @@
     if (id === 'list') {
       const threads = threadsOf(ch);
       nodes.push(el('div', { class: 'thread-bar' }, back, el('h2', { class: 'thread-title', text: 'Threads' })));
+      // The same form node across redraws, so a half-typed thread survives new messages arriving.
+      nodes.push(ch.threadForm || (ch.threadForm = newThreadForm(ch)));
       nodes.push(el('ul', { class: 'thread-list' }, ...threads.map((t) => {
         const open = ch.claims.get(t.id);
         return el('li', {}, el('button', { type: 'button', class: 'thread-item', onclick: () => openThread(ch, t.id) },
           el('span', { class: 'thread-item-task', text: threadName(ch, t.id) }),
           el('span', { class: 'thread-item-meta', text: [open ? (open.status === 'stalled' ? 'stalled' : 'open') : 'closed', `${t.count} message${t.count === 1 ? '' : 's'}`, [...t.people].slice(0, 3).join(', '), t.last ? formatTime(t.last) : ''].filter(Boolean).join(' · ') })));
       })));
-      if (!threads.length) nodes.push(el('div', { class: 'stream-empty' }, el('p', { text: 'No threads yet. Agents start one when they claim a task.' })));
+      if (!threads.length) nodes.push(el('div', { class: 'stream-empty' }, el('p', { text: 'No threads yet. Start one above, or agents start one when they claim a task.' })));
     } else {
       const claim = ch.claims.get(id);
       const entries = ch.timeline.filter((e) => e.kind === 'message' && e.message && (e.message.thread === id ||
@@ -2302,7 +2304,16 @@
       nodes.push(el('div', { class: 'thread-bar' }, back,
         el('div', { class: 'thread-head' },
           el('h2', { class: 'thread-title', text: (claim && claim.task) || (ch.threadNames && ch.threadNames.get(id)) || 'Thread' }),
-          el('span', { class: 'thread-sub', text: claim ? `${claim.owner.name} · ${claim.status === 'stalled' ? 'stalled' : 'open'} · only the agents on it and people see these` : 'closed' }))));
+          el('span', { class: 'thread-sub', text: claim ? `${claim.owner.name} · ${claim.status === 'stalled' ? 'stalled' : 'open'} · only the agents on it and people see these` : 'closed' })),
+        claim && state.me && claim.owner.id === state.me.id
+          ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm thread-close', onclick: async (ev) => {
+              ev.currentTarget.disabled = true;
+              try { await request('claim.update', { channel: ch.info.id, claim: id, status: 'done' }); }
+              catch (err) { ev.currentTarget.disabled = false; showNotice(err.message || String(err)); return; }
+              ch.claims.delete(id);
+              openThread(ch, id);
+            } }, 'Close thread')
+          : null));
       entries.forEach((e, i) => nodes.push(...renderEntry(ch, e, entries[i - 1], true)));
       if (!entries.length) nodes.push(el('div', { class: 'stream-empty' }, el('p', { text: 'Nothing in this thread yet.' })));
     }
@@ -2311,6 +2322,38 @@
     box.dataset.view = 'thread';
     box.dataset.channel = ch.info.id;
     $('jump').hidden = true;
+  }
+
+  /** Start a thread from the web app: a claim you own, whose first message @mentions the agents you want on it. */
+  function newThreadForm(ch) {
+    const task = el('input', { class: 'input', type: 'text', maxlength: '280', placeholder: 'What is it about? e.g. Fix the checkout email', 'aria-label': 'Thread topic', required: '' });
+    const first = el('textarea', { class: 'input thread-first', rows: '2', maxlength: '2000', placeholder: '@mention the agents to bring in, and say what you need', 'aria-label': 'First message' });
+    const submit = el('button', { type: 'submit', class: 'btn btn-primary btn-sm', text: 'Start thread' });
+    const form = el('form', { class: 'thread-new', onsubmit: async (ev) => {
+      ev.preventDefault();
+      const topic = task.value.trim();
+      const text = first.value.trim();
+      if (!topic) return task.focus();
+      submit.disabled = true;
+      try {
+        const claim = await request('claim.create', { channel: ch.info.id, task: topic, everySeconds: 7200 });
+        ch.claims.set(claim.id, claim);
+        (ch.threadNames = ch.threadNames || new Map()).set(claim.id, claim.task);
+        if (text) {
+          const message = await request('message.send', { channel: ch.info.id, content: text, split: true, thread: claim.id });
+          if (message && message.id) addMessage(message);
+        }
+        ch.threadForm = null;
+        openThread(ch, claim.id);
+      } catch (err) {
+        submit.disabled = false;
+        showNotice(err.message || String(err));
+      }
+    } },
+      el('h3', { class: 'thread-new-title', text: 'New thread' }),
+      task, first,
+      el('div', { class: 'thread-new-actions' }, el('span', { class: 'thread-new-tip', text: 'Only the agents you @mention (and people) see it.' }), submit));
+    return form;
   }
 
   /** The task a claim thread is about, while the cockpit has seen it. */

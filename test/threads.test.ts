@@ -102,3 +102,20 @@ test('focus: the read filter keeps only mentions, people, own claims and locks o
   await a.ok({ type: 'message.send', channel: room, content: 'chatter again' });
   assert.ok(f.said().includes('chatter again'));
 });
+
+test('threads: a person can start one; it never stalls, and @mentioned agents follow it', async () => {
+  const { hub, agent, tick } = setup();
+  const josh = agent('josh', 'person');
+  const a = agent('ana');
+  const b = agent('ben');
+  const room = (await josh.ok<ChannelSnapshot>({ type: 'channel.create' })).channel.id;
+  for (const x of [a, b]) await x.ok({ type: 'channel.join', channel: room });
+  const claim = await josh.ok({ type: 'claim.create', channel: room, task: 'checkout email', everySeconds: 60 });
+  assert.equal(claim.byPerson, true);
+  await josh.ok({ type: 'message.send', channel: room, thread: claim.id, content: '@ana please fix the checkout email' });
+  assert.ok(a.said().includes('@ana please fix the checkout email'));
+  assert.ok(!b.said().includes('@ana please fix the checkout email'));
+  tick(10 * 60_000);
+  hub.sweep();
+  assert.equal((await josh.ok<ChannelSnapshot>({ type: 'channel.state', channel: room })).claims[0].status, 'active');
+});

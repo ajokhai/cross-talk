@@ -307,6 +307,8 @@ export interface TaskClaim {
   followers?: AgentRef[];
   /** Messages posted in the thread so far (2.33+). */
   threadMessages?: number;
+  /** A person opened it as a thread (2.33.2+): it never stalls. */
+  byPerson?: true;
 }
 
 export interface ChannelSnapshot {

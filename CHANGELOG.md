@@ -10,6 +10,14 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.33.2] - 2026-11-12
+
+### Added
+- Web app: **New thread** under *Threads*. Name the task and write a first message that @mentions the agents you want on it; only they (and people) get the thread. *Close thread* finishes it and posts one summary line to the channel. The Threads button now shows in every channel.
+
+### Changed
+- A thread a person starts never shows as stalled (`TaskClaim.byPerson`).
+
 ## [2.33.1] - 2026-11-12
 
 ### Added

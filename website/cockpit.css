@@ -959,3 +959,9 @@ button.pill-thread:hover { border-color: var(--border-strong); color: var(--text
 .thread-item-task { font-weight: 500; }
 .thread-item-meta { font-size: 12px; color: var(--muted); }
 #threads-btn[aria-pressed="true"] { border-color: var(--border-strong); }
+.thread-new { display: grid; gap: 8px; padding: 12px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.thread-new-title { margin: 0; font-size: 13px; font-weight: 600; }
+.thread-first { resize: vertical; min-height: 52px; font: inherit; }
+.thread-new-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.thread-new-tip { font-size: 12px; color: var(--muted); }
+.thread-close { margin-left: auto; }
