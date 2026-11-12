@@ -1253,7 +1253,8 @@
 
   async function sendMessage(address, content) {
     // The hub does not echo our own message back as an event; use the result.
-    const message = await request('message.send', { channel: address, content, split: true });
+    const thread = state.thread && state.thread.address === address && state.thread.id !== 'list' && state.joined.get(address)?.claims.has(state.thread.id) ? state.thread.id : null;
+    const message = await request('message.send', { channel: address, content, split: true, ...(thread ? { thread } : {}) });
     if (message && message.id) addMessage(message);
     // Long text goes out as numbered parts; only the first comes back here.
     if (message && message.parts > 1) pollChannel(address);
@@ -2231,13 +2232,85 @@
         nameEl,
         mine ? el('span', { class: 'pill', text: 'you' }) : null,
         from.remote ? el('span', { class: 'pill', title: 'Joined from outside the hub\'s machine', text: 'remote' }) : null,
-        m.thread ? el('span', { class: 'pill pill-thread', title: 'In a claim thread: only the agents on it and people see this', text: `Thread · ${threadName(ch, m.thread)}` }) : null,
+        m.thread && !inRun ? el('button', { type: 'button', class: 'pill pill-thread', title: 'In a claim thread: only the agents on it and people see this. Click to open the thread.', onclick: () => openThread(ch, m.thread), text: `Thread · ${threadName(ch, m.thread)}` }) : null,
         isDm ? el('span', { class: 'pill pill-dm', title: 'Nobody else in the channel sees this', text: mine ? `Private · only ${m.to ? personName(ch, m.to) : 'they'} ${m.to ? 'sees' : 'see'} this` : 'Private · only you see this' }) : null,
         time),
       rich(m.content, { names: mentionNames(ch, m) }),
       raw ? el('code', { class: 'msg-shorthand', title: 'XDialect shorthand', text: raw }) : null));
     out.push(article);
     return out;
+  }
+
+  /** Claim threads seen in this channel, newest activity first. */
+  function threadsOf(ch) {
+    const byId = new Map();
+    for (const e of ch.timeline) {
+      const m = e.kind === 'message' && e.message;
+      if (!m || !m.thread) continue;
+      const t = byId.get(m.thread) || { id: m.thread, count: 0, last: 0, people: new Set() };
+      t.count++;
+      t.last = Math.max(t.last, e.timestamp);
+      if (m.from) t.people.add(m.from.name);
+      byId.set(m.thread, t);
+    }
+    for (const c of ch.claims.values()) if (!byId.has(c.id)) byId.set(c.id, { id: c.id, count: 0, last: c.createdAt, people: new Set([c.owner.name]) });
+    return [...byId.values()].sort((a, b) => b.last - a.last);
+  }
+
+  function updateThreadsButton(ch) {
+    const btn = $('threads-btn');
+    const n = ch ? threadsOf(ch).length : 0;
+    btn.hidden = !n;
+    btn.textContent = n ? `Threads ${n}` : 'Threads';
+    btn.setAttribute('aria-pressed', String(!!(state.thread && ch && state.thread.address === ch.info.id)));
+  }
+
+  function openThread(ch, id) {
+    state.thread = { address: ch.info.id, id };
+    $('messages')._rendered = null;
+    renderMessages();
+    renderComposerState();
+    $('stream').scrollTop = id === 'list' ? 0 : $('stream').scrollHeight;
+  }
+
+  function closeThread() {
+    state.thread = null;
+    $('messages')._rendered = null;
+    renderMessages();
+    renderComposerState();
+  }
+
+  /** The Threads list, or one thread's messages, in place of the channel stream. */
+  function renderThreadView(ch, box, stream) {
+    const id = state.thread.id;
+    const back = el('button', { type: 'button', class: 'btn btn-ghost btn-sm thread-back', onclick: () => (id === 'list' ? closeThread() : openThread(ch, 'list')) }, id === 'list' ? '← Channel' : '← Threads');
+    const nodes = [];
+    if (id === 'list') {
+      const threads = threadsOf(ch);
+      nodes.push(el('div', { class: 'thread-bar' }, back, el('h2', { class: 'thread-title', text: 'Threads' })));
+      nodes.push(el('ul', { class: 'thread-list' }, ...threads.map((t) => {
+        const open = ch.claims.get(t.id);
+        return el('li', {}, el('button', { type: 'button', class: 'thread-item', onclick: () => openThread(ch, t.id) },
+          el('span', { class: 'thread-item-task', text: threadName(ch, t.id) }),
+          el('span', { class: 'thread-item-meta', text: [open ? (open.status === 'stalled' ? 'stalled' : 'open') : 'closed', `${t.count} message${t.count === 1 ? '' : 's'}`, [...t.people].slice(0, 3).join(', '), t.last ? formatTime(t.last) : ''].filter(Boolean).join(' · ') })));
+      })));
+      if (!threads.length) nodes.push(el('div', { class: 'stream-empty' }, el('p', { text: 'No threads yet. Agents start one when they claim a task.' })));
+    } else {
+      const claim = ch.claims.get(id);
+      const entries = ch.timeline.filter((e) => e.kind === 'message' && e.message && (e.message.thread === id ||
+        (e.message.metadata && e.message.metadata.summary && (e.message.metadata.claims || []).includes(id))));
+      nodes.push(el('div', { class: 'thread-bar' }, back,
+        el('div', { class: 'thread-head' },
+          el('h2', { class: 'thread-title', text: (claim && claim.task) || (ch.threadNames && ch.threadNames.get(id)) || 'Thread' }),
+          el('span', { class: 'thread-sub', text: claim ? `${claim.owner.name} · ${claim.status === 'stalled' ? 'stalled' : 'open'} · only the agents on it and people see these` : 'closed' }))));
+      entries.forEach((e, i) => nodes.push(...renderEntry(ch, e, entries[i - 1], true)));
+      if (!entries.length) nodes.push(el('div', { class: 'stream-empty' }, el('p', { text: 'Nothing in this thread yet.' })));
+    }
+    box.replaceChildren(...nodes);
+    box._rendered = null;
+    box.dataset.view = 'thread';
+    box.dataset.channel = ch.info.id;
+    $('jump').hidden = true;
   }
 
   /** The task a claim thread is about, while the cockpit has seen it. */
@@ -2274,6 +2347,14 @@
       $('jump').hidden = true;
       return;
     }
+
+    updateThreadsButton(ch);
+    if (state.thread && state.thread.address !== ch.info.id) state.thread = null;
+    if (state.thread) {
+      renderThreadView(ch, box, stream);
+      return;
+    }
+    if (box.dataset.view === 'thread') { box.dataset.view = ''; box._rendered = null; }
 
     const nearBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 120;
     const same = box.dataset.channel === ch.info.id;
@@ -2344,8 +2425,9 @@
     if (!ch) return;
     const input = $('composer-input');
     const connected = state.status === 'connected';
+    const inThread = state.thread && state.thread.address === ch.info.id && state.thread.id !== 'list';
     input.placeholder = connected
-      ? `Message ${label(ch.info)}`
+      ? inThread ? (ch.claims.has(state.thread.id) ? `Reply in thread · ${threadName(ch, state.thread.id)}` : 'Thread closed: this goes to the channel') : `Message ${label(ch.info)}`
       : state.status === 'reconnecting' || state.status === 'connecting' ? 'Reconnecting to the hub…' : 'Offline. Connect in hub settings to send.';
     updateSendState();
   }
@@ -3161,6 +3243,11 @@
     $('copy-address').addEventListener('click', (e) => {
       const full = $('address-code').dataset.address;
       if (full) copyText(full, e.currentTarget);
+    });
+    $('threads-btn').addEventListener('click', () => {
+      const ch = state.selected && state.joined.get(state.selected);
+      if (!ch) return;
+      if (state.thread && state.thread.address === ch.info.id) closeThread(); else openThread(ch, 'list');
     });
     $('invite-btn').addEventListener('click', () => {
       const address = state.selected;

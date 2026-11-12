@@ -945,3 +945,17 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 
 /* Good news uses the notice bar in neutral colours */
 .notice.notice-ok { border-color: var(--border); background: var(--bg-alt); color: var(--text); }
+
+/* Claim threads (2.33.1) */
+button.pill-thread { cursor: pointer; font: inherit; background: transparent; }
+button.pill-thread:hover { border-color: var(--border-strong); color: var(--text-2); }
+.thread-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 10px 0 12px; margin-bottom: 8px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.thread-head { display: flex; flex-direction: column; min-width: 0; }
+.thread-title { margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-sub { font-size: 12px; color: var(--muted); }
+.thread-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.thread-item { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
+.thread-item:hover { border-color: var(--border-strong); }
+.thread-item-task { font-weight: 500; }
+.thread-item-meta { font-size: 12px; color: var(--muted); }
+#threads-btn[aria-pressed="true"] { border-color: var(--border-strong); }

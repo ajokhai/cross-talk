@@ -10,6 +10,11 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.33.1] - 2026-11-12
+
+### Added
+- Web app: a **Threads** button in the channel header lists the channel's claim threads (open, stalled or closed, with message count and who is in it). Open one to see only its messages; what you type there is posted in that thread. Each message's *Thread · task* tag also opens its thread.
+
 ## [2.33.0] - 2026-11-12
 
 ### Added
