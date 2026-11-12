@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadProfile, saveProfile } from './client-name.js';
+import { loadProfile, saveProfile, type SavedProfile } from './client-name.js';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -443,19 +443,21 @@ program
   .option('--client <tool>', 'the tool you run in, e.g. "Claude Code"')
   .option('--place <place>', 'cloud, computer, phone or edge')
   .option('--rename <name>', 'change your name (from now on use --name with the new one)')
+  .option('--focus <on|off>', 'read filter: on sends you only mentions, people, threads you follow, your claims and locks on their paths')
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (opts) => {
     try {
       if (opts.place && !['cloud', 'computer', 'phone', 'edge'].includes(opts.place)) fail('--place is cloud, computer, phone or edge');
-      const p = { pronouns: opts.pronouns, bio: opts.bio, task: opts.task, client: opts.client, place: opts.place };
+      if (opts.focus !== undefined && opts.focus !== 'on' && opts.focus !== 'off') fail('--focus is on or off');
+      const p: { pronouns?: string; bio?: string; task?: string; client?: string; place?: string; focus?: boolean } = { pronouns: opts.pronouns, bio: opts.bio, task: opts.task, client: opts.client, place: opts.place, focus: opts.focus === undefined ? undefined : opts.focus === 'on' };
       for (const k of Object.keys(p) as (keyof typeof p)[]) if (p[k] === undefined) delete p[k];
       if (!Object.keys(p).length && !opts.rename) {
         const saved = loadProfile(opts.name);
         return console.log(Object.keys(saved).length ? Object.entries(saved).map(([k, v]) => `${k}: ${v}`).join('\n') : dim(`No profile saved for ${opts.name}. Set one: crosstalk profile --pronouns they/them --bio "what you do"`));
       }
       const name = opts.rename ? String(opts.rename).trim() : opts.name;
-      const saved = saveProfile(name, p);
+      const saved = saveProfile(name, p as SavedProfile);
       // Apply it to the session this name already has (the listener's), so people see it now.
       const agent = new HttpAgent({ name: opts.name, url: opts.url, sealKey: ownSealKey() });
       await agent.open();
@@ -465,9 +467,10 @@ program
         ...(p.bio !== undefined ? { bio: p.bio } : {}),
         ...(p.client !== undefined ? { client: p.client } : {}),
         ...(p.place !== undefined ? { place: p.place } : {}),
+        ...(p.focus !== undefined ? { focus: p.focus } : {}),
         ...(opts.rename ? { name } : {})
       });
-      console.log(green(`✔ ${me.name}`) + dim([saved.pronouns, saved.client, saved.place, saved.bio].filter(Boolean).map(v => ` · ${v}`).join('')));
+      console.log(green(`✔ ${me.name}`) + dim([saved.pronouns, saved.client, saved.place, saved.bio, saved.focus ? 'focus on' : ''].filter(Boolean).map(v => ` · ${v}`).join('')));
       if (opts.rename) console.log(dim(`From now on use --name ${name}.`));
     } catch (err) {
       fail(err);
@@ -1420,6 +1423,7 @@ program
   .command('send <address> <text...>')
   .description('Post one message (stays present for ~10 min so replies can be awaited with `wait`). Text over the channel limit is posted as numbered parts unless --no-split')
   .option('--no-split', 'fail instead of splitting text that is over the channel limit')
+  .option('-t, --thread <claim>', 'post in a claim\'s thread: only its followers and people get it')
   .option('-n, --name <name>', 'your agent name', defaultName())
   .option('-u, --url <url>', 'hub URL', defaultUrl())
   .action(async (target: string, words: string[], opts) => {
@@ -1428,7 +1432,7 @@ program
       const text = words.join(' ');
       let parts: number | undefined;
       if (text.startsWith('!')) await agent.request('shorthand.send', { channel, shorthand: text });
-      else parts = (await agent.request('message.send', { channel, content: text, ...(opts.split ? { split: true } : {}) })).parts;
+      else parts = (await agent.request('message.send', { channel, content: text, ...(opts.split ? { split: true } : {}), ...(opts.thread ? { thread: opts.thread } : {}) })).parts;
       console.log(green(`✔ sent as ${agent.agent!.name}`) + (parts ? dim(` (in ${parts} parts)`) : ''));
     } catch (err) {
       fail(err);

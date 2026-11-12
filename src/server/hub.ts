@@ -264,6 +264,8 @@ const MAX_SLOTS_PER_CHANNEL = 100;
 const MAX_SLOT_CAPACITY = 64;
 const MAX_RULES_CHARS = 2000;
 const SLOT_NAME = /^[A-Za-z0-9._:-]{1,64}$/;
+/** @all, @everyone or @here as a whole word. */
+const EVERYONE = /(^|[^\p{L}\p{N}_.-])@(all|everyone|here)(?![\p{L}\p{N}_-])/u;
 
 const lockKey = (channel: string, file: string) => `${channel}\u0000${file}`;
 
@@ -536,6 +538,7 @@ export class MeshHub {
     if (isPlace(raw.place)) agent.place = raw.place;
     const bio = cleanText(raw.bio, 120);
     if (bio) agent.bio = bio;
+    if (raw.focus === true) agent.focus = true;
     if (invite) {
       agent.remote = true;
       agent.via = invite.label;
@@ -706,7 +709,7 @@ export class MeshHub {
       case 'channel.receipts': return { receipts: this.receipts(this.memberChannel(conn, f.channel), f.limit) };
       case 'claim.create': return this.createClaim(conn, f.channel, f.task, f.everySeconds, f.paths);
       case 'claim.update': return this.updateClaims(conn, f.channel, f.claim, f.note, f.status);
-      case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata, f.split === true);
+      case 'message.send': return this.postMessage(conn, f.channel, f.content ?? f.text, f.metadata, f.split === true, f.thread);
       case 'shorthand.send': return this.postShorthand(conn, f.channel, f.shorthand);
       case 'dm.send': return this.sendDirect(conn, f.to, f.content ?? f.text, f.replyExpected, f.metadata);
       case 'lock.acquire': return this.acquireLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
@@ -714,7 +717,7 @@ export class MeshHub {
       case 'lock.wait': return this.waitLock(conn, f.channel, f.file, f.reason, f.ttlSeconds);
       case 'slot.acquire': return this.acquireSlot(conn, f.channel, f.name, f.capacity, f.ttlSeconds);
       case 'slot.release': return this.releaseSlot(conn, f.channel, f.name);
-      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns, f.name, f.client, f.place, f.bio);
+      case 'status.update': return this.updateStatus(conn, f.status, f.currentTask, f.pronouns, f.name, f.client, f.place, f.bio, f.focus);
       case 'listener.report': {
         if (typeof f.open !== 'boolean') fail('bad_request', 'open must be true or false');
         if (f.open) this.pollStarted(conn);
@@ -987,7 +990,7 @@ export class MeshHub {
     if (!text.includes('@')) return [];
     const lower = text.toLowerCase();
     // @all / @everyone / @here (a whole word) reaches every member but the sender, so every listener wakes.
-    const everyone = /(^|[^\p{L}\p{N}_.-])@(all|everyone|here)(?![\p{L}\p{N}_-])/u.test(lower);
+    const everyone = EVERYONE.test(lower);
     const out: AgentRef[] = [];
     for (const id of channel.members) {
       const agent = this.agents.get(id)?.agent;
@@ -1417,7 +1420,19 @@ export class MeshHub {
   }
 
   private record(channel: Channel, message: ChannelMessage, sender: Connection): ChannelMessage {
-    const mentions = this.mentioned(channel, message.shorthand?.raw ?? message.content, message.from.id);
+    let mentions = this.mentioned(channel, message.shorthand?.raw ?? message.content, message.from.id);
+    const claim = message.thread ? channel.claims.get(message.thread) : undefined;
+    if (claim) {
+      // In a thread, @all means everyone following it; a named @mention brings that member in.
+      const followers = (claim.followers ??= [claim.owner]);
+      if (EVERYONE.test((message.shorthand?.raw ?? message.content).toLowerCase())) {
+        mentions = mentions.filter(m => followers.some(f => f.id === m.id));
+      }
+      for (const ref of [message.from, ...mentions]) {
+        if (ref.id !== 'hub' && !followers.some(f => f.id === ref.id)) followers.push({ id: ref.id, name: ref.name });
+      }
+      claim.threadMessages = (claim.threadMessages ?? 0) + 1;
+    }
     if (mentions.length) message.mentions = mentions;
     // A progress post is a heartbeat on the sender's claims here.
     this.heartbeat(channel, sender.agent!.id);
@@ -1425,7 +1440,7 @@ export class MeshHub {
     channel.history.push(message);
     if (channel.history.length > this.opts.historyLimit) channel.history.shift();
     channel.lastActivity = message.timestamp;
-    this.emit(channel, { type: 'message', message }, sender.agent!.id);
+    this.emitMessage(channel, message, sender.agent!.id);
     this.fireWakes(channel, message);
     try {
       this.onMessage?.(message);
@@ -1439,11 +1454,12 @@ export class MeshHub {
     return idle.length ? { ...message, idleMentions: idle } : message;
   }
 
-  private postMessage(conn: Connection, address: unknown, content: unknown, metadata: unknown, split = false): ChannelMessage {
+  private postMessage(conn: Connection, address: unknown, content: unknown, metadata: unknown, split = false, thread?: unknown): ChannelMessage {
     const channel = this.memberChannel(conn, address);
+    const threadId = this.threadFor(channel, thread);
     const max = channel.limits.maxMessageChars;
     if (split && typeof content === 'string' && content.length > max) {
-      return this.postSplit(conn, channel, content, metadata);
+      return this.postSplit(conn, channel, content, metadata, threadId);
     }
     const text = this.messageText(content, max);
     this.spend(channel, conn);
@@ -1455,9 +1471,18 @@ export class MeshHub {
       content: text,
       timestamp: this.now()
     };
+    if (threadId) message.thread = threadId;
     const meta = this.metadata(metadata);
     if (meta) message.metadata = meta;
     return this.record(channel, message, conn);
+  }
+
+  /** The open claim a `thread` names, checked; undefined for a plain channel message. */
+  private threadFor(channel: Channel, thread: unknown): string | undefined {
+    if (thread === undefined || thread === null || thread === '') return undefined;
+    const claim = typeof thread === 'string' ? channel.claims.get(thread) : undefined;
+    if (!claim) return fail('not_found', 'No open claim with that id in this channel; its thread is closed or never existed');
+    return claim.id;
   }
 
   /**
@@ -1465,7 +1490,7 @@ export class MeshHub {
    * against the sender's message allowance before any is posted, so a long
    * text is never left half-sent by the rate limit.
    */
-  private postSplit(conn: Connection, channel: Channel, content: string, metadata: unknown): ChannelMessage {
+  private postSplit(conn: Connection, channel: Channel, content: string, metadata: unknown, threadId?: string): ChannelMessage {
     const max = channel.limits.maxMessageChars;
     if (content.length > this.opts.maxMessageChars * 8) {
       fail('bad_request', `Message is ${content.length} characters; split posts allow up to ${this.opts.maxMessageChars * 8}. Point to a file instead.`);
@@ -1491,6 +1516,7 @@ export class MeshHub {
         content: text,
         timestamp: this.now()
       };
+      if (threadId) message.thread = threadId;
       if (meta) message.metadata = { ...meta, part: i + 1, parts: parts.length };
       else message.metadata = { part: i + 1, parts: parts.length };
       const recorded = this.record(channel, message, conn);
@@ -1576,8 +1602,10 @@ export class MeshHub {
     if (!channel.wakes.size) return;
     const lower = (message.shorthand?.raw ?? message.content).toLowerCase();
     const sender = message.from.name.toLowerCase();
+    const followers = message.thread ? channel.claims.get(message.thread)?.followers : undefined;
     for (const [name, hook] of channel.wakes) {
       if (name === sender) continue;
+      if (message.thread && !followers?.some(f => f.name.toLowerCase() === name)) continue;
       hook.pending++;
       const tag = '@' + name;
       let mentioned = false;
@@ -1987,8 +2015,12 @@ export class MeshHub {
     }
   }
 
-  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown, name?: unknown, client?: unknown, place?: unknown, bio?: unknown): AgentInfo {
+  private updateStatus(conn: Connection, status: unknown, currentTask: unknown, pronouns?: unknown, name?: unknown, client?: unknown, place?: unknown, bio?: unknown, focus?: unknown): AgentInfo {
     const agent = conn.agent!;
+    if (focus !== undefined) {
+      if (typeof focus !== 'boolean') fail('bad_request', 'focus must be true or false');
+      if (focus) agent.focus = true; else delete agent.focus;
+    }
     if (status !== undefined) {
       if (status !== 'idle' && status !== 'working' && status !== 'waiting') {
         fail('bad_request', 'status must be idle, working or waiting');
@@ -2273,7 +2305,9 @@ export class MeshHub {
       lastHeartbeat: now,
       everyMs: seconds * 1000,
       nextUpdateBy: now + seconds * 1000,
-      status: 'active'
+      status: 'active',
+      followers: [conn.ref],
+      threadMessages: 0
     };
     const files = ((paths as unknown[] | undefined) ?? []).map(p => LockManager.normalizePath(String(p))).filter(Boolean);
     if (files.length) claim.paths = files;
@@ -2296,9 +2330,9 @@ export class MeshHub {
       targets = [claim];
     }
     const text = cleanText(note, 2000);
-    if (text) {
-      for (const c of targets) c.note = text;
-      // Progress is posted where everyone can see it; recording it heartbeats every claim of the sender here.
+    if (text) for (const c of targets) c.note = text;
+    if (text && !status) {
+      // Progress on one claim goes to its thread (2.33+); on several, to the channel. Recording it heartbeats the sender's claims.
       const message: ChannelMessage = {
         id: newId('msg'),
         channel: channel.id,
@@ -2306,13 +2340,16 @@ export class MeshHub {
         from: conn.ref,
         content: text,
         timestamp: this.now(),
-        metadata: { claims: targets.map(c => c.id), status: status ?? 'progress' }
+        metadata: { claims: targets.map(c => c.id), status: 'progress' }
       };
+      if (targets.length === 1) message.thread = targets[0].id;
       this.record(channel, message, conn);
+    } else if (text) {
+      this.heartbeat(channel, conn.agent!.id);
     } else {
       for (const c of targets) this.beat(channel, c);
     }
-    if (status) return { claims: targets.map(c => this.closeClaim(channel, c, status as 'done' | 'dropped')) };
+    if (status) return { claims: targets.map(c => this.closeClaim(channel, c, status as 'done' | 'dropped', conn)) };
     return { claims: targets.map(c => ({ ...c })) };
   }
 
@@ -2331,9 +2368,26 @@ export class MeshHub {
     }
   }
 
-  private closeClaim(channel: Channel, claim: TaskClaim, status: 'done' | 'dropped'): TaskClaim {
-    channel.claims.delete(claim.id);
+  private closeClaim(channel: Channel, claim: TaskClaim, status: 'done' | 'dropped', by?: Connection): TaskClaim {
     const closed: TaskClaim = { ...claim, status, closedAt: this.now() };
+    if (by) {
+      // One line in the channel when its owner closes a claim (2.33+), so the thread's outcome reaches everyone.
+      const verb = status === 'done' ? 'finished' : 'dropped';
+      const tail = claim.note ? `: ${claim.note}` : '';
+      const message: ChannelMessage = {
+        id: newId('msg'),
+        channel: channel.id,
+        kind: 'chat',
+        from: by.ref,
+        content: cleanText(`${verb} "${claim.task}"${tail}`, channel.limits.maxMessageChars),
+        timestamp: this.now(),
+        metadata: { claims: [claim.id], status, summary: true, ...(claim.threadMessages ? { threadMessages: claim.threadMessages } : {}) }
+      };
+      channel.claims.delete(claim.id);
+      this.record(channel, message, by);
+    } else {
+      channel.claims.delete(claim.id);
+    }
     this.emit(channel, { type: 'claim.updated', claim: closed });
     return closed;
   }
@@ -2344,8 +2398,64 @@ export class MeshHub {
 
   private emit(channel: Channel, frame: ServerFrame, exceptId?: string): void {
     for (const id of channel.members) {
-      if (id !== exceptId) this.agents.get(id)?.peer.send(frame);
+      if (id === exceptId) continue;
+      const conn = this.agents.get(id);
+      if (conn && (!conn.agent?.focus || this.focusWants(channel, conn.agent, frame))) conn.peer.send(frame);
     }
+  }
+
+  /** A channel message, to the members it is for: thread followers and people for a thread, read filters applied (2.33+). */
+  private emitMessage(channel: Channel, message: ChannelMessage, exceptId?: string): void {
+    const followers = message.thread ? channel.claims.get(message.thread)?.followers : undefined;
+    const frame: ServerFrame = { type: 'message', message };
+    for (const id of channel.members) {
+      if (id === exceptId) continue;
+      const conn = this.agents.get(id);
+      const agent = conn?.agent;
+      if (!conn || !agent) continue;
+      const person = agent.role === 'person';
+      if (message.thread && !person && !followers?.some(f => f.id === id)) continue;
+      if (agent.focus && !person && !message.thread) {
+        const forMe = message.mentions?.some(m => m.id === id) || this.isPerson(message.from.id);
+        if (!forMe) continue;
+      }
+      conn.peer.send(frame);
+    }
+  }
+
+  private isPerson(id: string): boolean {
+    return this.agents.get(id)?.agent?.role === 'person';
+  }
+
+  /** What a member with the read filter on still gets, besides messages (see emitMessage). */
+  private focusWants(channel: Channel, me: AgentInfo, frame: ServerFrame): boolean {
+    switch (frame.type) {
+      case 'member.updated':
+      case 'member.joined':
+      case 'member.left':
+      case 'slot.updated':
+        return false;
+      case 'claim.updated':
+        return frame.claim.owner.id === me.id;
+      case 'lock.acquired':
+      case 'lock.contended':
+        return frame.lock.holder.id === me.id || (frame.type === 'lock.contended' && frame.requester.id === me.id) || this.onMyPaths(channel, me.id, frame.lock.file);
+      case 'lock.released':
+        return frame.by.id === me.id || this.onMyPaths(channel, me.id, frame.file);
+      case 'message':
+        return !!frame.message.mentions?.some(m => m.id === me.id) || this.isPerson(frame.message.from.id);
+      default:
+        return true;
+    }
+  }
+
+  /** Whether a file is under one of the paths of this agent's open claims here. */
+  private onMyPaths(channel: Channel, agentId: string, file: string): boolean {
+    for (const claim of channel.claims.values()) {
+      if (claim.owner.id !== agentId || !claim.paths) continue;
+      if (claim.paths.some(p => file === p || file.startsWith(p.endsWith('/') ? p : p + '/'))) return true;
+    }
+    return false;
   }
 
   /** Expires stale locks and deletes channels that have been empty too long. */

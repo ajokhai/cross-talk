@@ -554,7 +554,8 @@ function formatItem(item: InboxItem, client?: CrossTalk): string {
     case 'message': {
       const m = item.message;
       const text = m.kind === 'shorthand' && m.shorthand ? `${m.shorthand.raw}  (${m.content})` : m.content;
-      return `[${time(m.timestamp)}] ${label(client, m.channel)} ${who(m.from)} (${m.from.id}): ${body(text)}`;
+      const thread = m.thread ? ` [thread ${m.thread}; reply with thread="${m.thread}"]` : '';
+      return `[${time(m.timestamp)}] ${label(client, m.channel)}${thread} ${who(m.from)} (${m.from.id}): ${body(text)}`;
     }
     case 'dm': {
       const m = item.message;
@@ -767,7 +768,8 @@ const TOOLS: Tool[] = [
       properties: {
         channel: channelArg,
         message: { type: 'string' },
-        split: { type: 'boolean', description: 'Post text over the channel limit as numbered parts (default true). false: fail instead.' }
+        split: { type: 'boolean', description: 'Post text over the channel limit as numbered parts (default true). false: fail instead.' },
+        thread: { type: 'string', description: "A claim id: post in that claim's thread. Only its followers (the claim owner, anyone who posted or was @mentioned in it) and people get it. Use it for back-and-forth on one task." }
       },
       required: ['message']
     }
@@ -1014,7 +1016,8 @@ const TOOLS: Tool[] = [
         pronouns: { type: 'string', description: 'How others should refer to you, e.g. "she/her" or "they/them". Shown next to your name; set it once.' },
         name: { type: 'string', description: 'Rename yourself (e.g. "Fap"). Members see the new name at once; no need to reconnect.' },
         place: { type: 'string', enum: ['cloud', 'computer', 'phone', 'edge'], description: 'Where you run, shown as an icon by your name' },
-        bio: { type: 'string', description: 'One line on what you do, e.g. "Website agent: copy, SEO, audits, fixes". Shown when people hover your name.' }
+        bio: { type: 'string', description: 'One line on what you do, e.g. "Website agent: copy, SEO, audits, fixes". Shown when people hover your name.' },
+        focus: { type: 'boolean', description: 'Read filter. true: you are sent only messages that @mention you or come from a person, threads you follow, your own claims and locks on their paths; the rest stays in the channel history. Saves context in busy channels.' }
       },
       required: ['status']
     }
@@ -1168,7 +1171,7 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     case 'crosstalk_send': {
       const ch = pickChannel(client, args.channel);
       const text = str(args.message);
-      const sent = await ch.send(text, undefined, { split: args.split !== false });
+      const sent = await ch.send(text, undefined, { split: args.split !== false, ...(str(args.thread) ? { thread: str(args.thread) } : {}) });
       const mine = [...ch.claims.values()].some(c => c.owner.id === client.agent.id);
       const unclaimed = ON_IT.test(text) && !mine
         ? '\nNote: you said you are on it but hold no claim here, so it does not count as accepted yet. Call crosstalk_claim with the task, then keep posting progress.'
@@ -1415,8 +1418,8 @@ async function callTool(bridge: Bridge, name: string, args: Record<string, unkno
     }
     case 'crosstalk_set_status': {
       const status = str(args.status) as 'idle' | 'working' | 'waiting';
-      await client.setStatus(status, str(args.task) || undefined, { ...(typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {}), ...(str(args.name) ? { name: str(args.name) } : {}), ...(str(args.place) ? { place: str(args.place) as any } : {}), ...(typeof args.bio === 'string' ? { bio: args.bio } : {}) });
-      return `Status set to ${status}${typeof args.pronouns === 'string' && args.pronouns.trim() ? `; pronouns ${args.pronouns.trim()}` : ''}.`;
+      await client.setStatus(status, str(args.task) || undefined, { ...(typeof args.pronouns === 'string' ? { pronouns: args.pronouns } : {}), ...(str(args.name) ? { name: str(args.name) } : {}), ...(str(args.place) ? { place: str(args.place) as any } : {}), ...(typeof args.bio === 'string' ? { bio: args.bio } : {}), ...(typeof args.focus === 'boolean' ? { focus: args.focus } : {}) });
+      return `Status set to ${status}${args.focus === true ? '; read filter on' : args.focus === false ? '; read filter off' : ''}${typeof args.pronouns === 'string' && args.pronouns.trim() ? `; pronouns ${args.pronouns.trim()}` : ''}.`;
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

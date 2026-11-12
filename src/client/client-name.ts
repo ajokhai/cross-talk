@@ -66,7 +66,7 @@ export function detectPlace(env: NodeJS.ProcessEnv = process.env, hostname = saf
 
 // ---- Saved profiles (2.26+): what `crosstalk profile` set, sent with every new session for that name.
 
-export interface SavedProfile { pronouns?: string; bio?: string; client?: string; place?: AgentPlace; task?: string }
+export interface SavedProfile { pronouns?: string; bio?: string; client?: string; place?: AgentPlace; task?: string; /** Read filter (2.33+). */ focus?: boolean }
 
 export function profileFile(): string {
   return process.env.CROSSTALK_PROFILES_FILE || path.join(os.homedir(), '.crosstalk', 'profiles.json');

@@ -21,7 +21,7 @@ Two transports, picked automatically:
 The file also runs as a command-line tool: `python3 crosstalk.py --help`.
 """
 
-__version__ = "2.32.1"
+__version__ = "2.33.0"
 
 import json
 import os
@@ -378,8 +378,9 @@ class Channel:
         Empty on older hubs that don't report limits."""
         return self.info.get("limits") or {}
 
-    def send(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return self._client.send(self.address, text, metadata)
+    def send(self, text: str, metadata: Optional[Dict[str, Any]] = None, thread: Optional[str] = None) -> Dict[str, Any]:
+        """thread (2.33+): a claim id, to post in that claim's thread (only its followers and people get it)."""
+        return self._client.send(self.address, text, metadata, thread)
 
     def shorthand(self, expression: str) -> Dict[str, Any]:
         return self._client.shorthand(self.address, expression)
@@ -597,8 +598,8 @@ class CrossTalk:
     def channel(self, address: str) -> Optional[Channel]:
         return self.channels.get(address)
 
-    def send(self, channel: str, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return self.request("message.send", channel=channel, content=text, metadata=metadata)
+    def send(self, channel: str, text: str, metadata: Optional[Dict[str, Any]] = None, thread: Optional[str] = None) -> Dict[str, Any]:
+        return self.request("message.send", channel=channel, content=text, metadata=metadata, thread=thread)
 
     def shorthand(self, channel: str, expression: str) -> Dict[str, Any]:
         """Sends XDialect shorthand, e.g. '!LCK @src/auth.ts #REF "jwt" &WAIT'."""
@@ -668,9 +669,10 @@ class CrossTalk:
         """Gives up your place in a slot (or in its queue). True if a place you held was released."""
         return bool((self.request("slot.release", channel=channel, name=name) or {}).get("released"))
 
-    def set_status(self, status: Optional[str] = None, current_task: Optional[str] = None) -> Dict[str, Any]:
-        """status is 'idle', 'working' or 'waiting'."""
-        self.agent = self.request("status.update", status=status, currentTask=current_task)
+    def set_status(self, status: Optional[str] = None, current_task: Optional[str] = None, focus: Optional[bool] = None) -> Dict[str, Any]:
+        """status is 'idle', 'working' or 'waiting'. focus=True (2.33+) turns on the read filter:
+        only mentions, people, threads you follow, your claims and locks on their paths reach you."""
+        self.agent = self.request("status.update", status=status, currentTask=current_task, focus=focus)
         return self.agent
 
     def _relative(self, file: str) -> str:

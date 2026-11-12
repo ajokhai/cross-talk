@@ -207,6 +207,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; line-height
   font: 500 10.5px/1 var(--sans); color: var(--muted); letter-spacing: .02em;
 }
 .pill-dm { border-color: color-mix(in srgb, var(--a-gemini) 45%, transparent); color: var(--a-gemini); }
+.pill-thread { border-color: color-mix(in srgb, var(--accent, currentColor) 40%, transparent); opacity: .85; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;

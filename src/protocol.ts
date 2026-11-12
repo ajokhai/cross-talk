@@ -68,6 +68,13 @@ export interface AgentInfo {
   place?: 'cloud' | 'computer' | 'phone' | 'edge';
   /** One line on what this member does, e.g. "Website agent: copy, SEO, fixes" (2.25+). Up to 120 characters. */
   bio?: string;
+  /**
+   * Read filter (2.33+). When true, this agent is sent only what concerns it:
+   * messages that mention it or come from a person, threads it follows, its
+   * own claims, and locks on its claims' paths. Everything else stays in the
+   * channel history for when it reads. Set with status.update { focus }.
+   */
+  focus?: boolean;
 }
 
 /** A reference to the sender embedded in messages; kept small on purpose. */
@@ -186,6 +193,12 @@ export interface ChannelMessage {
   content: string;
   timestamp: number;
   metadata?: Record<string, unknown>;
+  /**
+   * The claim this message is in (2.33+): a thread. Thread messages go to the
+   * claim's followers (its owner, anyone who posted in it or was mentioned in
+   * it) and to people, not to every agent in the channel.
+   */
+  thread?: string;
   /** Channel members addressed as `@name` in the content, so wait loops can pick out what needs them. */
   mentions?: AgentRef[];
   /**
@@ -290,6 +303,10 @@ export interface TaskClaim {
   /** Files or directories the work covers, for tooling that heartbeats on file changes or commits there. */
   paths?: string[];
   closedAt?: number;
+  /** Who gets this claim's thread (2.33+): the owner, then anyone who posted or was mentioned in it. */
+  followers?: AgentRef[];
+  /** Messages posted in the thread so far (2.33+). */
+  threadMessages?: number;
 }
 
 export interface ChannelSnapshot {
@@ -466,7 +483,7 @@ export type RequestFrame =
    * (`[1/3] …`) instead of failing. Without it, oversize text fails with
    * `bad_request` and `details.maxMessageChars`.
    */
-  | { type: 'message.send'; id: string; channel: string; content: string; text?: string; metadata?: Record<string, unknown>; split?: boolean }
+  | { type: 'message.send'; id: string; channel: string; content: string; text?: string; metadata?: Record<string, unknown>; split?: boolean; /** A claim id: post in that claim's thread (2.33+). */ thread?: string }
   | { type: 'shorthand.send'; id: string; channel: string; shorthand: string }
   | { type: 'dm.send'; id: string; to: string; content: string; text?: string; replyExpected?: boolean; metadata?: Record<string, unknown> }
   | { type: 'lock.acquire'; id: string; channel: string; file: string; reason: string; ttlSeconds?: number }
@@ -495,7 +512,7 @@ export type RequestFrame =
   /** Gives up your place in a slot, or your place in its queue. */
   | { type: 'slot.release'; id: string; channel: string; name: string }
   /** `name` renames you (2.22+): members see the new name at once; older messages keep the name they were sent with. */
-  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string; name?: string; client?: string; place?: string; bio?: string }
+  | { type: 'status.update'; id: string; status?: AgentStatus; currentTask?: string; pronouns?: string; name?: string; client?: string; place?: string; bio?: string; /** Read filter on or off (2.33+), see AgentInfo.focus. */ focus?: boolean }
   /**
    * A WebSocket agent (an MCP server) reports that a local listener is
    * attached to it (2.21+): it counts as listening, exactly like an open

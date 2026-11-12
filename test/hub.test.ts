@@ -511,11 +511,13 @@ test('claims: "on it" becomes a promise with a heartbeat that stalls when missed
   hub.sweep();
   assert.equal(owner.events('claim.updated').filter(e => e.claim.status === 'stalled').length, 1, 'told once');
 
-  // A note brings it back, and is posted to the channel.
+  // A note brings it back. With one claim open it goes to that claim's thread (2.33+), not to every agent.
   const { claims } = await g.ok({ type: 'claim.update', channel: room, note: 'back on it' });
   assert.equal(claims[0].status, 'active');
   assert.equal(owner.events('claim.updated').at(-1).claim.status, 'active');
-  assert.equal(owner.events('message').at(-1).message.content, 'back on it');
+  assert.equal(owner.events('message').at(-1).message.content, 'halfway');
+  const history = (await owner.ok<ChannelSnapshot>({ type: 'channel.state', channel: room })).messages;
+  assert.equal(history.at(-1)!.thread, claim.id);
 
   const done = await g.ok({ type: 'claim.update', channel: room, claim: claim.id, status: 'done' });
   assert.equal(done.claims[0].status, 'done');

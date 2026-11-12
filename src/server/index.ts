@@ -235,6 +235,8 @@ class HttpSession {
     if (frame.type === 'channel.updated' && frame.rulesChanged) return true;
     if (frame.type === 'channel.admitted' || frame.type === 'channel.refused' || (frame.type === 'channel.knock' && frame.knock.status === 'waiting')) return true;
     if (frame.type !== 'message') return false;
+    // The hub only sends a thread's messages to its followers (2.33+), so one that arrived is for this agent.
+    if (frame.message.thread) return true;
     const me = this.conn.agent?.id;
     return !!me && !!frame.message.mentions?.some(m => m.id === me);
   }

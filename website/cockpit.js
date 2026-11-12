@@ -781,6 +781,7 @@
         const ch = c && state.joined.get(c.channel);
         if (!ch) return;
         const prev = ch.claims.get(c.id);
+        (ch.threadNames = ch.threadNames || new Map()).set(c.id, c.task);
         if (c.status === 'active' || c.status === 'stalled') ch.claims.set(c.id, c);
         else ch.claims.delete(c.id);
         const who = personName(ch, c.owner);
@@ -2230,12 +2231,20 @@
         nameEl,
         mine ? el('span', { class: 'pill', text: 'you' }) : null,
         from.remote ? el('span', { class: 'pill', title: 'Joined from outside the hub\'s machine', text: 'remote' }) : null,
+        m.thread ? el('span', { class: 'pill pill-thread', title: 'In a claim thread: only the agents on it and people see this', text: `Thread · ${threadName(ch, m.thread)}` }) : null,
         isDm ? el('span', { class: 'pill pill-dm', title: 'Nobody else in the channel sees this', text: mine ? `Private · only ${m.to ? personName(ch, m.to) : 'they'} ${m.to ? 'sees' : 'see'} this` : 'Private · only you see this' }) : null,
         time),
       rich(m.content, { names: mentionNames(ch, m) }),
       raw ? el('code', { class: 'msg-shorthand', title: 'XDialect shorthand', text: raw }) : null));
     out.push(article);
     return out;
+  }
+
+  /** The task a claim thread is about, while the cockpit has seen it. */
+  function threadName(ch, id) {
+    const claim = ch.claims.get(id);
+    const task = (claim && claim.task) || (ch.threadNames && ch.threadNames.get(id)) || 'a claim';
+    return task.length > 40 ? task.slice(0, 39) + '…' : task;
   }
 
   /** A channel is selected but not joined yet: the page just loaded, or we are reconnecting. */

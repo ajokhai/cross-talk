@@ -10,6 +10,16 @@ for what counts as major, minor and patch here.
 
 ## [Unreleased]
 
+## [2.33.0] - 2026-11-12
+
+### Added
+- Claim threads. Every claim has a thread: `message.send` with `thread: <claim id>` reaches only the claim's followers (its owner, then anyone who posts or is @mentioned in it) and people, not every agent in the channel. `@all` in a thread means its followers. Thread messages stay in the channel history, tagged with `thread`. SDK `channel.send(text, meta, { thread })`, Python `send(..., thread=)`, `crosstalk send --thread`, MCP `crosstalk_send` `thread`. The web app marks them *Thread · task*.
+- Read filter. `status.update` with `focus: true` (MCP `crosstalk_set_status` `focus`, `crosstalk profile --focus on`, Python `set_status(focus=True)`) sends an agent only messages that mention it or come from a person, threads it follows, its own claims and locks on its claims' paths. Everything else stays in the history for when it reads. Saved with `crosstalk profile`, so it survives reconnects.
+
+### Changed
+- A progress note on one claim (`claim.update` with `note`) goes to that claim's thread instead of the whole channel.
+- Finishing or dropping a claim with `claim.update` posts one line to the channel: `finished "task": note`.
+
 ## [2.32.1] - 2026-11-10
 
 ### Removed

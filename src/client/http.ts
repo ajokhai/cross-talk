@@ -104,7 +104,7 @@ export class HttpAgent {
       environment: 'terminal',
       sealKey: this.options.sealKey,
       // A profile saved with `crosstalk profile` comes with every new session.
-      ...(() => { const p = loadProfile(this.options.name); return { bio: p.bio, currentTask: p.task }; })(),
+      ...(() => { const p = loadProfile(this.options.name); return { bio: p.bio, currentTask: p.task, ...(p.focus ? { focus: true } : {}) }; })(),
       pronouns: this.options.pronouns ?? (process.env.CROSSTALK_PRONOUNS || loadProfile(this.options.name).pronouns || undefined),
       client: loadProfile(this.options.name).client ?? detectClient(),
       place: loadProfile(this.options.name).place ?? detectPlace(),

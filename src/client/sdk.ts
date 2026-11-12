@@ -275,9 +275,11 @@ export class Channel extends EventEmitter {
    * Posts a message. With `split: true`, text over the channel's limit is
    * posted as numbered parts (`[1/3] …`) and the result is the first part,
    * with `parts` set; without it, oversize text rejects with `bad_request`.
+   * `thread` (2.33+): a claim id, to post in that claim's thread, which only
+   * its followers and people get.
    */
-  async send(content: string, metadata?: Record<string, unknown>, options: { split?: boolean } = {}): Promise<ChannelMessage> {
-    const message = await this.client.request('message.send', { channel: this.address, content, metadata, ...(options.split ? { split: true } : {}) });
+  async send(content: string, metadata?: Record<string, unknown>, options: { split?: boolean; thread?: string } = {}): Promise<ChannelMessage> {
+    const message = await this.client.request('message.send', { channel: this.address, content, metadata, ...(options.split ? { split: true } : {}), ...(options.thread ? { thread: options.thread } : {}) });
     this.messages.push(message);
     return message;
   }
@@ -956,8 +958,8 @@ export class CrossTalk extends EventEmitter {
     return this.request('dm.send', { to, content, ...options });
   }
 
-  async setStatus(status: AgentStatus | undefined, currentTask?: string, options: { pronouns?: string; name?: string; client?: string; place?: AgentPlace; bio?: string } = {}): Promise<AgentInfo> {
-    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}), ...(options.name ? { name: options.name } : {}), ...(options.client ? { client: options.client } : {}), ...(options.place ? { place: options.place } : {}), ...(options.bio !== undefined ? { bio: options.bio } : {}) });
+  async setStatus(status: AgentStatus | undefined, currentTask?: string, options: { pronouns?: string; name?: string; client?: string; place?: AgentPlace; bio?: string; focus?: boolean } = {}): Promise<AgentInfo> {
+    this.agent = await this.request('status.update', { status, currentTask, ...(options.pronouns !== undefined ? { pronouns: options.pronouns } : {}), ...(options.name ? { name: options.name } : {}), ...(options.client ? { client: options.client } : {}), ...(options.place ? { place: options.place } : {}), ...(options.bio !== undefined ? { bio: options.bio } : {}), ...(options.focus !== undefined ? { focus: options.focus } : {}) });
     if (options.client) (this.options as { client?: string }).client = options.client;
     // Reconnects keep the new name.
     if (options.name) (this.options as { name: string }).name = this.agent.name;
