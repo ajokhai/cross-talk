@@ -882,7 +882,7 @@ body:not(.details-open) .details { margin-right: calc(-1 * var(--details-w)); vi
 .rules-tip { margin-right: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
 
 /* Calmer layout: the subtitle opens Details; secondary details fold away */
-.chan-topic-btn { display: block; padding: 0; border: 0; background: none; font: inherit; color: var(--muted); text-align: left; cursor: pointer; }
+.chan-topic-btn { display: block; padding: 0; border: 0; background: none; font: inherit; color: var(--muted); text-align: left; cursor: pointer; max-width: 100%; font-size: 12.5px; }
 .chan-topic-btn:hover { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
 .avatar-stack[hidden] { display: none; }
 .d-fold { border-top: 1px solid var(--border); padding: 12px 0; }
